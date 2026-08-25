@@ -1,0 +1,121 @@
+# AGENTS.md
+
+本文件适用于整个 `exercise-app` 仓库。
+
+## 1. 核心协作原则
+
+- 产品所有者明确提出的目标和能力，记录为当前产品意图；Agent 可以说明风险和成本，但不得擅自降级、删除或要求反复证明。
+- 先形成完整产品全貌，再讨论版本取舍、技术方案和验证指标。
+- Agent 默认先整理并提出方案，用户负责整体纠正和选择；不得用连续小问题让用户从零设计产品。
+- 可以不提问。只有真正阻塞当前产出时才提问。
+- 验证产品是否有帮助，不考核用户，不把观察指标变成打卡或使用配额。
+
+## 2. 当前有效文档
+
+| 文件 | 作用 |
+|---|---|
+| `.planning/exercise-app/task_plan.md` | 唯一当前规划：阶段、当前产出和下一步 |
+| `docs/product.md` | 已确认的唯一当前产品事实源 |
+| `docs/domain/domain-rules.md` | 已确认的当前领域事实源：概念、状态、计算责任、修正与异常规则 |
+| `docs/domain/calculation-evidence.md` | 训练与营养规划公式、阈值、适用范围、安全边界和产品推导的官方证据登记 |
+| `docs/experience/experience-design.md` | Phase 3 当前体验结构、核心流程、状态覆盖与低保真原型边界 |
+| `docs/architecture/technical-architecture.md` | 已确认的服务端、数据、任务、部署、安全与 Android 技术基线 |
+| `docs/architecture/delivery-plan.md` | 已确认的可运行增量、范围和验收顺序 |
+| `docs/product-decisions.md` | 只记录重要且经过权衡的决定 |
+| `docs/architecture/repository-layout.md` | 当前仓库边界、目录职责与未来应用位置 |
+| `docs/deployment/self-hosting.md` | 当前单机 Docker Compose 部署、持久化、备份恢复和待验收清单 |
+| `.planning/exercise-app/findings.md` | 研究、风险和待验证材料，不作为产品事实源 |
+| `.planning/exercise-app/progress.md` | 阶段、文件和测试历史，不作为当前任务来源 |
+| `README.md` | 项目入口 |
+
+`docs/archive/product-brief-v0.1.md` 是规划重置前的旧稿，只能作为重建 `docs/product.md` 的输入。
+
+发生冲突时，以产品所有者最新的明确表述为准，并在当前主题结束时清理冲突。
+
+## 3. 恢复工作
+
+提出产品问题或开始实现前：
+
+1. 阅读本文件。
+2. 阅读 `.planning/exercise-app/task_plan.md` 的当前阶段。
+3. 如果 `docs/product.md` 已存在，阅读它。
+4. 涉及体验设计时，阅读 `docs/experience/experience-design.md` 与 `docs/domain/domain-rules.md`；涉及训练或营养规划数值、公式或来源时，同时阅读 `docs/domain/calculation-evidence.md`。
+5. 涉及代码、工程配置、目录或部署时，阅读 `docs/architecture/repository-layout.md`；涉及服务端、数据、模型、部署或版本顺序时，同时阅读 Phase 4 的两份架构草案。
+6. 仅按当前任务需要读取决策、发现和历史记录。
+
+不得把历史中的“下一步”当成当前任务。
+
+## 4. 提问门槛
+
+提问前必须同时满足：
+
+1. 当前有效文档没有答案；
+2. 答案会改变正在制作的具体产出；
+3. 不回答就无法继续；
+4. 用户是最合适的信息来源；
+5. 无法采用安全、可逆、易修改的默认方案。
+
+任一条件不满足，就不提问；应直接整理、提出方案或把问题放回后续阶段。
+
+必须提问时，先说明已经知道什么、缺少什么以及它影响什么。一个主题可以整体讨论，不机械限制为每轮一个孤立问题。
+
+## 5. 讨论与更新
+
+每个主题采用：
+
+1. 展示已确认内容；
+2. 展示缺失或冲突；
+3. 提交完整草案或方案；
+4. 用户整体纠正；
+5. 主题确认后一次更新相关文档。
+
+不要逐句对话同步到多份文件。不要为了推进对话而强制以问题结尾。
+
+用户作出重要纠正、进入下一阶段、开始业务代码或准备发布前，执行一致性审计：
+
+- 产品当前事实是否只有一个来源；
+- 已回答的问题是否仍被列为未知；
+- 用户要求是否被错误降级为假设；
+- 验证信号是否被写成用户约束；
+- 当前下一步是否真正阻塞产出。
+
+## 6. 仓库架构与文件放置
+
+- 本项目采用单仓库、多应用结构。当前 Web 应用位于 `apps/web/`。
+- 当前 Web 工程基线为 Vue 3 + TypeScript + Vite；React 骨架已被替代。未经产品所有者明确改变，不重新比较前端框架。
+- 当前服务端位于 `apps/server/`；未来 Android 工程固定放入 `apps/android/`。
+- `packages/` 只用于已经出现真实跨应用复用关系的代码；不得预先制造公共层。
+- `deployment/` 只保存部署定义；照片、数据库、备份、凭证和用户记录不得进入仓库。
+- 根目录只保存全仓库入口、规则、许可、忽略规则和跨应用编排配置。应用专属源码、依赖和构建配置必须跟随对应应用。
+- APK、AAB、`dist/`、Gradle `build/`、缓存和本机配置都是生成物或本地状态，不得提交。
+- 当前有效的完整放置规则以 `docs/architecture/repository-layout.md` 为准。
+
+根目录工程命令：
+
+```bash
+npm install
+npm run dev
+npm run check
+npm run build
+```
+
+## 7. 阶段约束
+
+当前处于 Phase 5：Web 实现，正在实施增量 0“工程与数据地基”。
+
+- Phase 3 体验基线与 Phase 4 技术架构、交付顺序均已由产品所有者确认，不得重新降级为待讨论候选。
+- 当前只创建服务端 workspace、数据库与 migration、任务地基、账号会话、最小管理边界、前端路由/API 地基、开发部署配置和自动测试入口；不提前实现训练、营养、食物库、图片模型或 Android 业务。
+- 可以创建真实的 `apps/server/` 和 `deployment/`；`apps/android/` 等到 Android 增量，`packages/` 仍只在真实跨应用复用出现后创建。
+- PostgreSQL 是业务事实源；Drizzle migration 必须生成可审阅 SQL，生产不得使用 schema `push`。pg-boss 只负责执行，自有任务表保存产品权威状态，Worker 按至少一次执行和幂等写回设计，当前不引入 Redis。
+- 从第一张私有表开始保存账号归属并建立跨账号拒绝测试；朋友开放前再完成全量审计和 PostgreSQL RLS。管理员权限不得隐含获得其他用户健康数据读取权。
+- 密码明文或可逆密码不得写入数据库、日志、错误、任务、导出或备份清单；数据库只保存符合当前安全基线的 Argon2id 摘要。浏览器认证令牌不得进入 `localStorage`。
+- 容器、migration、测试和备份骨架必须使用假数据与示例 secret；数据库、临时媒体、真实 secret 和备份仍位于仓库外。
+- 每完成一个可运行纵向切片，执行类型检查、构建、单元/集成测试和相应安全检查，并同步交付进度；不得用静态演示冒充真实服务能力。
+- DeepSeek 契约测试只在增量 4 开始前执行，不阻塞当前地基。目标服务器规格在确定生产参数或首次部署前采集，本地工程保持可配置。
+
+## 8. 文件与 Git
+
+- 使用 `apply_patch` 编辑人工维护的文件。
+- 保留用户已有改动，不覆盖无关文件。
+- 未经用户要求，不提交、不推送、不执行破坏性 Git 操作。
+- 远程仓库为 `https://github.com/Syriii/exercise-app`，默认分支为 `main`。

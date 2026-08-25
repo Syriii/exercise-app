@@ -1,0 +1,27 @@
+# JavaScript / Web
+node_modules/
+dist/
+coverage/
+.runtime/
+*.tsbuildinfo
+
+# Android（工程建立后生效）
+apps/android/.gradle/
+apps/android/.idea/
+apps/android/local.properties
+apps/android/**/build/
+*.apk
+*.aab
+
+# Local tools and operating system
+.hallmark/
+.DS_Store
+*.local
+*.log
+
+# Local secrets
+.env
+.env.*
+!.env.example
+deployment/secrets/*
+!deployment/secrets/*.example

@@ -1,0 +1,22 @@
+{
+  "name": "@exercise-app/web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "check": "vue-tsc -b",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.2.1",
+    "vue-tsc": "^3.3.11"
+  },
+  "dependencies": {
+    "pinia": "4.0.3",
+    "vue": "^3.5.41",
+    "vue-router": "5.2.0"
+  }
+}

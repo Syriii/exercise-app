@@ -1,0 +1,26 @@
+{
+  "name": "exercise-app",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "overrides": {
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @exercise-app/web",
+    "dev:web": "npm run dev --workspace @exercise-app/web",
+    "dev:server": "npm run dev --workspace @exercise-app/server",
+    "dev:worker": "npm run dev:worker --workspace @exercise-app/server",
+    "check": "npm run check --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "audit:prod": "npm audit --omit=dev",
+    "preview": "npm run preview --workspace @exercise-app/web"
+  }
+}

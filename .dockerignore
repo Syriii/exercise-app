@@ -1,0 +1,13 @@
+.git
+.github
+.planning
+.runtime
+**/node_modules
+**/dist
+**/coverage
+apps/android
+deployment/secrets
+*.log
+.env
+.env.*
+!.env.example

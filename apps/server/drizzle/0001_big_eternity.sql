@@ -1,0 +1,1 @@
+ALTER TABLE "credentials" ADD CONSTRAINT "credentials_password_hash_argon2id_ck" CHECK ("credentials"."password_hash" like '$argon2id$%');
