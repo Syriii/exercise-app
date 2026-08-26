@@ -30,6 +30,7 @@ exercise-app/
 │   └── android/                 # 未来 Android 工程，实际开发时创建
 ├── packages/                    # 出现真实跨应用复用时创建
 ├── deployment/                  # 当前容器构建、Compose 与配置示例
+│   └── scripts/                 # 服务器烟雾、集成、持久化与恢复验收入口
 ├── docs/
 │   ├── architecture/            # 工程与仓库架构
 │   ├── archive/                 # 失效但需要保留的历史稿
@@ -62,6 +63,7 @@ exercise-app/
 - `apps/web/package.json`
 - `apps/web/vite.config.ts`
 - `apps/web/tsconfig.json`、`tsconfig.app.json` 和 `tsconfig.node.json`
+- `apps/web/playwright.config.ts` 与 `apps/web/e2e/`
 
 根 `package.json` 不声明 Vue、Vite 或其他 Web 运行与打包依赖，只通过 npm workspace 转发根命令。当前 TypeScript 编译器版本在根 workspace 统一锁定，避免 npm 可选 peer 把不兼容的编译器版本提升给多个工具；Vue、Vue Vite 插件和 `vue-tsc` 仍归属 `apps/web/package.json`。npm 官方把 workspace 定义为由顶层根包管理多个本地嵌套包的机制，并支持从根目录在指定 workspace 中执行命令：<https://docs.npmjs.com/cli/v11/using-npm/workspaces/>。
 
@@ -107,10 +109,13 @@ APK 和 AAB 是构建产物，不是源码。它们应被 Git 忽略，并在需
 npm install
 npm run dev
 npm run check
+npm run test
 npm run build
+npm run api:contract
+npm run test:e2e
 ```
 
-根命令目前编排 `@exercise-app/web` 与 `@exercise-app/server` workspace。`npm run dev:web`、`npm run dev:server` 和 `npm run dev:worker` 可以分别启动三个开发入口；检查、测试和构建默认覆盖所有已有 workspace。
+根命令目前编排 `@exercise-app/web` 与 `@exercise-app/server` workspace。`npm run dev:web`、`npm run dev:server` 和 `npm run dev:worker` 可以分别启动三个开发入口；检查、单元测试和构建默认覆盖所有已有 workspace。真实 PostgreSQL 集成测试使用独立的 `npm run test:integration`，并强制要求 `TEST_DATABASE_URL` 的数据库名以 `_test` 结尾。
 
 ## 8. 文件放置判断
 

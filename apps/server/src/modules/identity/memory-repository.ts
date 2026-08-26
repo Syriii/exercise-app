@@ -47,13 +47,16 @@ export class MemoryIdentityRepository implements IdentityRepository {
 
   public async createAccount(
     input: NewAccount,
-    options: { bypassRegistration: boolean },
+    options: { bypassRegistration: boolean; maxAccounts?: number },
   ): Promise<Account> {
     if (!options.bypassRegistration && !this.registrationOpen) {
       throw new IdentityError("registration_closed", "当前未开放注册", 403);
     }
     if ((await this.findAccountByNormalizedUsername(input.normalizedUsername)) !== null) {
       throw new IdentityError("username_taken", "用户名已被使用", 409);
+    }
+    if (!options.bypassRegistration && options.maxAccounts !== undefined && this.accounts.size >= options.maxAccounts) {
+      throw new IdentityError("account_limit_reached", "当前服务器账号已达上限", 403);
     }
 
     const account: AccountWithCredential = {
@@ -71,7 +74,7 @@ export class MemoryIdentityRepository implements IdentityRepository {
     return { id };
   }
 
-  public async updatePassword(userId: string, passwordHash: string): Promise<Account | null> {
+  public async updatePassword(userId: string, passwordHash: string, passwordChangeRequired: boolean): Promise<Account | null> {
     const account = this.accounts.get(userId);
     if (account === undefined) {
       return null;
@@ -79,7 +82,7 @@ export class MemoryIdentityRepository implements IdentityRepository {
     const updated: AccountWithCredential = {
       ...account,
       passwordHash,
-      passwordChangeRequired: false,
+      passwordChangeRequired,
     };
     this.accounts.set(userId, updated);
     return updated;
@@ -127,6 +130,12 @@ export class MemoryIdentityRepository implements IdentityRepository {
     const updated = { ...account, status };
     this.accounts.set(userId, updated);
     return updated;
+  }
+
+  public async deleteAccount(userId: string): Promise<boolean> {
+    const deleted = this.accounts.delete(userId);
+    for (const [token, session] of this.sessions) if (session.userId === userId) this.sessions.delete(token);
+    return deleted;
   }
 
   public async recordAuditEvent(event: AuditInput): Promise<void> {

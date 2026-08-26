@@ -7,13 +7,14 @@ import { IdentityService } from "./service.js";
 const sessionSecret = "a-test-session-secret-that-is-long-enough";
 const password = "correct horse battery staple";
 
-function createService(repository = new MemoryIdentityRepository()) {
+function createService(repository = new MemoryIdentityRepository(), maxAccounts = 10) {
   return {
     repository,
     service: new IdentityService({
       repository,
       sessionSecret,
       sessionTtlHours: 24,
+      maxAccounts,
       now: () => new Date("2026-08-25T00:00:00.000Z"),
     }),
   };
@@ -116,5 +117,39 @@ describe("IdentityService", () => {
     });
     expect((await repository.findAccountById(userSession.account.id))?.status).toBe("active");
     expect(repository.auditEvents.at(-1)?.action).toBe("account.sessions.revoke");
+  });
+
+  it("enforces the configured account capacity without blocking preset admin initialization", async () => {
+    const { repository, service } = createService(new MemoryIdentityRepository(), 2);
+    await service.initializeAdmin(password);
+    await service.register("first-friend", password);
+
+    await expect(service.register("second-friend", password)).rejects.toMatchObject({
+      code: "account_limit_reached",
+      statusCode: 403,
+    });
+    expect(repository.accounts.size).toBe(2);
+  });
+
+  it("lets an administrator set a hashed temporary password and revokes existing sessions", async () => {
+    const { repository, service } = createService();
+    const admin = await service.initializeAdmin(password);
+    const userSession = await service.register("reset-friend", password);
+    const temporaryPassword = "temporary password for reset";
+
+    const updated = await service.resetAccountPassword(
+      admin,
+      userSession.account.id,
+      temporaryPassword,
+    );
+
+    expect(updated.passwordChangeRequired).toBe(true);
+    await expect(service.authenticate(userSession.token)).rejects.toMatchObject({
+      code: "authentication_required",
+    });
+    const resetLogin = await service.login("reset-friend", temporaryPassword);
+    expect(resetLogin.account.passwordChangeRequired).toBe(true);
+    expect(JSON.stringify([...repository.accounts.values()])).not.toContain(temporaryPassword);
+    expect(repository.auditEvents.at(-1)?.action).toBe("account.password.reset");
   });
 });

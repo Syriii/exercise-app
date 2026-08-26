@@ -3,6 +3,7 @@ export type IdentityErrorCode =
   | "weak_password"
   | "registration_closed"
   | "username_taken"
+  | "account_limit_reached"
   | "invalid_credentials"
   | "invalid_current_password"
   | "account_disabled"
@@ -11,6 +12,8 @@ export type IdentityErrorCode =
   | "account_not_found"
   | "admin_username_conflict"
   | "cannot_disable_self"
+  | "cannot_reset_self"
+  | "cannot_delete_admin"
   | "invalid_origin";
 
 export class IdentityError extends Error {

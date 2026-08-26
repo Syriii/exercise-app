@@ -7,6 +7,8 @@ x-application-environment: &application-environment
   LOG_LEVEL: ${LOG_LEVEL:-info}
   COOKIE_SECURE: ${COOKIE_SECURE:-false}
   SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+  WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-15}
+  WORKER_HEARTBEAT_STALE_SECONDS: ${WORKER_HEARTBEAT_STALE_SECONDS:-45}
   DATABASE_HOST: postgres
   DATABASE_PORT: 5432
   DATABASE_NAME: ${POSTGRES_DB:-exercise}
@@ -15,15 +17,31 @@ x-application-environment: &application-environment
   SESSION_SECRET_FILE: /run/secrets/session_secret
   TEMP_MEDIA_ROOT: /app/.runtime/media
   WEB_DIST_DIR: /app/apps/web/dist
+  DEEPSEEK_VISION_MODEL: ${DEEPSEEK_VISION_MODEL:-deepseek-v4-flash-vision-exp}
+  DEEPSEEK_TIMEOUT_MS: ${DEEPSEEK_TIMEOUT_MS:-120000}
+  IMAGE_UPLOAD_MAX_BYTES: ${IMAGE_UPLOAD_MAX_BYTES:-8388608}
+  EXPORT_MAX_BYTES: ${EXPORT_MAX_BYTES:-67108864}
+  EXPORT_RETENTION_HOURS: ${EXPORT_RETENTION_HOURS:-168}
+  MEDIA_CLEANUP_INTERVAL_SECONDS: ${MEDIA_CLEANUP_INTERVAL_SECONDS:-3600}
+  MAX_ACCOUNTS: ${MAX_ACCOUNTS:-10}
+  AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-30}
+  AUTH_RATE_LIMIT_WINDOW_SECONDS: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:-300}
+  WRITE_RATE_LIMIT_MAX: ${WRITE_RATE_LIMIT_MAX:-240}
+  WRITE_RATE_LIMIT_WINDOW_SECONDS: ${WRITE_RATE_LIMIT_WINDOW_SECONDS:-60}
+  IMAGE_RATE_LIMIT_MAX: ${IMAGE_RATE_LIMIT_MAX:-20}
+  IMAGE_RATE_LIMIT_WINDOW_SECONDS: ${IMAGE_RATE_LIMIT_WINDOW_SECONDS:-3600}
+  MAX_ACTIVE_IMAGE_ANALYSES_PER_ACCOUNT: ${MAX_ACTIVE_IMAGE_ANALYSES_PER_ACCOUNT:-3}
+  TEMP_MEDIA_MAX_BYTES_PER_ACCOUNT: ${TEMP_MEDIA_MAX_BYTES_PER_ACCOUNT:-268435456}
 
 x-application-service: &application-service
   build:
     context: ..
     dockerfile: deployment/Dockerfile
+    args:
+      APP_BUILD_REVISION: ${APP_BUILD_REVISION:-local}
   image: exercise-app:${APP_IMAGE_TAG:-local}
   environment: *application-environment
   secrets:
-    - database_password
     - session_secret
   read_only: true
   tmpfs:
@@ -62,10 +80,12 @@ services:
     environment:
       <<: *application-environment
       ADMIN_INITIAL_PASSWORD_FILE: /run/secrets/admin_initial_password
+      API_DATABASE_PASSWORD_FILE: /run/secrets/api_database_password
     secrets:
       - database_password
       - session_secret
       - admin_initial_password
+      - api_database_password
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +93,13 @@ services:
 
   api:
     <<: *application-service
+    environment:
+      <<: *application-environment
+      DATABASE_USER: exercise_api
+      DATABASE_PASSWORD_FILE: /run/secrets/api_database_password
+    secrets:
+      - api_database_password
+      - session_secret
     ports:
       - "${APP_PORT:-3000}:3000"
     depends_on:
@@ -86,11 +113,38 @@ services:
     command: ["npm", "run", "start:worker", "--workspace", "@exercise-app/server"]
     healthcheck:
       disable: true
+    secrets:
+      - database_password
+      - session_secret
     depends_on:
       postgres:
         condition: service_healthy
       setup:
         condition: service_completed_successfully
+
+  integration:
+    profiles: ["verification"]
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+      target: verification
+      args:
+        APP_BUILD_REVISION: ${APP_BUILD_REVISION:-local}
+    image: exercise-app-verification:${APP_IMAGE_TAG:-local}
+    environment:
+      NODE_ENV: test
+      TEST_DATABASE_HOST: postgres
+      TEST_DATABASE_PORT: 5432
+      TEST_DATABASE_NAME: ${POSTGRES_DB:-exercise}_test
+      TEST_DATABASE_USER: ${POSTGRES_USER:-exercise}
+      TEST_DATABASE_PASSWORD_FILE: /run/secrets/database_password
+    secrets:
+      - database_password
+    command: ["npm", "run", "test:integration", "--workspace", "@exercise-app/server"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   postgres_data:
@@ -103,3 +157,5 @@ secrets:
     file: ./secrets/session_secret
   admin_initial_password:
     file: ./secrets/admin_initial_password
+  api_database_password:
+    file: ./secrets/api_database_password

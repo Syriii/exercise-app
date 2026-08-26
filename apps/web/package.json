@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "check": "vue-tsc -b",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "vite": "^8.2.1",
     "vue-tsc": "^3.3.11"

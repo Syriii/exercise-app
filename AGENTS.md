@@ -23,6 +23,7 @@
 | `docs/architecture/delivery-plan.md` | 已确认的可运行增量、范围和验收顺序 |
 | `docs/product-decisions.md` | 只记录重要且经过权衡的决定 |
 | `docs/architecture/repository-layout.md` | 当前仓库边界、目录职责与未来应用位置 |
+| `docs/deployment/quick-start.md` | 首次自托管的最短操作路径 |
 | `docs/deployment/self-hosting.md` | 当前单机 Docker Compose 部署、持久化、备份恢复和待验收清单 |
 | `.planning/exercise-app/findings.md` | 研究、风险和待验证材料，不作为产品事实源 |
 | `.planning/exercise-app/progress.md` | 阶段、文件和测试历史，不作为当前任务来源 |
@@ -86,6 +87,7 @@
 - 当前服务端位于 `apps/server/`；未来 Android 工程固定放入 `apps/android/`。
 - `packages/` 只用于已经出现真实跨应用复用关系的代码；不得预先制造公共层。
 - `deployment/` 只保存部署定义；照片、数据库、备份、凭证和用户记录不得进入仓库。
+- `deployment/scripts/` 保存可审阅的服务器验收入口；任何重建容器、重置测试库或恢复测试都必须使用固定隔离目标和显式影响确认，不得删除业务 volume。
 - 根目录只保存全仓库入口、规则、许可、忽略规则和跨应用编排配置。应用专属源码、依赖和构建配置必须跟随对应应用。
 - APK、AAB、`dist/`、Gradle `build/`、缓存和本机配置都是生成物或本地状态，不得提交。
 - 当前有效的完整放置规则以 `docs/architecture/repository-layout.md` 为准。
@@ -96,22 +98,28 @@
 npm install
 npm run dev
 npm run check
+npm run test
 npm run build
+npm run api:contract
+npm run test:e2e
 ```
+
+真实 PostgreSQL 集成测试单独使用 `npm run test:integration`，并且只能连接名称以 `_test` 结尾的显式测试数据库。
 
 ## 7. 阶段约束
 
-当前处于 Phase 5：Web 实现，正在实施增量 0“工程与数据地基”。
+Phase 5 Web 代码实现已经完成。完成性审计发现的训练消耗、图片暂定采用、饮食安排、历史趋势和上传体验缺口均已补齐并通过本地自动化验收；产品所有者已把真实服务器部署定义为独立后续目标。
 
 - Phase 3 体验基线与 Phase 4 技术架构、交付顺序均已由产品所有者确认，不得重新降级为待讨论候选。
-- 当前只创建服务端 workspace、数据库与 migration、任务地基、账号会话、最小管理边界、前端路由/API 地基、开发部署配置和自动测试入口；不提前实现训练、营养、食物库、图片模型或 Android 业务。
+- 后续若启动部署目标，再按自托管文档验证 Compose、PostgreSQL、pg-boss、DeepSeek、备份恢复和手机访问。图片不得进入导出或默认长期备份；Android 仍按既定门槛后移。
 - 可以创建真实的 `apps/server/` 和 `deployment/`；`apps/android/` 等到 Android 增量，`packages/` 仍只在真实跨应用复用出现后创建。
 - PostgreSQL 是业务事实源；Drizzle migration 必须生成可审阅 SQL，生产不得使用 schema `push`。pg-boss 只负责执行，自有任务表保存产品权威状态，Worker 按至少一次执行和幂等写回设计，当前不引入 Redis。
-- 从第一张私有表开始保存账号归属并建立跨账号拒绝测试；朋友开放前再完成全量审计和 PostgreSQL RLS。管理员权限不得隐含获得其他用户健康数据读取权。
+- 私有表均保存账号归属并纳入访问分类、跨账号拒绝测试和 PostgreSQL RLS；新增账号表必须同步这些清单。管理员权限不得隐含获得其他用户健康数据读取权。
 - 密码明文或可逆密码不得写入数据库、日志、错误、任务、导出或备份清单；数据库只保存符合当前安全基线的 Argon2id 摘要。浏览器认证令牌不得进入 `localStorage`。
 - 容器、migration、测试和备份骨架必须使用假数据与示例 secret；数据库、临时媒体、真实 secret 和备份仍位于仓库外。
-- 每完成一个可运行纵向切片，执行类型检查、构建、单元/集成测试和相应安全检查，并同步交付进度；不得用静态演示冒充真实服务能力。
-- DeepSeek 契约测试只在增量 4 开始前执行，不阻塞当前地基。目标服务器规格在确定生产参数或首次部署前采集，本地工程保持可配置。
+- 每完成一个可运行纵向切片，执行类型检查、构建、单元/集成测试和相应安全检查，并同步交付进度；不得用静态演示冒充真实服务能力。增量 0 未经真实服务器验证前继续标记为待验收，但这不再阻塞可独立完成的本地业务开发。
+- DeepSeek 请求结构的本地合约测试已完成；真实 Key、真实模型响应、用量、限流和超时仍需服务器环境验收，不得用固定测试结果冒充。目标服务器规格在确定生产参数或首次部署前采集，本地工程保持可配置。
+- 问题报告只能由用户主动生成并先行预览，不得自动上传；浏览器自动收集部分不得记录请求体、响应体、账号标识、凭证、照片或训练饮食明细，部署侧诊断不得读取 secret、数据库记录或媒体内容。
 
 ## 8. 文件与 Git
 

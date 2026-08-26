@@ -1,8 +1,8 @@
 # Exercise App
 
-一个正在设计中的开源健身辅助应用。项目先以响应式 Web App 验证训练与饮食体验，成熟后再封装为 Android APK。
+一个面向训练与饮食记录的开源健身辅助应用。项目先以响应式 Web App 验证真实使用体验，成熟后再封装为 Android APK。
 
-当前仓库采用单仓库、多应用结构；Vue Web、Fastify 服务端、PostgreSQL migration、pg-boss worker、账号会话和 Compose 部署骨架已经进入 Phase 5 增量 0。训练算法、营养数据库、图片分析和 Android 仍按后续增量实现。
+当前仓库采用单仓库、多应用结构；Vue Web、Fastify 服务端、PostgreSQL migration、pg-boss worker、账号会话和 Compose 部署定义已经完成。训练计划与实际记录、证据化训练建议和消耗估算、官方营养规划、独立饮食安排、手工与图片估餐、暂定值核对、历史趋势、三类提醒、账号导出/删除及朋友版安全边界均已有可运行实现，并已通过本地自动化验收。真实 Docker、PostgreSQL、DeepSeek 和备份恢复仍等待目标服务器验收；大型公共食物目录等待合法数据源，Android 在 Web 版获得实际使用确认后实现。
 
 ## 已确认的两个功能域
 
@@ -25,7 +25,39 @@ npm run check
 npm run test
 npm run build
 npm run audit:prod
+npm run api:contract
+npm run test:e2e
 ```
+
+`npm test` 运行不依赖数据库的单元与 API 契约测试。浏览器测试会构建应用并启动只使用内存账号的专用本地服务，不连接生产数据库。真实 PostgreSQL 集成测试必须显式提供名称以 `_test` 结尾的独立数据库：
+
+```bash
+TEST_DATABASE_URL=postgresql://exercise:密码@127.0.0.1:5432/exercise_test npm run test:integration
+```
+
+集成测试会执行 Drizzle 与 pg-boss migration，不能指向个人使用库或生产库。
+
+在已经启动 Compose 的目标服务器上，可以运行增量 0 的非破坏性烟雾检查：
+
+```bash
+deployment/scripts/verify-increment0.sh smoke
+```
+
+包含测试数据库、备份恢复和 PostgreSQL 容器重建的完整验收具有短暂服务影响，需要显式允许：
+
+```bash
+ALLOW_CONTAINER_RECREATE_TEST=true deployment/scripts/verify-increment0.sh full
+```
+
+第一次部署可以直接跟随[快速部署教程](docs/deployment/quick-start.md)，启动容器前先运行其中的无副作用预检；持久化、安全、备份恢复、升级和完整验收见[自托管手册](docs/deployment/self-hosting.md)。
+
+运行中遇到页面问题时，可以在“设置 → 问题报告”生成可复制、可下载的脱敏文本。容器启动、数据库或后台任务异常时，在 `deployment/` 目录执行：
+
+```bash
+./scripts/collect-diagnostics.sh
+```
+
+报告只在本机生成，不会自动上传；分享前仍需检查容器日志中的 IP、请求路径和错误上下文。
 
 ## 项目如何推进
 
@@ -40,7 +72,12 @@ npm run audit:prod
 - 仓库架构与文件放置：[`docs/architecture/repository-layout.md`](docs/architecture/repository-layout.md)
 - 当前技术架构：[`docs/architecture/technical-architecture.md`](docs/architecture/technical-architecture.md)
 - 当前分阶段交付方案：[`docs/architecture/delivery-plan.md`](docs/architecture/delivery-plan.md)
+- 账号隔离与数据访问：[`docs/security/data-access.md`](docs/security/data-access.md)
+- 快速部署：[`docs/deployment/quick-start.md`](docs/deployment/quick-start.md)
 - 自托管与部署：[`docs/deployment/self-hosting.md`](docs/deployment/self-hosting.md)
+- 隐私说明模板：[`PRIVACY.md`](PRIVACY.md)
+- 安全策略：[`SECURITY.md`](SECURITY.md)
+- 贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 历史研究、风险与待验证材料：[`.planning/exercise-app/findings.md`](.planning/exercise-app/findings.md)
 - 工作记录与测试结果：[`.planning/exercise-app/progress.md`](.planning/exercise-app/progress.md)
 - 重要且经过权衡的决定：[`docs/product-decisions.md`](docs/product-decisions.md)

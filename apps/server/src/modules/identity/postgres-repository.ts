@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
 
 import type { Database } from "../../db/database.js";
 import {
@@ -82,7 +82,7 @@ export class PostgresIdentityRepository implements IdentityRepository {
 
   public async createAccount(
     input: NewAccount,
-    options: { bypassRegistration: boolean },
+    options: { bypassRegistration: boolean; maxAccounts?: number },
   ): Promise<Account> {
     try {
       return await this.#database.transaction(async (transaction) => {
@@ -95,6 +95,14 @@ export class PostgresIdentityRepository implements IdentityRepository {
             .limit(1);
           if (setting?.registrationOpen !== true) {
             throw new IdentityError("registration_closed", "当前未开放注册", 403);
+          }
+          if (options.maxAccounts !== undefined) {
+            const [accountCount] = await transaction
+              .select({ count: sql<number>`count(*)::int` })
+              .from(users);
+            if ((accountCount?.count ?? 0) >= options.maxAccounts) {
+              throw new IdentityError("account_limit_reached", "当前服务器账号已达上限", 403);
+            }
           }
         }
 
@@ -136,7 +144,7 @@ export class PostgresIdentityRepository implements IdentityRepository {
     return session;
   }
 
-  public async updatePassword(userId: string, passwordHash: string): Promise<Account | null> {
+  public async updatePassword(userId: string, passwordHash: string, passwordChangeRequired: boolean): Promise<Account | null> {
     return this.#database.transaction(async (transaction) => {
       const [credential] = await transaction
         .update(credentials)
@@ -149,7 +157,7 @@ export class PostgresIdentityRepository implements IdentityRepository {
 
       const [user] = await transaction
         .update(users)
-        .set({ passwordChangeRequired: false, updatedAt: new Date() })
+        .set({ passwordChangeRequired, updatedAt: new Date() })
         .where(eq(users.id, userId))
         .returning();
       return user === undefined ? null : toAccount(user);
@@ -210,6 +218,11 @@ export class PostgresIdentityRepository implements IdentityRepository {
       .where(eq(users.id, userId))
       .returning();
     return user === undefined ? null : toAccount(user);
+  }
+
+  public async deleteAccount(userId: string): Promise<boolean> {
+    const deleted = await this.#database.delete(users).where(eq(users.id, userId)).returning({ id: users.id });
+    return deleted.length > 0;
   }
 
   public async recordAuditEvent(event: AuditInput): Promise<void> {

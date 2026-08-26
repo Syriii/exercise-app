@@ -1,17 +1,21 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
-import Dashboard from "../app/Dashboard.vue";
 import { useSessionStore } from "../stores/session";
 import AdminPage from "../views/AdminPage.vue";
 import AuthPage from "../views/AuthPage.vue";
 import ChangePasswordPage from "../views/ChangePasswordPage.vue";
+import HistoryPage from "../views/HistoryPage.vue";
+import NutritionPage from "../views/NutritionPage.vue";
+import SettingsPage from "../views/SettingsPage.vue";
+import TodayPage from "../views/TodayPage.vue";
+import TrainingPage from "../views/TrainingPage.vue";
 
 const sectionRoutes: RouteRecordRaw[] = [
-  { path: "/today", name: "today", component: Dashboard, meta: { section: "today" } },
-  { path: "/training", name: "training", component: Dashboard, meta: { section: "training" } },
-  { path: "/nutrition", name: "nutrition", component: Dashboard, meta: { section: "nutrition" } },
-  { path: "/history", name: "history", component: Dashboard, meta: { section: "history" } },
-  { path: "/settings", name: "settings", component: Dashboard, meta: { section: "settings" } },
+  { path: "/today", name: "today", component: TodayPage, meta: { section: "today" } },
+  { path: "/training", name: "training", component: TrainingPage, meta: { section: "training" } },
+  { path: "/nutrition", name: "nutrition", component: NutritionPage, meta: { section: "nutrition" } },
+  { path: "/history", name: "history", component: HistoryPage, meta: { section: "history" } },
+  { path: "/settings", name: "settings", component: SettingsPage, meta: { section: "settings" } },
 ];
 
 export const router = createRouter({

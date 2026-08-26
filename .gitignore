@@ -2,6 +2,8 @@
 node_modules/
 dist/
 coverage/
+test-results/
+playwright-report/
 .runtime/
 *.tsbuildinfo
 
@@ -25,3 +27,4 @@ apps/android/**/build/
 !.env.example
 deployment/secrets/*
 !deployment/secrets/*.example
+deployment/backups/

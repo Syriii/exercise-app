@@ -5,20 +5,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
-import type { AppConfig } from "./config/environment.js";
+import { MemoryIdentityRepository } from "./modules/identity/memory-repository.js";
+import { IdentityService } from "./modules/identity/service.js";
+import { createTestConfig } from "./testing/test-config.js";
 
-const config: AppConfig = {
-  mode: "test",
-  host: "127.0.0.1",
-  port: 3000,
-  logLevel: "silent",
-  databaseUrl: "postgresql://unused",
-  sessionSecret: "a-test-secret-that-is-at-least-32-characters",
-  sessionTtlHours: 168,
-  cookieSecure: false,
-  temporaryMediaRoot: "/tmp/exercise-app-test-media",
-  webDistDirectory: "/directory-that-does-not-exist",
-};
+const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 const temporaryDirectories: string[] = [];
@@ -85,5 +76,37 @@ describe("health routes", () => {
     expect(apiResponse.json()).toMatchObject({ code: "not_found" });
     expect(apiRootResponse.statusCode).toBe(404);
     expect(apiRootResponse.json()).toMatchObject({ code: "not_found" });
+  });
+
+  it("rate limits repeated authentication attempts through the real request hook", async () => {
+    const limitedConfig = createTestConfig({
+      webDistDirectory: "/directory-that-does-not-exist",
+      authRateLimitMax: 2,
+      authRateLimitWindowSeconds: 300,
+    });
+    const identityService = new IdentityService({
+      repository: new MemoryIdentityRepository(),
+      sessionSecret: limitedConfig.sessionSecret,
+      sessionTtlHours: limitedConfig.sessionTtlHours,
+    });
+    const app = await buildApp({
+      config: limitedConfig,
+      checkDatabase: async () => undefined,
+      identityService,
+    });
+    apps.push(app);
+    const request = () => app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "missing-user", password: "valid-length-password" },
+    });
+
+    expect((await request()).statusCode).toBe(401);
+    expect((await request()).statusCode).toBe(401);
+    const blocked = await request();
+
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.headers["retry-after"]).toBe("300");
+    expect(blocked.json()).toMatchObject({ code: "rate_limit_exceeded" });
   });
 });

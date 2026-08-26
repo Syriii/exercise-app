@@ -50,5 +50,10 @@ export const useSessionStore = defineStore("session", () => {
     restored.value = true;
   }
 
-  return { account, restored, restore, authenticate, changePassword, logout };
+  function clearLocalSession() {
+    account.value = null;
+    restored.value = true;
+  }
+
+  return { account, restored, restore, authenticate, changePassword, logout, clearLocalSession };
 });

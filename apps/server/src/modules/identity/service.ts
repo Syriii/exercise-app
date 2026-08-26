@@ -16,6 +16,8 @@ export interface IdentityServiceOptions {
   readonly repository: IdentityRepository;
   readonly sessionSecret: string;
   readonly sessionTtlHours: number;
+  readonly maxAccounts?: number;
+  readonly onAuthenticated?: (account: Account) => void;
   readonly now?: () => Date;
 }
 
@@ -41,12 +43,16 @@ export class IdentityService {
   readonly #repository: IdentityRepository;
   readonly #sessionSecret: string;
   readonly #sessionTtlHours: number;
+  readonly #maxAccounts: number;
+  readonly #onAuthenticated: ((account: Account) => void) | undefined;
   readonly #now: () => Date;
 
   public constructor(options: IdentityServiceOptions) {
     this.#repository = options.repository;
     this.#sessionSecret = options.sessionSecret;
     this.#sessionTtlHours = options.sessionTtlHours;
+    this.#maxAccounts = options.maxAccounts ?? 10;
+    this.#onAuthenticated = options.onAuthenticated;
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -95,7 +101,7 @@ export class IdentityService {
           role: "user",
           passwordChangeRequired: false,
         },
-        { bypassRegistration: false },
+        { bypassRegistration: false, maxAccounts: this.#maxAccounts },
       );
     } catch (error) {
       if (error instanceof IdentityError) {
@@ -139,7 +145,14 @@ export class IdentityService {
     if (session.account.status !== "active") {
       throw new IdentityError("account_disabled", "账号已停用", 403);
     }
+    this.#onAuthenticated?.(session.account);
     return session.account;
+  }
+
+  public async authenticateAdmin(token: string | undefined): Promise<Account> {
+    const account = await this.authenticate(token);
+    this.#requireAdmin(account);
+    return account;
   }
 
   public async logout(token: string | undefined): Promise<void> {
@@ -165,7 +178,7 @@ export class IdentityService {
       throw new IdentityError("invalid_current_password", "当前密码不正确", 400);
     }
 
-    const updated = await this.#repository.updatePassword(account.id, await hashPassword(newPassword));
+    const updated = await this.#repository.updatePassword(account.id, await hashPassword(newPassword), false);
     if (updated === null) {
       throw new IdentityError("account_not_found", "账号不存在", 404);
     }
@@ -239,6 +252,51 @@ export class IdentityService {
       action: "account.sessions.revoke",
       result: "succeeded",
     });
+  }
+
+  public async resetAccountPassword(
+    actor: Account,
+    userId: string,
+    temporaryPassword: string,
+  ): Promise<Account> {
+    this.#requireAdmin(actor);
+    if (actor.id === userId) {
+      throw new IdentityError("cannot_reset_self", "管理员请使用当前密码修改自己的密码", 409);
+    }
+    validatePassword(temporaryPassword);
+    const updated = await this.#repository.updatePassword(
+      userId,
+      await hashPassword(temporaryPassword),
+      true,
+    );
+    if (updated === null) {
+      throw new IdentityError("account_not_found", "账号不存在", 404);
+    }
+    await this.#repository.revokeSessionsForUser(userId, this.#now());
+    await this.#repository.recordAuditEvent({
+      actorUserId: actor.id,
+      targetUserId: userId,
+      action: "account.password.reset",
+      result: "succeeded",
+    });
+    return updated;
+  }
+
+  public async confirmAccountDeletion(account: Account, password: string): Promise<void> {
+    if (account.role === "admin") throw new IdentityError("cannot_delete_admin", "预置管理员账号不能在应用内删除", 409);
+    const credential = await this.#repository.findAccountByNormalizedUsername(account.normalizedUsername);
+    if (credential === null || !(await verifyPassword(credential.passwordHash, password))) throw new IdentityError("invalid_current_password", "当前密码不正确", 400);
+  }
+
+  public async disableForDeletion(account: Account): Promise<void> {
+    const updated = await this.#repository.setAccountStatus(account.id, "disabled");
+    if (updated === null) throw new IdentityError("account_not_found", "账号不存在", 404);
+    await this.#repository.revokeSessionsForUser(account.id, this.#now());
+    await this.#repository.recordAuditEvent({ actorUserId: account.id, targetUserId: account.id, action: "account.deletion.request", result: "accepted" });
+  }
+
+  public async deleteAccountPermanently(userId: string): Promise<void> {
+    if (!(await this.#repository.deleteAccount(userId))) throw new IdentityError("account_not_found", "账号不存在", 404);
   }
 
   #requireAdmin(account: Account): void {

@@ -1,0 +1,2 @@
+ALTER TABLE "training_templates" ADD COLUMN "source_suggestion_id" uuid;--> statement-breakpoint
+CREATE UNIQUE INDEX "training_templates_source_suggestion_uq" ON "training_templates" USING btree ("source_suggestion_id");

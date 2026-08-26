@@ -2,6 +2,9 @@ FROM node:24.19.0-bookworm-slim AS build
 
 WORKDIR /app
 
+ARG APP_BUILD_REVISION=local
+ENV VITE_APP_BUILD_REVISION=$APP_BUILD_REVISION
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends build-essential python3 \
   && rm -rf /var/lib/apt/lists/*
@@ -13,8 +16,15 @@ RUN npm ci
 
 COPY apps/server apps/server
 COPY apps/web apps/web
-RUN npm run build \
-  && npm prune --omit=dev
+RUN npm run build
+
+FROM build AS verification
+
+ENV NODE_ENV=test
+
+FROM build AS production-dependencies
+
+RUN npm prune --omit=dev
 
 FROM node:24.19.0-bookworm-slim AS runtime
 
@@ -26,13 +36,13 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-COPY --from=build /app/package.json /app/package-lock.json ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/apps/server/package.json apps/server/package.json
-COPY --from=build /app/apps/server/dist apps/server/dist
-COPY --from=build /app/apps/server/drizzle apps/server/drizzle
-COPY --from=build /app/apps/web/package.json apps/web/package.json
-COPY --from=build /app/apps/web/dist apps/web/dist
+COPY --from=production-dependencies /app/package.json /app/package-lock.json ./
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=production-dependencies /app/apps/server/package.json apps/server/package.json
+COPY --from=production-dependencies /app/apps/server/dist apps/server/dist
+COPY --from=production-dependencies /app/apps/server/drizzle apps/server/drizzle
+COPY --from=production-dependencies /app/apps/web/package.json apps/web/package.json
+COPY --from=production-dependencies /app/apps/web/dist apps/web/dist
 
 RUN mkdir -p /app/.runtime/media \
   && chown -R node:node /app/.runtime

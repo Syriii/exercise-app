@@ -20,6 +20,9 @@
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:integration": "npm run test:integration --workspace @exercise-app/server",
+    "test:e2e": "npm run build && npm run test:e2e --workspace @exercise-app/web",
+    "api:contract": "npm run api:contract --workspace @exercise-app/server",
     "audit:prod": "npm audit --omit=dev",
     "preview": "npm run preview --workspace @exercise-app/web"
   }

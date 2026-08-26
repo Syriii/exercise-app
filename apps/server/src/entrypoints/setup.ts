@@ -5,6 +5,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 import { loadConfig, readSecretValue } from "../config/environment.js";
 import { createDatabase } from "../db/database.js";
+import { ensureApiDatabaseRole, grantApiDatabaseRole } from "../db/runtime-role.js";
 import { PostgresIdentityRepository } from "../modules/identity/postgres-repository.js";
 import { IdentityService } from "../modules/identity/service.js";
 import { migratePgBoss } from "../modules/tasks/pgboss-task-queue.js";
@@ -13,10 +14,15 @@ const config = loadConfig();
 const database = createDatabase(config.databaseUrl);
 
 try {
+  const apiDatabasePassword = readSecretValue("API_DATABASE_PASSWORD", process.env, (path) =>
+    readFileSync(path, "utf8"),
+  );
+  await ensureApiDatabaseRole(database.pool, apiDatabasePassword);
   await migrate(database.database, {
     migrationsFolder: resolve("apps/server/drizzle"),
   });
   await migratePgBoss(config.databaseUrl);
+  await grantApiDatabaseRole(database.pool);
   const initialAdminPassword = readSecretValue("ADMIN_INITIAL_PASSWORD", process.env, (path) =>
     readFileSync(path, "utf8"),
   );

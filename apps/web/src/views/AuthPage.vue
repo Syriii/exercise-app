@@ -57,6 +57,8 @@ async function submit() {
         <p>{{ mode === "login" ? "回到今天的安排。" : "账号只用于保存你自己的训练和饮食记录。" }}</p>
       </div>
 
+      <p v-if="mode === 'login' && route.query.accountDeletion === 'requested'" class="form-notice" role="status">账号删除请求已提交。所有设备已退出，后台会继续清理该账号的数据和临时照片。</p>
+
       <form class="access-form" @submit.prevent="submit">
         <label><span>用户名</span><input v-model="username" name="username" autocomplete="username" minlength="3" maxlength="32" required /></label>
         <label><span>密码</span><input v-model="password" name="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" type="password" :minlength="mode === 'register' ? 12 : 1" maxlength="128" required /></label>

@@ -30,6 +30,10 @@ interface AccountStatusBody {
   readonly status: UserStatus;
 }
 
+interface ResetPasswordBody {
+  readonly temporaryPassword: string;
+}
+
 const accountSchema = {
   type: "object",
   additionalProperties: false,
@@ -270,4 +274,35 @@ export async function registerIdentityRoutes(
       return reply.status(204).send();
     },
   });
+
+  app.put<{ Params: { userId: string }; Body: ResetPasswordBody }>(
+    "/api/v1/admin/accounts/:userId/password",
+    {
+      schema: {
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["userId"],
+          properties: { userId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["temporaryPassword"],
+          properties: {
+            temporaryPassword: { type: "string", minLength: 12, maxLength: 128 },
+          },
+        },
+        response: { 200: accountSchema },
+      },
+      handler: async (request) =>
+        publicAccount(
+          await service.resetAccountPassword(
+            await currentAccount(request),
+            request.params.userId,
+            request.body.temporaryPassword,
+          ),
+        ),
+    },
+  );
 }
