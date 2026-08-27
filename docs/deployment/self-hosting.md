@@ -97,6 +97,8 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 `.env` 中最常调整的是：
 
 - `APP_PORT`：服务器对外端口，例如 `3000`；访问地址为 `http://服务器IP:APP_PORT`。
+- `NODE_BASE_IMAGE`：构建镜像使用的 Node 基础镜像，默认 `node:24.19.0-bookworm-slim`。只在目标主机无法稳定访问 Docker Hub 且替代仓库已验证时覆盖。
+- `POSTGRES_IMAGE`：PostgreSQL 服务镜像，默认 `postgres:18.6-bookworm`。首次初始化后不得通过这个变量跨主版本升级数据库。
 - `COOKIE_SECURE=false`：只适用于受信局域网或 VPN 内的纯 HTTP。公共互联网必须先配置 HTTPS，再改为 `true`。
 - `POSTGRES_DB` 和 `POSTGRES_USER`：首次初始化后不要随意改变；它们与已有 volume 中的数据库身份有关。
 - `WORKER_HEARTBEAT_INTERVAL_SECONDS`：worker 写入 PostgreSQL 存活信号的间隔，默认 15 秒。
@@ -128,6 +130,19 @@ docker compose ps
 docker compose logs setup
 docker compose logs --tail=100 api worker postgres
 ```
+
+#### Docker Hub 不可达时切换项目镜像
+
+镜像地址由项目 `.env` 控制，不需要修改 `/etc/docker/daemon.json`。这对于承载其他项目的共享服务器尤其重要：daemon 级 `registry-mirrors` 会改变所有 Docker 工作负载的拉取行为，并需要重新加载或重启 Docker。
+
+当前已验证的 DaoCloud 写法为：
+
+```dotenv
+NODE_BASE_IMAGE=m.daocloud.io/docker.io/library/node:24.19.0-bookworm-slim
+POSTGRES_IMAGE=m.daocloud.io/docker.io/library/postgres:18.6-bookworm
+```
+
+切换前先用不会下载镜像层的 manifest 检查确认固定标签存在并包含目标架构；切换后重新运行 `./scripts/preflight.sh`。公共代理有缓存、白名单和限流边界，不能把一次成功当作永久可用保证。生产环境更稳定的做法是把经过验证的固定镜像同步到自己控制的容器仓库，再把上述变量指向自有地址。Dockerfile 使用官方支持的 `ARG` 参数化 `FROM`，没有设置变量时仍回到 Docker Hub 原始标签：[Dockerfile `ARG` 与 `FROM`](https://docs.docker.com/reference/dockerfile/#understand-how-arg-and-from-interact)、[Compose build args](https://docs.docker.com/reference/compose-file/build/#args)、[DaoCloud 公共镜像代理](https://github.com/DaoCloud/public-image-mirror)。
 
 上面的基础命令不会挂载 DeepSeek Key，训练和手工饮食照常可用，拍照入口会明确提示“尚未配置”。启用拍照估餐时，确认 `secrets/deepseek_api_key` 已写入真实 Key，然后在所有 Compose 命令中同时加入覆盖文件：
 
@@ -283,7 +298,7 @@ curl --fail http://127.0.0.1:${APP_PORT:-3000}/api/v1/health/ready
 
 `setup` 是幂等入口：只执行仓库中尚未应用的 migration，并确认管理员存在。更改 `admin_initial_password` 不会修改已经初始化的管理员密码；管理员密码只能通过应用内改密或未来受控重置流程变更。
 
-当前镜像锁定明确的 Node 24 与 PostgreSQL 18 minor 标签。升级 PostgreSQL 主版本前必须阅读官方镜像和 PostgreSQL 升级说明并完成独立恢复演练；不能只替换镜像标签。PostgreSQL 官方建议受支持主版本采用最新 minor：[版本策略](https://www.postgresql.org/support/versioning/)。
+当前默认镜像锁定明确的 Node 24 与 PostgreSQL 18 minor 标签；部署者可以更换镜像仓库，但不应改变对应版本。升级 PostgreSQL 主版本前必须阅读官方镜像和 PostgreSQL 升级说明并完成独立恢复演练；不能只替换镜像标签。PostgreSQL 官方建议受支持主版本采用最新 minor：[版本策略](https://www.postgresql.org/support/versioning/)。
 
 ## 8. 故障定位
 

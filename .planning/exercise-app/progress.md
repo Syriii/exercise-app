@@ -889,3 +889,14 @@
 - 已同步服务端业务校验、注册/改密/管理员重置 API schema、Vue 表单、部署预检、secret 示例和自托管文档，并新增 7 位拒绝、8 位接受的边界测试。
 - 验证通过：身份定向 16 项、全量 23 个文件 96 项服务端测试、严格类型检查、Vue 生产构建、OpenAPI 契约、部署脚本语法和 `git diff --check`。
 - 这批修改尚未提交或推送，服务器仍运行 `95f1bc3`的 12 位旧规则；在新代码提交、推送并由服务器 fast-forward 拉取前，不创建用户选定的 11 位初始密码。
+
+# 2026-08-27：镜像源参数化开始
+
+- 服务器已同步 `1bdf5359dc5219652e25685cce968a51fd3c97d1`，四个私有 secret 和 `APP_PORT=5011` 配置通过无容器副作用预检。
+- OpenCloudOS `docker-buildx` RPM 自报 `v0.0.0+unknown`，Compose 拒绝构建；安装经过固定 SHA-256 校验的 root 用户级官方 Buildx `v0.31.1` 后恢复，系统 RPM 保持未修改，回滚只需删除单个用户插件文件。
+- 首次 API 构建在 Docker Hub Node manifest HTTPS HEAD 超时处退出；没有镜像、容器、volume 或端口变化，仅留下 8 KiB BuildKit 元数据。
+- DaoCloud 两个固定镜像 manifest 的只读测试通过且没有新增 Docker 数据。产品所有者已批准继续把镜像入口参数化、本地验证、提交推送和后续服务器同步。
+- 当前实施边界：默认仍使用 Docker Hub；仅由部署环境显式传入 DaoCloud 镜像。不得修改服务器全局 Docker daemon 镜像源。
+- 已完成参数化：Dockerfile 用全局 `NODE_BASE_IMAGE` 驱动 build/runtime 两个外部 `FROM`，Compose 的普通与 verification 构建目标都传入该参数，PostgreSQL 使用独立 `POSTGRES_IMAGE`；两个默认值保持原 Docker Hub 固定版本。
+- `.env.example`、快速部署和完整自托管文档已同步；文档说明项目级覆盖、恢复默认值、公共代理边界以及自有仓库的长期建议。
+- 本地验证通过：`git diff --check`、Compose YAML 解析、全部部署脚本 `sh -n`、镜像入口结构断言、全仓库 TypeScript/Vue 检查、23 个文件 96 项服务端测试、生产构建和 OpenAPI 合约生成。没有业务或界面变化，因此未重复 Playwright。

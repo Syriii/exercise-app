@@ -64,6 +64,15 @@ COOKIE_SECURE=false
 
 `COOKIE_SECURE=false` 只适用于局域网或受信 VPN 中的 HTTP 测试。如果这个端口直接暴露在公共互联网，先按完整手册配置 HTTPS，再改为 `true`；不要通过公网明文发送密码、照片和健康记录。
 
+默认从 Docker Hub 获取固定版本的 Node 与 PostgreSQL 镜像。如果服务器访问 Docker Hub 不稳定，可以在确认代理支持对应版本后，只为本项目修改 `.env`：
+
+```dotenv
+NODE_BASE_IMAGE=m.daocloud.io/docker.io/library/node:24.19.0-bookworm-slim
+POSTGRES_IMAGE=m.daocloud.io/docker.io/library/postgres:18.6-bookworm
+```
+
+这两个变量只改变本项目使用的镜像，不修改 Docker daemon，也不需要重启 Docker。公共代理可能限流或缓存旧标签，使用前应先检查 manifest；长期生产部署更适合把固定镜像同步到自己控制的容器仓库。恢复默认值时删除这两行，或改回 `.env.example` 中的 Docker Hub 地址。
+
 ## 4. 构建并启动
 
 先执行无副作用的部署预检：

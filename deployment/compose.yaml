@@ -39,6 +39,7 @@ x-application-service: &application-service
     dockerfile: deployment/Dockerfile
     args:
       APP_BUILD_REVISION: ${APP_BUILD_REVISION:-local}
+      NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:24.19.0-bookworm-slim}
   image: exercise-app:${APP_IMAGE_TAG:-local}
   environment: *application-environment
   secrets:
@@ -56,7 +57,7 @@ x-application-service: &application-service
 
 services:
   postgres:
-    image: postgres:18.6-bookworm
+    image: ${POSTGRES_IMAGE:-postgres:18.6-bookworm}
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-exercise}
       POSTGRES_USER: ${POSTGRES_USER:-exercise}
@@ -130,6 +131,7 @@ services:
       target: verification
       args:
         APP_BUILD_REVISION: ${APP_BUILD_REVISION:-local}
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:24.19.0-bookworm-slim}
     image: exercise-app-verification:${APP_IMAGE_TAG:-local}
     environment:
       NODE_ENV: test

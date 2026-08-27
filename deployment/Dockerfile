@@ -1,4 +1,6 @@
-FROM node:24.19.0-bookworm-slim AS build
+ARG NODE_BASE_IMAGE=node:24.19.0-bookworm-slim
+
+FROM ${NODE_BASE_IMAGE} AS build
 
 WORKDIR /app
 
@@ -26,7 +28,7 @@ FROM build AS production-dependencies
 
 RUN npm prune --omit=dev
 
-FROM node:24.19.0-bookworm-slim AS runtime
+FROM ${NODE_BASE_IMAGE} AS runtime
 
 ENV NODE_ENV=production \
   HOST=0.0.0.0 \

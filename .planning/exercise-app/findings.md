@@ -1414,3 +1414,12 @@
 - 现有 1 GiB Swap 是根盘 `/www/swap` 文件且几乎用尽；新增 Docker/PostgreSQL 前需要持续观察内存压力。任何备份不能只与 Docker volume 同存 `/newdata`。
 - 产品所有者明确目标服务器不属于自己，短期磁盘重挂载风险可以接受，并认为没有权限修改服务器基础配置。因此 `/dev/vdb` 挂载、UUID、`fstab`、systemd 和 Docker 数据目录只保留为管理员参考，不再作为 Agent 可自行执行的步骤。
 - 即使当前登录账号技术上可能拥有较高权限，也不等于获得修改第三方服务器基础设施的授权。后续必须由服务器管理员提供 Docker/Compose、PostgreSQL 或明确的系统修改许可；否则只能进行仓库内和用户目录内的无副作用验证，不能把内存测试服务冒充长期部署。
+
+# 2026-08-27：Docker Hub 替代镜像调研与服务器验证
+
+- Docker 官方支持通过 Dockerfile 全局 `ARG` 参数化 `FROM`，Compose `build.args` 可在部署时传入该参数；这使开源默认值继续指向官方镜像，同时允许受限网络的部署者显式切换镜像来源。
+- Docker daemon 的 `registry-mirrors` 会修改宿主机全局配置并需要 reload/restart；共享服务器上可能影响其他 Docker 项目，不作为本项目首次部署的首选。
+- 阿里云官方文档说明传统 ACR 镜像加速已停止同步最新镜像，并建议生产环境把所需上游镜像同步到自有仓库；华为云 SWR 加速则限制在华为云用户和指定云产品/区域，不适合当前主机作为通用默认值。
+- DaoCloud 公共代理声明支持 `m.daocloud.io/docker.io/...` 前缀并保持上游摘要语义，但存在缓存、白名单和限流边界，仍应固定明确版本并在目标主机实际验证。
+- 目标服务器只读验证通过：`m.daocloud.io` DNS、直连 TCP 443、TLS 1.3 与 Registry challenge 正常；Node `24.19.0-bookworm-slim` 和 PostgreSQL `18.6-bookworm` manifest 均在约 2 秒内取得且包含 `linux/amd64`。该验证没有拉取镜像层，不能替代完整构建。
+- 当前仓库只有两个外部基础镜像入口：Dockerfile 的 Node 标签和 Compose 的 PostgreSQL 标签。推荐分别用 `NODE_BASE_IMAGE` build arg 与 `POSTGRES_IMAGE` 环境变量参数化，默认保持原始 Docker Hub 短名。

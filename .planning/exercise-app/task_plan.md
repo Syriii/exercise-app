@@ -77,9 +77,9 @@
 ## 当前阶段
 
 - **阶段：** 6 — 使用与扩展（正在执行首次真实服务器部署验收）
-- **状态：** 提交 `95f1bc3` 已在服务器同步；OpenCloudOS 原生 Docker/Moby、Compose、Buildx 已安装并完成首次启动，运行数据确认写入 `/newdata`；Docker/containerd 当前 active 但 disabled，现有服务与 public 防火墙规则未受影响。服务器已创建 `APP_PORT=5011` 的私有 `.env` 和三个内部 secret；本地已将应用密码规则统一调整为 8–128 位并验收，尚未提交到服务器使用的代码基线
+- **状态：** 提交 `1bdf535` 已推送并在服务器同步，8–128 位密码规则与四个私有 secret 已通过预检；OpenCloudOS 原生 Docker/Moby、Compose 已安装并完成首次启动，运行数据确认写入 `/newdata`。系统 Buildx RPM 的版本元数据异常已用 root 用户级官方 `v0.31.1` 插件可回滚覆盖修复。首次 API 构建在读取 Docker Hub Node manifest 时因 HTTPS 超时停止，未产生镜像或容器；DaoCloud 对固定 Node/PostgreSQL 标签的 DNS、TLS 和 manifest 只读验证已通过。Node/PostgreSQL 基础镜像参数化已经完成本地静态、类型、96 项测试、生产构建与 API 合约验证，待提交推送和服务器同步
 - **当前产出：** 完整 Web 实现、本地自动化验收、公开仓库提交、快速部署与诊断交接均已完成
-- **下一步：** 将已验收的 8 位密码规则代码提交、推送并在服务器 fast-forward 同步；再由产品所有者在服务器终端隐藏输入管理员初始密码，运行无容器副作用的 `deployment/scripts/preflight.sh`。通过后再单独设计镜像构建和 Compose 首次启动，重点控制 Swap 近满时的内存压力；暂不 enable Docker 开机启动，不修改 `fstab`、挂载、Nginx 或现有项目。
+- **下一步：** 审查并提交 Node/PostgreSQL 镜像参数化，推送 GitHub 后让服务器 fast-forward；由服务器私有 `.env` 显式选择已验证的 DaoCloud 地址并重新运行 preflight，再单独批准实际镜像构建。构建继续监控 Swap 近满时的内存压力；暂不 enable Docker 开机启动，不修改 Docker daemon、`fstab`、挂载、Nginx 或现有项目。
 
 ## 首次完整提交审查
 
@@ -95,9 +95,9 @@
 
 | 阶段 | 验收内容 | 状态 |
 |---|---|---|
-| 0. 仓库与主机基线 | 拉取 `95f1bc3`，确认工作区、系统规格、Docker/Compose、端口和已有容器/volume | **已通过：仓库干净同步；Docker/Compose 未安装** |
-| 1. 运行环境、本机配置与预检 | 逐条审查 Docker 软件包、数据目录和服务启动；每项变更后复验宿主机与现有项目，再创建项目私有配置并运行 preflight | **部分通过：Docker/Moby 29.3.1、Compose 5.4.0、Buildx 0.31.1 已安装并首次启动；`/newdata`、containerd、Docker 网络和现有服务复验通过；项目私有配置与 preflight 待执行** |
-| 2. 首次启动 | 构建镜像、setup migration、API/worker/PostgreSQL 健康检查 | 待执行 |
+| 0. 仓库与主机基线 | 拉取当前部署提交，确认工作区、系统规格、Docker/Compose、端口和已有容器/volume | **已通过：服务器仓库干净同步到 `1bdf535`** |
+| 1. 运行环境、本机配置与预检 | 逐条审查 Docker 软件包、数据目录和服务启动；每项变更后复验宿主机与现有项目，再创建项目私有配置并运行 preflight | **已通过：Docker/Moby 29.3.1、Compose 5.4.0、root 用户级 Buildx 0.31.1、`/newdata` 数据目录、四个私有 secret 与 preflight 均通过；现有服务保持正常** |
+| 2. 首次启动 | 构建镜像、setup migration、API/worker/PostgreSQL 健康检查 | **进行中：Docker Hub manifest 超时且未产生镜像；DaoCloud 固定标签 manifest 已通过，基础镜像参数化已完成本地验收，待提交同步、私有配置与重新构建** |
 | 3. 数据与故障验收 | 测试数据库、RLS、事务、worker 崩溃恢复、volume 持久化、备份恢复 | 待执行 |
 | 4. 模型与访问 | 真实 DeepSeek 请求、临时图片删除、手机 IP+端口访问 | 待真实 Key 与前述阶段通过 |
 
