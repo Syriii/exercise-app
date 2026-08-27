@@ -127,7 +127,7 @@ export async function registerIdentityRoutes(
         required: ["username", "password"],
         properties: {
           username: { type: "string", minLength: 3, maxLength: 32 },
-          password: { type: "string", minLength: 12, maxLength: 128 },
+          password: { type: "string", minLength: 8, maxLength: 128 },
         },
       },
       response: { 201: accountSchema },
@@ -181,7 +181,7 @@ export async function registerIdentityRoutes(
         required: ["currentPassword", "newPassword"],
         properties: {
           currentPassword: { type: "string", minLength: 1, maxLength: 128 },
-          newPassword: { type: "string", minLength: 12, maxLength: 128 },
+          newPassword: { type: "string", minLength: 8, maxLength: 128 },
         },
       },
       response: { 200: accountSchema },
@@ -290,7 +290,7 @@ export async function registerIdentityRoutes(
           additionalProperties: false,
           required: ["temporaryPassword"],
           properties: {
-            temporaryPassword: { type: "string", minLength: 12, maxLength: 128 },
+            temporaryPassword: { type: "string", minLength: 8, maxLength: 128 },
           },
         },
         response: { 200: accountSchema },

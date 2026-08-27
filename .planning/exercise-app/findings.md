@@ -1397,3 +1397,20 @@
 - 部署审查确认所有公开示例 secret 本身都能满足原有长度门槛，忘记替换时存在用公开密码启动的风险。已新增无副作用 `preflight.sh`，在启动前检查主机工具、端口、文件归属与权限、Git 忽略、长度、占位值、重复 secret 和 Compose 配置；服务端同时拒绝任何含公开 `replace-with-` 占位值的必需或可选 secret。
 - 最终候选集合为 52 个已跟踪修改和 166 个新增文件，共 218 个文件；本地 Markdown 链接、高置信凭据、个人主机/IP/路径、真实部署 secret、脚本语法/权限、Compose YAML 和 `git diff --check` 均通过。
 - 最终全量验证通过：严格类型检查、23 个测试文件 95 项服务端测试、生产构建、OpenAPI 合约、桌面/手机 27 项 Playwright，以及生产依赖在线审计 0 个已知漏洞。本机没有 Docker/PostgreSQL，因此预检真实执行、migration/RLS/pg-boss 故障和备份恢复仍按既定边界留给服务器验收。
+
+# 2026-08-26：首次真实服务器部署验收启动
+
+- 产品所有者已在目标服务器配置项目级 Git 并 clone 仓库，明确授权联系远程 Codex 任务开始部署测试。
+- 本地提交 `95f1bc3` 已推送到 `https://github.com/Syriii/exercise-app` 的 `main`；远端不能再因 GitHub 只有 foundation 代码而阻塞。
+- 远程任务固定为先执行只读阶段 0：核对仓库和目标提交、主机规格、Docker/Compose/Git/curl、端口、相关容器和 volume；在返回结果前禁止创建 secret、容器、数据库或修改防火墙。
+- 远程首次 `git fetch` 只因 Codex 沙箱把 `.git/FETCH_HEAD` 视为只读而等待批准，并非 Git 冲突、认证失败或 GitHub 故障。
+- 修改审批规则并重新发起后，服务器成功 fast-forward 到完整 `95f1bc3`，`main` 与 `origin/main` 一致且工作区干净。
+- 主机为 OpenCloudOS 9.2、x86_64 KVM、4 vCPU、3.6 GiB 内存和 1 GiB Swap；Swap 几乎用尽。根盘剩余约 13 GiB，`/newdata` 剩余约 76 GiB，因此 Docker 数据目录在安装前需要明确选择，优先评估 `/newdata`。
+- Docker Engine、Compose、containerd、Moby 和 Podman 均未安装；端口 3000/5432 空闲，80/443 已由现有 Nginx 占用。服务器不是空白主机，后续不得覆盖现有 Nginx、宝塔或其他应用配置。
+- 所有部署脚本语法与可执行位、Compose YAML、三个 package.json 和 `git diff --check` 通过；项目预检按预期停在缺少 `docker`。真实 `.env` 和 secret 尚未创建，阶段 0 没有修改容器、volume、数据库、防火墙或 Nginx。
+- 存储审计确认主机有两块 KVM 虚拟数据盘：`/dev/vda` 60 GiB，单分区 `/dev/vda1` 以 XFS 挂载根目录；`/dev/vdb` 约 100 GiB，整盘 ext4 直接挂载 `/newdata`。另有未挂载的虚拟光驱 `sr0`；无 LVM、MD RAID、ZFS 或 Btrfs。
+- `/newdata` 不是网络盘，剩余约 76 GiB、inode 使用约 4%，适合 Docker/containerd；推荐目录固定为 `/newdata/docker-data`，不放进 Git 仓库目录。
+- `/etc/fstab` 当前用易受枚举顺序影响的 `/dev/vdb` 挂载 `/newdata`，没有 `nofail` 且 fsck pass 为 0。使用 Docker 前应改为文件系统 UUID，并通过 systemd `RequiresMountsFor` 或等价依赖保证数据盘未挂载时 Docker 不会退回根盘创建同名目录。
+- 现有 1 GiB Swap 是根盘 `/www/swap` 文件且几乎用尽；新增 Docker/PostgreSQL 前需要持续观察内存压力。任何备份不能只与 Docker volume 同存 `/newdata`。
+- 产品所有者明确目标服务器不属于自己，短期磁盘重挂载风险可以接受，并认为没有权限修改服务器基础配置。因此 `/dev/vdb` 挂载、UUID、`fstab`、systemd 和 Docker 数据目录只保留为管理员参考，不再作为 Agent 可自行执行的步骤。
+- 即使当前登录账号技术上可能拥有较高权限，也不等于获得修改第三方服务器基础设施的授权。后续必须由服务器管理员提供 Docker/Compose、PostgreSQL 或明确的系统修改许可；否则只能进行仓库内和用户目录内的无副作用验证，不能把内存测试服务冒充长期部署。

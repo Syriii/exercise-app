@@ -89,7 +89,7 @@ secrets_directory="$DEPLOYMENT_DIRECTORY/secrets"
 database_password=$(validate_secret "$secrets_directory/database_password" "database_password" 16)
 api_database_password=$(validate_secret "$secrets_directory/api_database_password" "api_database_password" 16)
 session_secret=$(validate_secret "$secrets_directory/session_secret" "session_secret" 32)
-admin_initial_password=$(validate_secret "$secrets_directory/admin_initial_password" "admin_initial_password" 12)
+admin_initial_password=$(validate_secret "$secrets_directory/admin_initial_password" "admin_initial_password" 8)
 
 for relative_secret in \
   deployment/secrets/database_password \

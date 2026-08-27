@@ -849,3 +849,43 @@
 - 工程一致性通过：19 份 migration 与 journal 对齐，全部 snapshot JSON、Compose YAML、部署脚本语法/可执行位、本地 Markdown 链接、Git 忽略规则和 `git diff --check` 正常。
 - 全量验收通过：严格类型检查、23 个文件 95 项服务端测试、生产构建、OpenAPI、桌面/手机 27 项 Playwright、生产依赖在线审计 0 漏洞。
 - 当前准备创建本地提交，不推送。真实 Docker、PostgreSQL、DeepSeek 和备份恢复继续是服务器拉取代码后的独立验收目标。
+
+# 2026-08-26：GitHub 发布与服务器验收启动
+
+- 创建本地提交 `95f1bc3 feat: complete exercise app web implementation`，提交后工作区干净，随后按产品所有者既有推送要求和当前部署目标成功推送 GitHub `main`。
+- 联系远程任务“确认查看 exercise-app 项目”，下发阶段 0 只读检查：只有工作区干净才允许 fast-forward 拉取；若拿不到 `95f1bc3` 必须停止；禁止提前创建 secret、容器、volume 或修改防火墙。
+- 远程任务执行 `git fetch` 时等待 Codex 沙箱批准写入 `.git/FETCH_HEAD`。产品所有者批准后继续；当前没有把远程环境标记为已通过。
+- 产品所有者调整审批要求后重新发起成功：服务器已同步到 `95f1bc3`，阶段 0 只读检查完成。
+- 静态部署材料通过；真实部署当前阻塞于 Docker Engine/Compose 未安装。根盘仅余约 13 GiB，而 `/newdata` 余约 76 GiB，下一阶段需先确定 Docker 数据目录并获得安装授权。
+- 完成只读存储审计：两块 KVM 虚拟盘分别承载根目录与 `/newdata`；后者是整盘 ext4、无 LVM/RAID，确认适合 `/newdata/docker-data`。同时记录 fstab 仍使用 `/dev/vdb` 和 Docker 需绑定挂载依赖的启动风险。
+- 产品所有者纠正权限前提：服务器不归本人管理，当前没有修改 `fstab` 或安装系统组件的授权。部署计划已撤回系统改动要求，等待服务器管理员明确可提供的运行环境；当前不执行 Docker、挂载、systemd、Nginx 或防火墙变更。
+- 产品所有者进一步明确部署硬约束：任何修改都不能影响服务器本身及其上其他项目。文档已说明 Docker 安装、启动、网络和构建资源不可能在共享操作系统上承诺绝对零影响；无法证明隔离时立即停止，优先等待管理员提供独立虚拟机或逐项批准影响范围与回滚条件。
+- 产品所有者允许继续评估 Docker 安装，但要求所有服务器状态变更逐条审批：执行前提供准确命令、影响、最坏风险、验证与回退；一次只做一个最小变更，执行后报告并停止，不把阶段认可解释为批量命令授权。部署文档与当前计划已同步该变更控制规则。
+- 产品所有者纠正变更控制的尺度：硬约束不是对复合命令或 `curl | sh` 的绝对禁令。来源可信、内容或固定版本可核验、影响与回退已说明且获得明确批准时可以执行；流程应控制风险，但不得因机械拆分阻碍部署推进。
+
+# 2026-08-27：Docker 工具链安装与 `/newdata` 配置完成
+
+- 第一阶段基线确认 OpenCloudOS 9.2、`/newdata` 为 `/dev/vdb` 的 ext4 读写挂载、3000/5432 空闲，Docker/containerd 尚未安装；根盘剩余约 13 GiB，Swap 近满是后续构建风险。
+- Docker 官方便捷脚本静态审查确认不支持 `ID=opencloudos`，因此没有运行其安装路径；转而采用 OpenCloudOS 官方仓库的 `dnf install docker` 路线。
+- DNF 模拟确认原生组合为 Moby 29.3.1、containerd 1.7.29、runc 1.3.3、Compose 5.4.0、Buildx 0.31.1 等 8 个包，无升级、降级、替换、删除或冲突。
+- 首次 RPM 下载误用了 `--alldeps`，额外下载 183 个已安装系统依赖；没有安装。该目录已原地隔离为 `rpms-unexpected-alldeps-20260827`，保留 207 MiB 等待后续明确清理；修正下载恰好取得 8 个 OpenCloudOS 签名通过的 RPM。
+- RPM scriptlet 审查发现 Moby 安装会执行一次 firewalld reload。安装前只读审计确认 runtime/permanent 规则一致，22/80/443/5005/8888 等现有端口均已持久化；实际安装后 nftables 指纹和 SSH、Nginx、Xray、BT-Panel、Python 服务均保持正常。
+- 使用禁用全部仓库的本地 RPM 事务安装 8 个包，安装后约占根盘 477 MiB；Docker、docker.socket、containerd 均保持 inactive/disabled，未创建容器、镜像、volume 或 Docker 网络。
+- 已配置 `/newdata/docker-data` 与 `/newdata/containerd-data`，写入 Docker `data-root` 和 containerd `root`，并为两个 systemd unit 增加 `RequiresMountsFor=/newdata`。`dockerd --validate`、containerd 配置解析、Compose CLI 和 systemd drop-in 离线检查通过。
+- 当前阶段在首次启动前停止。Buildx 可执行但版本输出为 `v0.0.0+unknown`，RPM 版本为 0.31.1；需要在下一阶段实际构建中验证。首次启动、storage/cgroup/iptables 集成、镜像构建和 PostgreSQL 仍未验收。
+
+# 2026-08-27：Docker/containerd 首次启动验收完成
+
+- 评估后删除了唯一无后续用途的 `rpms-unexpected-alldeps-20260827`：删除前验证为精确路径、root:root 0700、非链接且恰好包含 183 个普通 RPM，释放约 207 MiB；正确 8 个 RPM、DNF 缓存、配置备份和 firewalld 审计继续保留至首次部署稳定。
+- containerd 第一次启动时默认 CRI 插件在 `127.0.0.1` 创建随机流式服务端口并报告缺少 CNI；按预设停止条件立即停止 containerd，回滚后端口、网络、防火墙和现有服务恢复，Docker 未在该轮启动。
+- containerd 官方资料确认 Moby 不使用 CRI；备份当前配置后增加 `disabled_plugins = ["io.containerd.grpc.v1.cri"]`。重新启动验证不再出现随机 TCP 监听或 CNI/CRI 告警，containerd 仅使用 Unix socket，数据继续写入 `/newdata/containerd-data`。
+- Docker 首次启动通过：Engine 29.3.1、overlayfs、containerd image store、systemd cgroup v2，`DockerRootDir=/newdata/docker-data`；没有 TCP Docker API、镜像、容器或命名 volume，根盘默认数据路径未使用。
+- Docker 创建预期 `docker0`、`172.17.0.0/16` 路由、firewalld docker zone 和 forwarding policy；public zone 与启动前逐字段一致。SSH、Nginx、Xray、BT-Panel、Python 及 22/80/443/5005/8888 等原有监听均正常，3000/5432 仍空闲。
+- Docker、docker.socket、containerd 当前 active 但 disabled，未设置开机启动。可用内存约 2.1 GiB、Swap 仍近满；下一阶段先创建私有配置并运行 preflight，镜像构建需要单独限制和监控资源。
+
+# 2026-08-27：密码下限调整为 8 位
+
+- 产品所有者明确将应用账号密码下限从 12 改为 8；上限 128、Argon2id 摘要、明文禁止入库和管理员首次登录强制改密均保持不变。
+- 已同步服务端业务校验、注册/改密/管理员重置 API schema、Vue 表单、部署预检、secret 示例和自托管文档，并新增 7 位拒绝、8 位接受的边界测试。
+- 验证通过：身份定向 16 项、全量 23 个文件 96 项服务端测试、严格类型检查、Vue 生产构建、OpenAPI 契约、部署脚本语法和 `git diff --check`。
+- 这批修改尚未提交或推送，服务器仍运行 `95f1bc3`的 12 位旧规则；在新代码提交、推送并由服务器 fast-forward 拉取前，不创建用户选定的 11 位初始密码。

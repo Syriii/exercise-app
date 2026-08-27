@@ -21,6 +21,18 @@ function createService(repository = new MemoryIdentityRepository(), maxAccounts 
 }
 
 describe("IdentityService", () => {
+  it("accepts an eight-character password and rejects seven characters", async () => {
+    const { service } = createService();
+
+    await expect(service.register("eight-ok", "12345678")).resolves.toMatchObject({
+      account: { username: "eight-ok" },
+    });
+    await expect(service.register("seven-no", "1234567")).rejects.toMatchObject({
+      code: "weak_password",
+      statusCode: 400,
+    });
+  });
+
   it("creates the preset admin without retaining the plaintext password", async () => {
     const { repository, service } = createService();
 

@@ -61,8 +61,8 @@ async function submit() {
 
       <form class="access-form" @submit.prevent="submit">
         <label><span>用户名</span><input v-model="username" name="username" autocomplete="username" minlength="3" maxlength="32" required /></label>
-        <label><span>密码</span><input v-model="password" name="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" type="password" :minlength="mode === 'register' ? 12 : 1" maxlength="128" required /></label>
-        <p v-if="mode === 'register'" class="field-note">至少 12 个字符。数据库只保存 Argon2id 密码哈希。</p>
+        <label><span>密码</span><input v-model="password" name="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" type="password" :minlength="mode === 'register' ? 8 : 1" maxlength="128" required /></label>
+        <p v-if="mode === 'register'" class="field-note">至少 8 个字符。数据库只保存 Argon2id 密码哈希。</p>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <button class="action-button action-button--primary" type="submit" :disabled="submitting || (mode === 'register' && !registrationOpen)">
           {{ submitting ? "正在处理…" : mode === "login" ? "登录" : registrationOpen ? "注册" : "注册暂未开放" }}

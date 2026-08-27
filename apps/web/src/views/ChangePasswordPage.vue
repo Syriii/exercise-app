@@ -37,8 +37,8 @@ async function submit() {
       <div class="access-copy"><p class="date-line">账号安全</p><h1 id="password-title">修改密码</h1><p>修改成功后，之前的登录状态都会失效，这台设备会自动换用新会话。</p></div>
       <form class="access-form" @submit.prevent="submit">
         <label><span>当前密码</span><input v-model="currentPassword" type="password" autocomplete="current-password" required /></label>
-        <label><span>新密码</span><input v-model="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /></label>
-        <label><span>再输入一次</span><input v-model="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /></label>
+        <label><span>新密码</span><input v-model="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
+        <label><span>再输入一次</span><input v-model="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <button class="action-button action-button--primary" type="submit" :disabled="submitting">{{ submitting ? "正在保存…" : "保存新密码" }}</button>
       </form>

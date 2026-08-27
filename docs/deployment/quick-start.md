@@ -2,6 +2,8 @@
 
 这份教程只解决一件事：在一台已有公网或局域网 IP 的 Linux 服务器上，把 Exercise App 启动起来，并能用手机通过 `IP + 端口` 访问。完整的安全边界、DeepSeek、备份恢复、升级和故障说明见[完整自托管手册](self-hosting.md)。
 
+> 如果服务器还承载其他项目，先阅读完整手册中的“共享服务器的硬性停止条件”。Docker 安装、启动和镜像构建并非零影响操作；本页代码块只是操作说明，不构成整段执行授权。每条改变服务器状态的命令都要先说明后果、风险、验证和回退方式，获得产品所有者对准确命令的明确批准后才能单独执行。
+
 ## 1. 准备服务器
 
 服务器需要：
@@ -45,7 +47,7 @@ umask 077
 openssl rand -hex 32 | tr -d '\n' > secrets/database_password
 openssl rand -hex 32 | tr -d '\n' > secrets/api_database_password
 openssl rand -hex 32 | tr -d '\n' > secrets/session_secret
-read -rsp '请输入 admin 首次登录密码（至少 12 位）: ' EXERCISE_ADMIN_PASSWORD
+read -rsp '请输入 admin 首次登录密码（至少 8 位）: ' EXERCISE_ADMIN_PASSWORD
 printf '%s' "$EXERCISE_ADMIN_PASSWORD" > secrets/admin_initial_password
 unset EXERCISE_ADMIN_PASSWORD
 printf '\n密码已保存。\n'

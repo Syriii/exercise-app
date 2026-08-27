@@ -34,8 +34,8 @@ function normalizeUsername(username: string): string {
 }
 
 function validatePassword(password: string): void {
-  if (password.length < 12 || password.length > 128) {
-    throw new IdentityError("weak_password", "密码长度需为 12–128 个字符", 400);
+  if (password.length < 8 || password.length > 128) {
+    throw new IdentityError("weak_password", "密码长度需为 8–128 个字符", 400);
   }
 }
 

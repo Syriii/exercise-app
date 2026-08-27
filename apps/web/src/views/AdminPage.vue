@@ -178,7 +178,7 @@ onMounted(load);
         </div>
         <span v-else class="status-chip">当前账号</span>
         <form v-if="passwordResetTargetId === account.id" class="admin-password-reset" @submit.prevent="resetPassword(account)">
-          <label><span>一次性临时密码</span><input v-model="temporaryPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" :aria-label="`为 ${account.username} 设置临时密码`" required /><small>请通过安全渠道交给对方；提交后页面不会保存或再次显示。</small></label>
+          <label><span>一次性临时密码</span><input v-model="temporaryPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" :aria-label="`为 ${account.username} 设置临时密码`" required /><small>请通过安全渠道交给对方；提交后页面不会保存或再次显示。</small></label>
           <div class="form-actions"><button class="action-button action-button--primary" type="submit" :disabled="passwordResetSaving">{{ passwordResetSaving ? '正在设置…' : '确认设置并退出旧会话' }}</button><button class="text-action" type="button" @click="cancelPasswordReset">取消</button></div>
         </form>
       </article>
