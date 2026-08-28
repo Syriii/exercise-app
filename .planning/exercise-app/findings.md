@@ -1448,3 +1448,4 @@
 - PostgreSQL 单服务启动在约 6 秒内 healthy，数据库 volume 初始化约 48.5 MB，容器内存约 55 MiB；Compose secret 以额外只读 bind mount 出现在容器挂载中，后置审计必须把它作为预期安全挂载，不能只允许数据 volume。
 - Compose 本地 file-backed secrets 在目标 Docker/Compose 中保留宿主机 root:root 0600 元数据，非 root 镜像用户不能直接读取；`uid/gid/mode` 对 file bind source 不能作为可移植修复。把宿主机 secret 改为 0644、让应用长期以 root 运行或把 secret 填入环境变量都会削弱当前边界。
 - 当前修复采用短暂 root 入口 + tmpfs 副本 + gosu 降权：原始 bind secret 继续 0600，副本 root:node 0440 且只存在容器 `/tmp`；API/setup/worker 的实际 Node 进程仍为非 root，直接入口同时减少 npm PID 代理。真实验证必须检查副本权限、主进程 UID/GID、无 secret 回显和 setup 幂等边界。
+- root UID 在容器 `cap_drop: ALL` 后不能完成 chown/setgroups/setgid/setuid；入口需要的最小启动能力是 CHOWN、SETGID、SETUID。它们只用于准备 tmpfs secret 并由 gosu 降权，实际 Node 进程必须通过 `/proc/self/status` 验证 `CapEff=0`，同时保持 `no-new-privileges`，不能为方便而恢复默认 capability 集合。

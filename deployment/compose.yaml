@@ -52,6 +52,10 @@ x-application-service: &application-service
     - temporary_media:/app/.runtime/media
   security_opt:
     - no-new-privileges:true
+  cap_add:
+    - CHOWN
+    - SETGID
+    - SETUID
   cap_drop:
     - ALL
   restart: unless-stopped

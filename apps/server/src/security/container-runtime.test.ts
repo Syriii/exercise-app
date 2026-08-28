@@ -23,6 +23,8 @@ describe("container runtime secret boundary", () => {
     expect(entrypoint).not.toContain("printf '%s' \"$source_path\"");
     expect(compose).toContain('command: ["node", "apps/server/dist/entrypoints/setup.js"]');
     expect(compose).toContain('command: ["node", "apps/server/dist/entrypoints/worker.js"]');
+    expect(compose).toContain("cap_add:\n    - CHOWN\n    - SETGID\n    - SETUID\n  cap_drop:\n    - ALL");
+    expect(compose).toContain("no-new-privileges:true");
     expect(preflight).toContain('[ ! -L "$file_path" ]');
   });
 });

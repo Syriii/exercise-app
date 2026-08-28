@@ -954,3 +954,5 @@
 - 失败现场按规则保留：PostgreSQL 仍 running/healthy 且未重启，setup exited 1；新增 temporary_media volume，但 API/worker 不存在，5011/3306 未监听，无新 OOM或既有服务变化。宿主机四个 secret 仍为 root:root 0600。
 - 根因是 Compose file-backed secret 保留宿主机文件权限，而应用镜像固定 `USER node`；preflight 只校验了宿主机权限和 Compose 展开，没有验证运行 UID 的实际可读性。修复不降低宿主机文件权限：runtime 入口以 root 复制允许的 secret 到 `/tmp` tmpfs，设为 root:node 0440，随后用 gosu 立即降权并直接执行 Node 入口。
 - 本地已新增入口脚本、Compose 直接 Node 命令、secret 符号链接拒绝和回归测试；Shell 语法、严格类型检查、24 个文件 97 项服务端测试、生产构建和 OpenAPI 合约均通过。本机无 Docker，真实入口仍需服务器镜像探针验证。
+- 镜像 `exercise-app:8f58e9a` 在服务器单次重建成功，约 111.7 MiB；构建约 100 秒，`/newdata` 增加约 632 MiB、缓存增至约 1.82 GB。PostgreSQL、失败 setup、端口、服务和 OOM 状态保持，旧镜像未删除。
+- 设计探针时发现 Compose `cap_drop: ALL` 同时会阻止 root 入口执行 chown/setgid/setuid。真实探针前补充最小 `CHOWN`、`SETGID`、`SETUID` bootstrap capabilities；gosu 降为 node 后必须验证有效能力为 0，`no-new-privileges` 保留。未在这一缺口修复前运行探针或重试 setup。
