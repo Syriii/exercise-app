@@ -912,3 +912,30 @@
 - 审计保留约 332.5 MB 构建缓存，不执行 prune。项目新增可选 `DEBIAN_MIRROR` build arg，默认保持 Debian 官方源；腾讯云部署示例使用官方公布的 `https://mirrors.cloud.tencent.com/debian`，只改变镜像构建内部的软件源，不修改宿主机或 Docker daemon。
 - 同步更新 `.env.example`、快速部署和完整自托管手册，移除实际 BuildKit 401 的 DaoCloud 推荐示例。静态配置检查、脚本语法、`git diff --check`、严格类型检查、23 个文件 96 项服务端测试、生产构建和 OpenAPI 合约均通过。
 - 上述 8 个项目与规划文件已提交为 `852fe74 fix(deployment): support configurable Debian mirror` 并推送 GitHub `main`；服务器尚未拉取，私有 `.env` 尚未增加 Debian 源覆盖，构建也没有自动重启。
+- 失效的旧远程部署任务已归档，新任务“Exercise App 服务器部署续接”在现有服务器项目目录启动。前置门、fetch 后提交与 8 文件范围门均通过，服务器从 `29f143f` fast-forward 到 `5516fc3`。
+- 后验确认服务器 Git 干净且 HEAD/origin 一致；私有 `.env`、四个 secret、Docker/containerd 配置与运行参数均不变。应用镜像/容器/named volume 仍为 0，BuildKit 缓存仍为 9 条约 332.5 MB，5011、关键服务、监听和 OOM 状态正常；本轮未运行 preflight、构建、镜像拉取或容器操作。
+- 腾讯云 Debian 三个索引只读测速均为 HTTP 200，耗时约 2.15 秒、2.97 秒与 0.37 秒；达到预设 10 秒门限。服务器私有 `.env` 仅新增 `DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian`，同一 inode、root:root 0600；移除新增行后的校验值精确恢复修改前值。
+- preflight 与 verification profile 静态展开通过，api/integration 均取得腾讯云 Debian 源，Node/PostgreSQL 镜像入口不变。筛选报告曾因 Ruby 不存在和 Python f-string 语法错误失败，均只影响报告工具，最终用现有 Python 成功解析，没有安装软件或产生运行时变化。
+- Compose 同时确认应用 build revision 与两个镜像 tag 仍为 `29f143f`，落后于服务器代码 `5516fc3`；本阶段按授权没有修改。后验仍为 0 应用镜像/容器/named volume，9 条约 332.5 MB 缓存、5011、secret、服务和 OOM 状态正常，未执行 build/pull/up。
+- 经单独批准，服务器私有 `.env` 的 `APP_IMAGE_TAG` 与 `APP_BUILD_REVISION` 从 `29f143f` 精确更新为 `5516fc3`；文件保持同一 inode、root:root 0600，反向替换后校验值恢复，证明仅这两行改变。
+- preflight 与 verification profile 静态展开再次通过，API/Integration 镜像分别为 `exercise-app:5516fc3`、`exercise-app-verification:5516fc3`，两个 build revision 均为 `5516fc3`，腾讯云 Debian/Node/PostgreSQL 地址保持不变。
+- 后验仍为 0 应用镜像/容器/named volume，9 条约 332.5 MB BuildKit 缓存、5011、Git、secret、Docker/containerd、关键服务和 OOM 状态正常；没有执行 build、pull、数据库、端口或容器生命周期操作。
+- 经单独批准执行唯一附着式 API build，硬门与 preflight 通过；构建约 8 秒后在 APT 阶段退出 100。原因是 Node slim 基础镜像当前没有可用 CA 证书，无法验证腾讯云 HTTPS 软件源，随后无法定位 `build-essential` 与 `python3`；未进入 npm 或应用编译。
+- 构建失败后未修改 Dockerfile、未降级 HTTP、未重试或清理。目标镜像不存在，BuildKit 缓存仍为 9 条约 332.5 MB；根盘约减少 8.48 MiB、`/newdata` 约减少 0.15 MiB，MemAvailable 约 2130 MiB，Swap 已用约 991 MiB。
+- 后验仍为 0 容器/0 named volume、仅内置网络、5011 空闲、无新 OOM和残留构建进程；Git、`.env`、secret、daemon/systemd 与关键服务不变。下一步需单独批准只读验证并切换腾讯云官方内网 HTTP Debian 源，不能原样重复失败构建。
+- 首次普通 curl 测试腾讯云内网 HTTP 源时，三个请求均连接 loopback 并返回 503，因此按门禁没有修改 `.env`。只读诊断确认这是远程任务进程的 HTTP 代理路径，不是内网源故障。
+- 使用 `--noproxy '*'` 后，目标域名直连 `169.254.0.3` link-local 地址，三个索引均 HTTP 200，耗时约 0.017、0.013、0.080 秒。全过程未改配置、未运行 preflight 或构建，服务器状态不变。
+- Docker 代理只读审计确认默认 CLI config.json 不存在，客户端 `proxies`、daemon HTTP/HTTPS/NoProxy 与 systemd 代理环境全部 unset。所以下次构建 RUN 不会继承 loopback 代理；HTTPS 失败仍归因于 slim 镜像 CA 不可用，HTTP 内网源具备直连条件。
+- 产品所有者批准把私有 `DEBIAN_MIRROR` 切换到腾讯云内网 HTTP 源后，常规等待界面连续返回两个没有正文的 turn；当时按证据门槛停止继续投递，没有把它们误报为执行成功。
+- 随后通过读取归档任务完整记录恢复了被等待界面遗漏的工具结果：`01a0466e-63ad-7b00-8402-46371fa31bc4` 已完成单行替换，`.env` 保持同一 inode、root:root 0600；反向替换校验值精确恢复，证明只修改了 `DEBIAN_MIRROR`，新值为 `http://mirrors.tencentyun.com/debian`。
+- 同一记录确认 preflight 和 verification profile 静态展开通过，api/integration 均取得新 HTTP Debian 源，revision、镜像 tag、腾讯云 Node/PostgreSQL 地址不变；后验仍为 0 应用镜像、0 容器、0 named volume，BuildKit 缓存 9 条约 332.5 MB，5011、Git、secret、Docker 配置、关键服务和 OOM 状态正常，未执行 build/pull/up。
+- 新建的服务器任务再次只读检查到 HTTP 新值存在、HTTPS 旧值不存在，因此按基线不符门禁停止且没有写文件。配置切换阶段据完整审计记录判定为已完成；下一步仅在单独批准后重试 API 构建。
+- 产品所有者随后批准唯一一次 API 构建，但构建前硬门发现 `nginx.service`、`mysqld.service`、`ipmi.service` 为 failed，因此在 preflight 和 build 之前停止；这次构建机会未使用，服务器没有发生修改，Docker 对象、缓存、端口和资源保持基线。
+- 纯只读诊断确认三个 unit 的失败都早于本项目 Docker 安装：nginx unit 于 2026-05-16 失败，但 6 个不在该 unit cgroup 的 Nginx 进程自 2026-08-06 起持续监听 80/443；mysqld 于 2026-06-07 被 OOM kill 后没有进程或 3306 监听；ipmi 在 KVM 主机 2026-05-16 启动时以退出码 1 失败。
+- Docker/containerd 于 2026-08-27 安装启动；已定位的全局/cgroup OOM 均早于 Docker，Docker 启动后的内核 OOM 数为 0。此前构建日志中的 Docker cgroup `oom_kill event` 读取警告不是 OOM 证据。
+- 因此原门禁把历史 failed unit 等同于本项目造成的服务变化，存在误判。下一次若获批准，应固定比较构建前后的实际进程、监听、unit 状态与 Docker 安装后 OOM 增量；不得 reset-failed、启动 MySQL/IPMI、接管 Nginx 或修复其他项目。
+- 产品所有者确认安全规则偏严并批准调整后重试：正式规则改为“历史异常记录为基线和警告，只有本次操作期间的新增异常或既有运行状态变化才阻断”。完整自托管手册已同步该原则，服务器原有 MySQL/IPMI 状态不纳入本项目修复范围。
+- 修正后的硬门、双资源采样和 preflight 通过后，唯一一次 API 构建成功，退出码 0；构建阶段耗时 125 秒，腾讯云内网 HTTP Debian 源完成索引与 83.2 MB 编译依赖下载，最终生成 `exercise-app:5516fc3`，大小约 110.8 MiB。
+- 构建后 `/newdata` 可用空间减少约 961 MiB至约 74.3 GiB，根盘减少约 2 MiB至约 12.0 GiB，MemAvailable 约 2.25 GiB；BuildKit 缓存从 9 条约 332.5 MB 增至 26 条约 1.17 GB，当前不清理。
+- 后验确认 Docker 安装后新增 OOM 为 0，Nginx 进程及 80/443、其他既有监听均未变化，5011/3306 未监听；只有 1 个预期应用镜像，仍为 0 容器、0 named volume、仅内置网络，`/var/lib/docker` 不存在。Git、私有配置元数据、Docker/containerd 配置和历史 failed 状态均未改变。
+- 本阶段没有执行 pull/up/start、migration、数据库或 worker。下一步必须单独批准首次启动及其网络、volume、数据库和端口影响。

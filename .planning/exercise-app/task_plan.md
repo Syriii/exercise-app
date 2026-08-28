@@ -77,9 +77,9 @@
 ## 当前阶段
 
 - **阶段：** 6 — 使用与扩展（正在执行首次真实服务器部署验收）
-- **状态：** 项目级 Debian 软件源参数化已由提交 `852fe74` 推送到 GitHub `main`；默认仍使用 Debian 官方源，腾讯云部署可只在项目私有 `.env` 中切换统一软件源。目标服务器仍停留在 `29f143f`，没有应用镜像、容器或业务 volume，5011 与既有服务保持正常，约 332.5 MB 缓存继续保留
+- **状态：** 目标服务器已成功构建 `exercise-app:5516fc3`，镜像约 110.8 MiB。腾讯云内网 HTTP Debian 源完成索引和 83.2 MB 编译依赖下载，完整构建耗时 125 秒；后验确认无新增 OOM，Nginx 与既有监听未变，5011 仍空闲，0 容器、0 named volume、仅内置网络。应用、PostgreSQL、setup 和 worker 尚未启动
 - **当前产出：** 完整 Web 实现、本地自动化验收、公开仓库提交、快速部署与诊断交接均已完成
-- **下一步：** 经单独批准，让服务器只 fast-forward 拉取 `852fe74`，确认 Git 与私有配置元数据不变；之后再单独批准向私有 `.env` 增加 `DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian` 并运行无副作用 preflight。实际重启构建仍需独立确认并持续监控 Swap、内存、磁盘、5011 和既有服务；不清理现有缓存，不 enable Docker，不修改 Docker daemon、宿主机软件源、`fstab`、挂载、Nginx 或其他项目。
+- **下一步：** 单独审查并批准首次启动命令及影响：创建项目网络和 PostgreSQL/临时媒体 named volume，运行 setup migration 与管理员初始化，再启动 API、worker 和 PostgreSQL，最后执行健康与宿主机后验检查。未经批准不执行 `up`，不开放除 5011 外的端口，不修改 Nginx、防火墙或其他项目。
 
 ## 首次完整提交审查
 
@@ -97,7 +97,7 @@
 |---|---|---|
 | 0. 仓库与主机基线 | 拉取当前部署提交，确认工作区、系统规格、Docker/Compose、端口和已有容器/volume | **已通过：服务器仓库干净同步到 `1bdf535`** |
 | 1. 运行环境、本机配置与预检 | 逐条审查 Docker 软件包、数据目录和服务启动；每项变更后复验宿主机与现有项目，再创建项目私有配置并运行 preflight | **已通过：Docker/Moby 29.3.1、Compose 5.4.0、root 用户级 Buildx 0.31.1、`/newdata` 数据目录、四个私有 secret 与 preflight 均通过；现有服务保持正常** |
-| 2. 首次启动 | 构建镜像、setup migration、API/worker/PostgreSQL 健康检查 | **进行中：版本元数据已修正；首次完整构建因 Debian 官方源极慢且远程平台中断而取消，正在提交项目级腾讯云 Debian 源参数化后再受控重试** |
+| 2. 首次启动 | 构建镜像、setup migration、API/worker/PostgreSQL 健康检查 | **进行中：API 镜像 `exercise-app:5516fc3` 已成功构建；容器、数据库、迁移和健康检查尚未启动** |
 | 3. 数据与故障验收 | 测试数据库、RLS、事务、worker 崩溃恢复、volume 持久化、备份恢复 | 待执行 |
 | 4. 模型与访问 | 真实 DeepSeek 请求、临时图片删除、手机 IP+端口访问 | 待真实 Key 与前述阶段通过 |
 

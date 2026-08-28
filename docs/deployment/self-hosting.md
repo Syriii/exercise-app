@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | Web 长期运行部署基线；OpenCloudOS 9 首台主机已完成 Docker 安装、`/newdata` 配置与首次启动验收，等待应用预检和构建 |
-| 最后更新 | 2026-08-27 |
+| 状态 | Web 长期运行部署基线；OpenCloudOS 9 首台主机已完成容器环境、私有配置和 API 镜像构建，等待首次启动 |
+| 最后更新 | 2026-08-28 |
 | 适用范围 | 单台长期运行服务器、Docker Compose、IP + 端口访问 |
 
 ## 0. 共享服务器的硬性停止条件
@@ -33,7 +33,17 @@ Docker 安装和启动并不是零影响操作：它会安装系统软件和 sys
 5. 执行后用于确认无异常的只读检查；
 6. 可执行的回退步骤，以及回退本身的风险。
 
-执行后必须原样报告退出状态、实际变化和前后检查结果，不自动进入下一条修改命令。任何端口冲突、意外软件包变更、网络规则变化、资源余量不足、现有服务异常、实际结果超出批准范围或回退条件不明确都属于停止条件。
+执行后必须原样报告退出状态、实际变化和前后检查结果，不自动进入下一条修改命令。任何端口冲突、意外软件包变更、网络规则变化、资源余量不足、现有服务出现新的异常、实际结果超出批准范围或回退条件不明确都属于停止条件。
+
+安全门禁比较的是本次操作带来的变化，不要求共享服务器在操作前不存在任何历史异常。执行前已经存在且与本项目无关的 failed unit、停用服务或历史 OOM 应记录为基线和警告；只要目标操作不依赖它们，就不单独阻断。不得为了通过门禁而擅自 `reset-failed`、启动、停止、接管或修复这些服务。
+
+构建和启动前后的判断顺序如下：
+
+1. 先记录实际进程、监听端口、unit 状态、内核 OOM 计数、Docker 对象和资源余量；
+2. 把操作前已经存在的异常与本次新增异常分开；
+3. 对现有服务以实际进程和监听是否保持为主，systemd 状态作为辅助证据；
+4. 只有出现新增 OOM、现有进程或监听变化、意外 Docker 对象、端口占用、资源越过批准门槛或其他可归因变化时才中止；
+5. 历史异常是否需要修复属于服务器管理员的独立事项，不与 Exercise App 部署捆绑处理。
 
 ## 1. 部署后会运行什么
 
@@ -141,10 +151,10 @@ docker compose logs --tail=100 api worker postgres
 ```dotenv
 NODE_BASE_IMAGE=mirror.ccs.tencentyun.com/library/node:24.19.0-bookworm-slim
 POSTGRES_IMAGE=mirror.ccs.tencentyun.com/library/postgres:18.6-bookworm
-DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian
+DEBIAN_MIRROR=http://mirrors.tencentyun.com/debian
 ```
 
-`mirrors.cloud.tencent.com` 是腾讯云公布的公网与内网统一域名；云服务器位于腾讯云 VPC 且保留默认 DNS 时会优先走内网链路。切换前仍应使用不会下载镜像层的 manifest 检查确认固定容器标签存在并包含目标架构；切换后重新运行 `./scripts/preflight.sh`。镜像代理存在缓存、白名单和限流边界，不能把一次成功当作永久保证。生产环境更稳定的做法是把经过验证的固定镜像同步到自己控制的容器仓库，再把镜像变量指向自有地址。Dockerfile 使用官方支持的 `ARG` 参数化 `FROM` 与构建软件源，没有设置变量时仍回到原始上游：[Dockerfile `ARG` 与 `FROM`](https://docs.docker.com/reference/dockerfile/#understand-how-arg-and-from-interact)、[Compose build args](https://docs.docker.com/reference/compose-file/build/#args)、[腾讯云软件源](https://cloud.tencent.com/document/product/213/8623)。
+`mirrors.tencentyun.com` 是腾讯云内网软件源，只用于能够访问该内网地址的腾讯云服务器。这里使用 HTTP 是为了让尚未安装 CA 证书的 slim 基础镜像完成首次 APT 安装；APT 仍会验证签名的 Release 元数据，不得设置 `trusted=yes`、`allow-insecure` 或其他关闭认证的选项。切换前仍应使用不会下载镜像层的 manifest 检查确认固定容器标签存在并包含目标架构；切换后重新运行 `./scripts/preflight.sh`。镜像代理存在缓存、白名单和限流边界，不能把一次成功当作永久保证。生产环境更稳定的做法是把经过验证的固定镜像同步到自己控制的容器仓库，再把镜像变量指向自有地址。Dockerfile 使用官方支持的 `ARG` 参数化 `FROM` 与构建软件源，没有设置变量时仍回到原始上游：[Dockerfile `ARG` 与 `FROM`](https://docs.docker.com/reference/dockerfile/#understand-how-arg-and-from-interact)、[Compose build args](https://docs.docker.com/reference/compose-file/build/#args)、[腾讯云软件源](https://cloud.tencent.com/document/product/213/8623)、[Debian `apt-secure`](https://manpages.debian.org/bookworm/apt/apt-secure.8.en.html)。
 
 上面的基础命令不会挂载 DeepSeek Key，训练和手工饮食照常可用，拍照入口会明确提示“尚未配置”。启用拍照估餐时，确认 `secrets/deepseek_api_key` 已写入真实 Key，然后在所有 Compose 命令中同时加入覆盖文件：
 

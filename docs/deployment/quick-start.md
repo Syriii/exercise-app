@@ -69,8 +69,10 @@ COOKIE_SECURE=false
 ```dotenv
 NODE_BASE_IMAGE=mirror.ccs.tencentyun.com/library/node:24.19.0-bookworm-slim
 POSTGRES_IMAGE=mirror.ccs.tencentyun.com/library/postgres:18.6-bookworm
-DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian
+DEBIAN_MIRROR=http://mirrors.tencentyun.com/debian
 ```
+
+`mirrors.tencentyun.com` 是腾讯云内网软件源，只适用于能够访问该内网地址的腾讯云服务器。这里使用 HTTP 是为了让尚未安装 CA 证书的 slim 基础镜像完成首次 APT 安装；APT 仍会按 Debian `apt-secure` 规则验证签名的 Release 元数据，不得增加 `trusted=yes`、`allow-insecure` 或其他关闭认证的选项。
 
 这些变量只影响本项目的镜像与镜像内部的软件包下载，不修改宿主机软件源或 Docker daemon，也不需要重启 Docker。镜像代理可能限流或缓存旧标签，使用前应先检查 manifest；长期生产部署更适合把固定镜像同步到自己控制的容器仓库。恢复默认值时删除这些覆盖项，或改回 `.env.example` 中的值。
 

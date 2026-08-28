@@ -1429,4 +1429,14 @@
 - 远程 Codex 平台后端 403 会使附着于该任务的长时间构建客户端上下文被取消；Docker 日志记录 BuildKit `Solve` 为 `context canceled`。这不是服务器 OOM或原有服务故障，但说明不能让慢速上游把单次受控构建拖到平台会话极限。
 - 中断后审计确认目标镜像不存在、0 容器、0 named volume、5011 空闲、关键服务 active、无新 OOM；约 332.5 MB BuildKit 缓存保留，`/var/lib/docker` 仍不存在。
 - 腾讯云官方说明 `mirrors.cloud.tencent.com` 是公网与内网统一域名，腾讯云 VPC 默认 DNS 会优先解析到内网链路。最小方案是在 Dockerfile 与 Compose 增加项目级 `DEBIAN_MIRROR` build arg，默认仍为 `http://deb.debian.org/debian`；目标服务器只在私有 `.env` 覆盖，不修改宿主机 `/etc/apt` 或 Docker daemon。
-- 本机普通 SSH 进程没有远程项目所用密钥，直接只读连接被公钥认证拒绝；后续服务器操作仍必须通过 Codex 远程项目。远程任务在审计后又出现空 turn，实际腾讯云 Debian 源速度仍需在下一次可用的远程任务中先只读验证。
+- 本机普通 SSH 进程没有远程项目所用密钥，直接只读连接被公钥认证拒绝；后续服务器操作仍必须通过 Codex 远程项目。常规等待界面曾遗漏归档任务的工具结果，但读取完整任务记录后确认腾讯云内网 HTTP 源配置已经完成并通过静态验证，不能再把该步骤当作未知状态。
+- `node:24.19.0-bookworm-slim` 构建阶段在切换到 `https://mirrors.cloud.tencent.com/debian` 后约 8 秒失败：基础镜像当前没有可用 CA 证书，APT 无法验证 HTTPS 证书，索引失败后无法定位 `build-essential` 与 `python3`。这属于 HTTPS 自举顺序问题，不是镜像站不可达或仓库缺包。
+- 腾讯云官方文档给出的内网软件源地址是 `http://mirrors.tencentyun.com`，并说明腾讯云 VPC 可使用内网地址；腾讯云常用内部服务端口文档也登记该域名使用 80 端口。对当前基础镜像，项目级 HTTP 内网源可避免在安装 CA 之前依赖 CA。
+- Debian `apt-secure` 默认验证仓库签名的 Release 信息，并拒绝未认证仓库；使用 HTTP 不等于关闭仓库认证。下一方案不得设置 `allow-insecure`、`trusted=yes` 或跳过签名验证，只替换传输地址并由 APT 继续执行 Debian archive 签名校验。
+- 目标主机进程环境存在 loopback HTTP/HTTPS 与 SOCKS 代理，但 Docker 默认客户端 config.json 不存在，Docker CLI `proxies`、daemon 代理字段和 systemd unit 代理 Environment 均未配置。按 Docker 官方规则，当前 `docker compose build` 不会自动把该进程代理注入 RUN 阶段。
+- `mirrors.tencentyun.com` 经 NSS/DNS 解析到 `169.254.0.3` link-local 地址。普通 curl 因目标域名不在进程 `NO_PROXY` 中而走 loopback 代理并收到 503；显式 `--noproxy '*'` 后三个 Bookworm InRelease 均直接返回 200，耗时约 0.017、0.013 与 0.080 秒。构建没有代理注入，因此 HTTP 内网源会走该直连路径。
+- 归档任务完整执行记录证明服务器私有 `.env` 已从 HTTPS 统一域名精确切换到 `http://mirrors.tencentyun.com/debian`：文件 inode、root:root 0600、其他配置和反向校验均保持；preflight 与 Compose verification 静态展开通过。该结论来自实际修改和后验审计，不再只是网络可行性推断。
+- 使用该 HTTP 内网源的真实 API 镜像构建已成功：APT 索引、83.2 MB 编译依赖、npm、应用编译和镜像导出均完成，生成约 110.8 MiB 的 `exercise-app:5516fc3`。这证明当前目标主机的项目级源配置可用，但不代表该内网域名适用于腾讯云之外的主机。
+- 首次获批重试没有进入 build：硬门发现三个既有 unit 为 failed 后在 preflight 前停止。只读时间线证明这些状态分别形成于 2026-05 至 2026-06，早于 2026-08-27 的 Docker 安装，不能用 unit 的静态 failed 状态判断本项目是否影响服务器。
+- 当前 Nginx 真实运行并监听 80/443，但不在旧 `nginx.service` cgroup；mysqld 没有进程或 3306 监听，属于历史 OOM 后的真实停止状态；IPMI 在 KVM 虚拟机启动时退出，是否需要它不属于本项目判断范围。后续门禁必须保留这些既有状态并比较增量，不能擅自 reset、启动或接管。
+- 目标服务器最近两次已定位 OOM 都早于 Docker；Docker 启动后内核 OOM 数为 0。后续构建应以“新增 OOM/killed”作为停止条件，不能把 Docker 清理 cgroup 后读取 `oom_kill event` 文件失败误判为发生 OOM。
