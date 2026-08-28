@@ -64,9 +64,17 @@ esac
 [ "$worker_age" -le "$maximum_worker_age" ] || fail "worker heartbeat is stale (${worker_age}s)"
 
 log "checking private service ports"
-postgres_port=$(compose port postgres 5432 2>/dev/null || true)
+published_container_port() {
+  service=$1
+  container_port=$2
+  container_id=$(compose ps -q "$service")
+  [ -n "$container_id" ] || fail "$service container is missing"
+  docker container port "$container_id" "$container_port/tcp" 2>/dev/null || true
+}
+
+postgres_port=$(published_container_port postgres 5432)
 [ -z "$postgres_port" ] || fail "PostgreSQL is unexpectedly published at $postgres_port"
-worker_port=$(compose port worker 3000 2>/dev/null || true)
+worker_port=$(published_container_port worker 3000)
 [ -z "$worker_port" ] || fail "worker is unexpectedly published at $worker_port"
 
 log "checking temporary-media volume write access"

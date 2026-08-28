@@ -967,3 +967,8 @@
 - 修正替身类型后服务端严格类型检查通过；定向测试 3 项中 2 项通过，唯一失败是事务测试断言观察了已被生产包装替换的 `client.query`，Vitest 正确指出它不再是 spy。测试改为保留并断言原始 query spy 的调用顺序，不改变生产代码或预期行为。
 - 定向修复验证最终通过：服务端严格类型检查与 3 项连接池/容器运行时测试通过。随后全仓库类型检查、25 个文件 99 项服务端测试、生产构建和 OpenAPI 合约全部通过；Web 构建仍为 51 个模块，未改变 API 契约。
 - 为停止持续连接泄漏，只人工停止 API 一次；停止时旧进程因连接池卡死未能在 30 秒内优雅退出，最终 exited 137，但 Docker 安装后 OOM 仍为 0。人工停止后 restart count 固定、5011 释放；PostgreSQL/setup、两个 volume、network、secret 元数据、Nginx 和资源基线均保持。
+- 修复提交 `adf00b0` 已推送；服务器只执行一次 fast-forward 并精确更新两个私有版本键，preflight 与 Compose 定向检查通过。旧 API 仍 stopped，PostgreSQL/setup/worker 与宿主机基线不变，新镜像尚不存在。
+- 随后的构建回合、简化后的构建回合和不执行命令的状态探测连续三次被同一远程任务空回收，均没有 user/agent/command item，也没有服务器状态变化。这属于远程任务通道失效；按三次失败规则停止重复投递，等待明确授权后归档并换新远程任务。
+- 按产品所有者此前对失效远程任务的处理授权归档旧任务并创建续接 4；新任务发现 `adf00b0` 已在空回合窗口内实际构建。镜像时间、大小、入口、healthcheck、Web revision 与约 650 MB cache 增量一致；无网络/挂载的非 root 隔离探针完成 16 次 callback query 且 16 次 release，证明镜像内容为修复版本。
+- API 只执行一次 Compose 替换后 healthy/restart 0；live/ready 首次 200，8 并行+8 连续 readiness 全通过，70 秒后最近 5 次 health 均 exit 0、无 timeout。Worker 随后只启动一次，Node PID1、UID/GID1000、CapEff0、NoNewPrivs1、无端口、ready日志与首次 heartbeat 均通过。
+- smoke 只执行一次并通过容器、live/ready、4表、Argon2id约束、受限角色、32 RLS、secret隔离与heartbeat，随后在私有端口检查停止。Compose 5.4.0 的 `compose port postgres 5432` 对未发布端口返回 `invalid IP:0`；Docker PortBindings为空、`docker container port` 0行且宿主机3306无监听，属于脚本兼容误报。临时媒体探针尚未执行。

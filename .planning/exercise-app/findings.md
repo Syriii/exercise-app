@@ -1454,3 +1454,6 @@
 - 后续只读诊断修正了上一条的“没有应用退出”判断：API 的 PID 1 确实曾以退出码 1 结束并由 `unless-stopped` 自动拉起一次；Docker 不会仅因 unhealthy 自动重启容器。重启后的 PID 1 是预期 Node API，UID/GID 1000、CapEff=0、NoNewPrivs=1，容器内重新出现 3000 监听。
 - healthcheck 每次恰好运行到 5 秒 timeout，而镜像命令的成功分支只检查 `r.ok`、没有显式 `process.exit(0)`。Node 内置 fetch 的连接池可继续保持事件循环，因而“HTTP 已成功但探针进程不退出”是当前最强候选；应先用可单测的探针函数或显式成功退出修复，不应放宽健康超时。主进程退出码 1 仍需单独用生命周期和应用代码证据解释。
 - 最终只读证据确认 readiness 的 31 个请求都有进入日志但没有完成日志，容器内 3000 和宿主机 5011 映射正常；`pg.Pool.query` 源码明确通过 `this.connect(callback)` 取连接，而项目包装忽略 callback。每 30 秒泄漏 1 个连接、池上限 10、连接等待超时 5 秒，与约 5 分 36 秒后的退出码 1、无业务异常日志和自动拉起完整吻合，因此连接池契约缺失为高置信根因；显式 healthcheck 退出仍是必须单独修复的次要缺陷。
+- 远程任务变为 `notLoaded` 后，连续两个构建指令与一个无命令状态探测都产生 completed 但 items 为空的回合；这证明问题位于任务执行通道，而不是 Docker/build。服务器在最后一个有证据的回合仍为 `adf00b0`、preflight 通过、API stopped、5011 空闲、新镜像不存在；不得把空回合当成构建尝试或构建失败。
+- 后续镜像创建时间、Docker缓存和磁盘增量证明第一个空回合实际完成了 `adf00b0` 构建，只是任务记录丢失；因此“空回合没有服务器变化”这一推断被更强运行时证据修正。门禁因镜像已存在而停止重复构建，随后通过隔离行为探针确认镜像真实性。
+- Docker Compose 5.4.0 的 `compose port` 可对未发布端口输出非空占位 `invalid IP:0`，不能再用“输出非空”判断私有服务是否发布。运行态应查询具体容器的 `docker container port <id> <port>/tcp`，并以 PortBindings/宿主机监听作为后验；当前 PostgreSQL 与 Worker 实际均未发布端口。
