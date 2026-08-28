@@ -10,7 +10,7 @@ ENV VITE_APP_BUILD_REVISION=$APP_BUILD_REVISION
 
 RUN sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR%/}|g" /etc/apt/sources.list.d/debian.sources \
   && apt-get update \
-  && apt-get install -y --no-install-recommends build-essential python3 \
+  && apt-get install -y --no-install-recommends build-essential gosu python3 \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -47,14 +47,19 @@ COPY --from=production-dependencies /app/apps/server/dist apps/server/dist
 COPY --from=production-dependencies /app/apps/server/drizzle apps/server/drizzle
 COPY --from=production-dependencies /app/apps/web/package.json apps/web/package.json
 COPY --from=production-dependencies /app/apps/web/dist apps/web/dist
+COPY --from=build /usr/sbin/gosu /usr/local/bin/gosu
+COPY deployment/container-entrypoint.sh /usr/local/bin/exercise-app-entrypoint
 
 RUN mkdir -p /app/.runtime/media \
-  && chown -R node:node /app/.runtime
+  && chown -R node:node /app/.runtime \
+  && chmod 0755 /usr/local/bin/exercise-app-entrypoint \
+  && /usr/local/bin/gosu node:node true
 
-USER node
+USER root
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/v1/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+  CMD ["/usr/local/bin/gosu", "node:node", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
-CMD ["npm", "run", "start", "--workspace", "@exercise-app/server"]
+ENTRYPOINT ["/usr/local/bin/exercise-app-entrypoint"]
+CMD ["node", "apps/server/dist/entrypoints/api.js"]

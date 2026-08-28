@@ -77,9 +77,9 @@
 ## 当前阶段
 
 - **阶段：** 6 — 使用与扩展（正在执行首次真实服务器部署验收）
-- **状态：** 目标服务器已成功构建 `exercise-app:5516fc3`，镜像约 110.8 MiB。腾讯云内网 HTTP Debian 源完成索引和 83.2 MB 编译依赖下载，完整构建耗时 125 秒；后验确认无新增 OOM，Nginx 与既有监听未变，5011 仍空闲，0 容器、0 named volume、仅内置网络。应用、PostgreSQL、setup 和 worker 尚未启动
+- **状态：** PostgreSQL 已 running/healthy。首次 setup 单次执行在任何数据库连接或 migration 之前失败：非 root `node` 无法读取 Compose 以宿主机 `root:root 0600` 原样挂载的 secret；退出码 1，现场已保留，数据库仍为空且健康，API/worker 未启动。正在修复容器 secret 降权入口，宿主机 secret 权限不降低
 - **当前产出：** 完整 Web 实现、本地自动化验收、公开仓库提交、快速部署与诊断交接均已完成
-- **下一步：** 单独审查并批准首次启动命令及影响：创建项目网络和 PostgreSQL/临时媒体 named volume，运行 setup migration 与管理员初始化，再启动 API、worker 和 PostgreSQL，最后执行健康与宿主机后验检查。未经批准不执行 `up`，不开放除 5011 外的端口，不修改 Nginx、防火墙或其他项目。
+- **下一步：** 完成容器 secret 入口的本地验证、提交和推送；服务器 fast-forward 后更新镜像版本并重建应用镜像。先用不连接数据库的容器探针确认 secret 临时副本可由 node 读取且主进程 UID/GID 已降权，再删除失败的 setup 容器并重新执行一次 setup。不得在修复验证前重跑 migration。
 
 ## 首次完整提交审查
 

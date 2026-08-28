@@ -76,7 +76,7 @@ services:
 
   setup:
     <<: *application-service
-    command: ["npm", "run", "db:setup:prod", "--workspace", "@exercise-app/server"]
+    command: ["node", "apps/server/dist/entrypoints/setup.js"]
     healthcheck:
       disable: true
     environment:
@@ -112,7 +112,7 @@ services:
 
   worker:
     <<: *application-service
-    command: ["npm", "run", "start:worker", "--workspace", "@exercise-app/server"]
+    command: ["node", "apps/server/dist/entrypoints/worker.js"]
     healthcheck:
       disable: true
     secrets:

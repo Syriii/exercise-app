@@ -104,6 +104,8 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 
 可以用系统密码管理器或密码生成器创建随机值。不要把真实 secret 粘贴进 `.env`、Compose 文件、Issue 或 Git 提交。
 
+真实 secret 保持宿主机所有者私有的 `0600`，不需要为了非 root 容器改成全局可读。应用镜像的最小入口会在容器启动时把已挂载 secret 复制到 `/tmp` 的内存文件系统，副本为 `root:node 0440`，随后立即降权为 `node` 执行 API、setup 或 worker；secret 不进入镜像层、Docker 环境变量或日志。预检也会拒绝符号链接形式的 secret 文件。
+
 `.env` 中最常调整的是：
 
 - `APP_PORT`：服务器对外端口，例如 `3000`；访问地址为 `http://服务器IP:APP_PORT`。

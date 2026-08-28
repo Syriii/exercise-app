@@ -939,3 +939,18 @@
 - 构建后 `/newdata` 可用空间减少约 961 MiB至约 74.3 GiB，根盘减少约 2 MiB至约 12.0 GiB，MemAvailable 约 2.25 GiB；BuildKit 缓存从 9 条约 332.5 MB 增至 26 条约 1.17 GB，当前不清理。
 - 后验确认 Docker 安装后新增 OOM 为 0，Nginx 进程及 80/443、其他既有监听均未变化，5011/3306 未监听；只有 1 个预期应用镜像，仍为 0 容器、0 named volume、仅内置网络，`/var/lib/docker` 不存在。Git、私有配置元数据、Docker/containerd 配置和历史 failed 状态均未改变。
 - 本阶段没有执行 pull/up/start、migration、数据库或 worker。下一步必须单独批准首次启动及其网络、volume、数据库和端口影响。
+- 开始首次启动准备时，现有远程任务连续两轮在审查命令执行前后遭遇 Codex 后端 `403`。读取完整任务记录确认它只读取了规划技能说明，没有执行 PostgreSQL manifest、Compose 启动或任何服务器状态变更；不能把该轮视为已完成启动审查。
+- 同一远程执行通道连续两次系统错误后停止继续投递。下一步需要归档该任务并创建同一服务器项目的新任务；新任务只读确认镜像、PostgreSQL 下载量、Compose 对象和分步启动语义后，再申请任何 pull/up 授权。
+- 产品所有者批准后，故障任务已归档并在同一服务器项目、同一工作目录创建替代任务；没有移动目录、复制仓库或修改服务器状态。新任务首次门禁错误地把已废弃 HTTPS Debian 源当成基线，主任务用已经成功构建验证的 `http://mirrors.tencentyun.com/debian` 纠正后继续，全程仍为只读。
+- 首次启动审查确认 PostgreSQL 镜像本地不存在；腾讯云内网 registry 的 linux/amd64 manifest 可直连访问，13 个 gzip layer 合计约 149.96 MiB，manifest 无法可靠给出解压后总量。远程任务进程代理会导致 TLS EOF，显式绕过后约 1 秒成功；真实 pull 若遇同类错误必须停止，不修改 Docker daemon 或代理配置。
+- Compose project 为 `exercise-app`；默认会创建 `exercise-app_default`、`exercise-app_postgres_data` 和 `exercise-app_temporary_media`。默认依赖顺序为 PostgreSQL healthy → setup 成功退出 → API/worker；integration profile 不参与。5011 未限定 host IP，启动 API 后会发布到宿主机全部接口。
+- `up -d --no-build` 不会重建应用镜像，但会拉取缺失的 PostgreSQL 镜像；setup 失败时 PostgreSQL 保持运行、API/worker 不启动，再次整组 `up` 可能重新运行 setup。为保留失败现场并防止重复 migration，选择逐步批准：pull postgres → 单独启动并等待 PostgreSQL → 防重复门禁后单次 setup → `--no-deps` 启动 API → `--no-deps` 启动 worker。
+- 产品所有者把“完成首次启动并通过健康检查”设为持续目标，仍保留每一步的增量门禁、停止和失败现场规则。第 1 步只执行一次 `docker compose ... pull --policy missing postgres`，约 11.72 秒成功，无自动重试。
+- 拉取后新增腾讯云 PostgreSQL 18.6 Bookworm linux/amd64 镜像，镜像大小约 150 MiB；`/newdata` 可用空间减少约 492.6 MiB，根盘仅减少约 0.8 MiB，MemAvailable 约减少 9–10 MiB。仍为 0 容器、0 named volume和内置网络，5011/3306 未监听，Docker 安装后新增 OOM 为 0，Nginx 与既有服务保持。
+- 持续目标第 2 步只执行一次 PostgreSQL `up`，约 6.31 秒成功：`exercise-app-postgres-1` running/healthy，failing streak 0、重启 0，restart policy 为 unless-stopped；约使用 55 MiB 内存、0.03% CPU。
+- 本步只创建 `exercise-app_default`、`exercise-app_postgres_data` 和 PostgreSQL 容器。数据库 volume 当前约 48.5 MB，并有预期只读密码 secret；没有创建 temporary_media、setup/API/worker 容器，也没有宿主机端口绑定。
+- `/newdata` 因初始化数据库减少约 46.45 MiB，MemAvailable 约减少 27 MiB；5011/3306 未监听，Nginx 与全部既有 TCP 监听哈希保持，Docker 安装后新增 OOM 为 0。setup 前只读门禁随后通过。
+- 持续目标第 3 步通过防重复门禁后只执行一次 setup，但约 2.96 秒以退出码 1 失败：`node` 用户无法读取 `/run/secrets/session_secret`。错误发生在 `loadConfig()`，早于数据库连接，因此 19 个业务 migration、pg-boss migration、数据库角色/RLS 和 admin 初始化均未执行。
+- 失败现场按规则保留：PostgreSQL 仍 running/healthy 且未重启，setup exited 1；新增 temporary_media volume，但 API/worker 不存在，5011/3306 未监听，无新 OOM或既有服务变化。宿主机四个 secret 仍为 root:root 0600。
+- 根因是 Compose file-backed secret 保留宿主机文件权限，而应用镜像固定 `USER node`；preflight 只校验了宿主机权限和 Compose 展开，没有验证运行 UID 的实际可读性。修复不降低宿主机文件权限：runtime 入口以 root 复制允许的 secret 到 `/tmp` tmpfs，设为 root:node 0440，随后用 gosu 立即降权并直接执行 Node 入口。
+- 本地已新增入口脚本、Compose 直接 Node 命令、secret 符号链接拒绝和回归测试；Shell 语法、严格类型检查、24 个文件 97 项服务端测试、生产构建和 OpenAPI 合约均通过。本机无 Docker，真实入口仍需服务器镜像探针验证。

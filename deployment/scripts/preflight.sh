@@ -24,6 +24,7 @@ require_private_file() {
   label=$2
 
   [ -f "$file_path" ] || fail "$label is missing: $file_path"
+  [ ! -L "$file_path" ] || fail "$label cannot be a symbolic link"
   file_mode=$(stat -c '%a' "$file_path")
   case "$file_mode" in
     400|600) ;;

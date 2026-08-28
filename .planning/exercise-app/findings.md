@@ -1440,3 +1440,11 @@
 - 首次获批重试没有进入 build：硬门发现三个既有 unit 为 failed 后在 preflight 前停止。只读时间线证明这些状态分别形成于 2026-05 至 2026-06，早于 2026-08-27 的 Docker 安装，不能用 unit 的静态 failed 状态判断本项目是否影响服务器。
 - 当前 Nginx 真实运行并监听 80/443，但不在旧 `nginx.service` cgroup；mysqld 没有进程或 3306 监听，属于历史 OOM 后的真实停止状态；IPMI 在 KVM 虚拟机启动时退出，是否需要它不属于本项目判断范围。后续门禁必须保留这些既有状态并比较增量，不能擅自 reset、启动或接管。
 - 目标服务器最近两次已定位 OOM 都早于 Docker；Docker 启动后内核 OOM 数为 0。后续构建应以“新增 OOM/killed”作为停止条件，不能把 Docker 清理 cgroup 后读取 `oom_kill event` 文件失败误判为发生 OOM。
+- 首次启动只读审查连续两次被远程 Codex 后端 `403` 中断；完整任务记录显示唯一完成的命令是读取规划技能说明，没有 manifest、Compose 或服务器状态查询结果。该失败属于远程执行通道，不是目标服务器或 Docker 错误，也没有造成部分 pull/up。
+- 替代远程任务确认腾讯云 PostgreSQL `linux/amd64` 子 manifest 可通过内网直连读取，压缩层合计约 149.96 MiB；manifest 不携带可靠的解压尺寸。进程级代理会让该内网 registry 出现 TLS EOF，而直连正常；项目后续不得为此修改共享 Docker daemon 代理。
+- Compose 5.4.0 的 `--no-build` 只禁止构建，不禁止拉取缺失镜像。完整 `up` 虽能按 healthy/completed 依赖排序，但 setup 失败后盲目重跑可能再次执行 migration；首次部署采用明确的一次 setup 和后续 `--no-deps` 启动，更容易审计和保留失败现场。
+- `5011:3000` 当前未指定 host IP，因此 API 启动后会绑定全部宿主机接口；这符合已确认的 IP+端口访问目标，但启动批准必须明确其网络暴露影响。PostgreSQL 和 worker 没有宿主机端口。
+- PostgreSQL 镜像实际拉取成功且只执行一次，约 150 MiB 镜像最终占用使 `/newdata` 减少约 492.6 MiB；说明 manifest 压缩层总量不能替代本地 content store 与解压/快照实际占用评估。拉取没有创建容器、volume 或网络，也没有触发进程代理 TLS 问题。
+- PostgreSQL 单服务启动在约 6 秒内 healthy，数据库 volume 初始化约 48.5 MB，容器内存约 55 MiB；Compose secret 以额外只读 bind mount 出现在容器挂载中，后置审计必须把它作为预期安全挂载，不能只允许数据 volume。
+- Compose 本地 file-backed secrets 在目标 Docker/Compose 中保留宿主机 root:root 0600 元数据，非 root 镜像用户不能直接读取；`uid/gid/mode` 对 file bind source 不能作为可移植修复。把宿主机 secret 改为 0644、让应用长期以 root 运行或把 secret 填入环境变量都会削弱当前边界。
+- 当前修复采用短暂 root 入口 + tmpfs 副本 + gosu 降权：原始 bind secret 继续 0600，副本 root:node 0440 且只存在容器 `/tmp`；API/setup/worker 的实际 Node 进程仍为非 root，直接入口同时减少 npm PID 代理。真实验证必须检查副本权限、主进程 UID/GID、无 secret 回显和 setup 幂等边界。
