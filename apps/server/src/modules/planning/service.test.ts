@@ -81,6 +81,18 @@ describe("PlanningService", () => {
     expect(first.inputSnapshot.strategy.macroPreference).toBe("balanced");
   });
 
+  it("coalesces concurrent requests for an unchanged daily reference", async () => {
+    const service = new PlanningService(new MemoryPlanningRepository());
+
+    const references = await Promise.all([
+      service.getDailyReference("user-a", "2026-08-28", "Asia/Shanghai"),
+      service.getDailyReference("user-a", "2026-08-28", "Asia/Shanghai"),
+    ]);
+
+    expect(references[0]).toMatchObject({ revision: 1, result: { status: "needs_profile" } });
+    expect(references[1]).toMatchObject({ id: references[0].id, revision: 1 });
+  });
+
   it("retains the old value when a measurement is corrected and isolates accounts", async () => {
     const service = new PlanningService(new MemoryPlanningRepository());
     const measurement = await service.createMeasurement("user-a", {

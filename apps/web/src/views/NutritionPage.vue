@@ -5,9 +5,9 @@ import { useRoute, useRouter } from "vue-router";
 import { ApiError } from "../api/client";
 import { nutritionApi, type ContributionInput, type DietPlan, type DietPlanInput, type FoodSearchResult, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary, type PersonalFoodTemplate } from "../api/nutrition";
 import { planningApi, type DailyPlanningReference } from "../api/planning";
-import { navigationItems, type AppSection } from "../app/modules";
+import AppShell from "../app/AppShell.vue";
+import { type AppSection } from "../app/modules";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
-import { useSessionStore } from "../stores/session";
 
 interface ContributionForm { mode: MealContributionMode; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; saveAsTemplate: boolean; }
 interface ImageAdoptionForm { mode: "whole_meal" | "supplement"; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; deleteOriginal: boolean; }
@@ -16,10 +16,10 @@ const emptyContribution = (): ContributionForm => ({ mode: "item", label: "", po
 
 const route = useRoute();
 const router = useRouter();
-const sessionStore = useSessionStore();
 const selectedDate = ref(typeof route.query.date === "string" ? route.query.date : localDate(new Date()));
 const loading = ref(true);
 const saving = ref(false);
+const coverageSaving = ref(false);
 const errorMessage = ref("");
 const notice = ref("");
 const reference = ref<DailyPlanningReference | null>(null);
@@ -43,6 +43,8 @@ const imageForms = reactive<Record<string, ImageAdoptionForm>>({});
 const uploadingMealId = ref<string | null>(null);
 const actingAnalysisId = ref<string | null>(null);
 let pollTimer: number | undefined;
+let pollInFlight = false;
+let loadGeneration = 0;
 
 function localDate(date: Date): string { const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).map((part) => [part.type, part.value])); return `${values.year}-${values.month}-${values.day}`; }
 function currentTime(): string { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()); }
@@ -75,33 +77,95 @@ function imageFormFor(analysis: MealImageAnalysis, meal: Meal): ImageAdoptionFor
   return form;
 }
 
-async function loadImageAnalyses(mealId: string) {
-  try { analysesByMeal[mealId] = await nutritionApi.listImageAnalyses(mealId); }
+function clearRecord<T>(record: Record<string, T>) {
+  for (const key of Object.keys(record)) delete record[key];
+}
+
+function resetDateScopedState() {
+  reference.value = null;
+  summary.value = null;
+  meals.value = [];
+  dietPlans.value = [];
+  editingDietPlanId.value = null;
+  dietPlanForm.value = null;
+  creatingMeal.value = false;
+  editingContributionId.value = null;
+  mealForm.name = "";
+  mealForm.time = currentTime();
+  mealForm.note = "";
+  clearRecord(contributionForms);
+  clearRecord(foodSearchQueries);
+  clearRecord(foodSearchResults);
+  clearRecord(analysesByMeal);
+  clearRecord(uploadProgress);
+  clearRecord(imageForms);
+  imageSelections.value = {};
+}
+
+async function loadImageAnalyses(mealId: string, expectedDate = selectedDate.value) {
+  try {
+    const values = await nutritionApi.listImageAnalyses(mealId);
+    if (selectedDate.value === expectedDate) analysesByMeal[mealId] = values;
+  }
   catch (error) { if (error instanceof ApiError && error.code === "image_analysis_unavailable") return; throw error; }
 }
 
 async function pollImageAnalyses() {
+  if (pollInFlight) return;
+  const polledDate = selectedDate.value;
   const activeMealIds = meals.value.filter((meal) => (analysesByMeal[meal.id] ?? []).some((value) => value.status === "pending" || value.status === "running")).map((meal) => meal.id);
+  if (activeMealIds.length === 0) return;
+  pollInFlight = true;
   const activeAnalysisIds = new Set(activeMealIds.flatMap((mealId) => (analysesByMeal[mealId] ?? []).filter((value) => value.status === "pending" || value.status === "running").map((value) => value.id)));
-  await Promise.all(activeMealIds.map(loadImageAnalyses));
-  const completed = activeMealIds.some((mealId) => (analysesByMeal[mealId] ?? []).some((value) => activeAnalysisIds.has(value.id) && value.status === "succeeded"));
-  if (completed) {
-    meals.value = await nutritionApi.listMeals(selectedDate.value, selectedDate.value);
-    await refreshSummary();
+  try {
+    await Promise.all(activeMealIds.map((mealId) => loadImageAnalyses(mealId, polledDate)));
+    if (selectedDate.value !== polledDate) return;
+    const completed = activeMealIds.some((mealId) => (analysesByMeal[mealId] ?? []).some((value) => activeAnalysisIds.has(value.id) && value.status === "succeeded"));
+    if (completed) {
+      const refreshedMeals = await nutritionApi.listMeals(polledDate, polledDate);
+      if (selectedDate.value !== polledDate) return;
+      meals.value = refreshedMeals;
+      await refreshSummary(polledDate);
+    }
+  } catch (error) {
+    if (selectedDate.value !== polledDate) return;
+    console.error("Image analysis refresh failed", error);
+    errorMessage.value = error instanceof ApiError ? `${error.message}；照片分析状态稍后会再次刷新。` : "照片分析状态暂时刷新不了，稍后会再次尝试。";
+  } finally {
+    pollInFlight = false;
   }
 }
 
 async function load() {
-  loading.value = true; errorMessage.value = "";
-  try {
-    const [dailyReference, daySummary, dayMeals, personalTemplates, currentDietPlans] = await Promise.all([
-      planningApi.getDailyReference(selectedDate.value, browserTimeZone()), nutritionApi.getDaySummary(selectedDate.value, browserTimeZone()), nutritionApi.listMeals(selectedDate.value, selectedDate.value), nutritionApi.listFoodTemplates(), nutritionApi.listDietPlans(selectedDate.value, selectedDate.value),
-    ]);
-    reference.value = dailyReference; summary.value = daySummary; meals.value = dayMeals; templates.value = personalTemplates; dietPlans.value = currentDietPlans;
-    for (const meal of dayMeals) formFor(meal.id);
-    await Promise.all(dayMeals.map((meal) => loadImageAnalyses(meal.id)));
-  } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时读取不了这一天的饮食记录"; }
-  finally { loading.value = false; }
+  const requestedDate = selectedDate.value;
+  const generation = ++loadGeneration;
+  loading.value = true; errorMessage.value = ""; notice.value = "";
+  resetDateScopedState();
+  const results = await Promise.allSettled([
+      planningApi.getDailyReference(requestedDate, browserTimeZone()), nutritionApi.getDaySummary(requestedDate, browserTimeZone()), nutritionApi.listMeals(requestedDate, requestedDate), nutritionApi.listFoodTemplates(), nutritionApi.listDietPlans(requestedDate, requestedDate),
+  ] as const);
+  if (generation !== loadGeneration || selectedDate.value !== requestedDate) return;
+  const [referenceResult, summaryResult, mealsResult, templatesResult, dietPlansResult] = results;
+  if (referenceResult.status === "fulfilled") reference.value = referenceResult.value;
+  if (summaryResult.status === "fulfilled") summary.value = summaryResult.value;
+  if (templatesResult.status === "fulfilled") templates.value = templatesResult.value;
+  if (dietPlansResult.status === "fulfilled") dietPlans.value = dietPlansResult.value;
+  if (mealsResult.status === "fulfilled") {
+    meals.value = mealsResult.value;
+    for (const meal of mealsResult.value) formFor(meal.id);
+    const analysisResults = await Promise.allSettled(mealsResult.value.map((meal) => loadImageAnalyses(meal.id, requestedDate)));
+    if (generation !== loadGeneration || selectedDate.value !== requestedDate) return;
+    if (analysisResults.some((result) => result.status === "rejected")) {
+      errorMessage.value = "餐食已载入，但部分照片分析状态暂时读取不了。";
+    }
+  }
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    console.error("Nutrition page loaded partially", failed.reason);
+    const detail = failed.reason instanceof ApiError ? failed.reason.message : "部分饮食内容暂时读取不了";
+    errorMessage.value = `${detail}；其他可用内容已保留，可以稍后重试。`;
+  }
+  loading.value = false;
 }
 
 async function changeDate() { await router.replace({ name: "nutrition", query: selectedDate.value === localDate(new Date()) ? {} : { date: selectedDate.value } }); await load(); }
@@ -146,8 +210,14 @@ async function selectMealImage(mealId: string, event: Event) {
     return;
   }
   errorMessage.value = "";
-  const prepared = await prepareMealImage(file);
-  imageSelections.value = { ...imageSelections.value, [mealId]: prepared };
+  try {
+    const prepared = await prepareMealImage(file);
+    imageSelections.value = { ...imageSelections.value, [mealId]: prepared };
+  } catch (error) {
+    console.error("Meal image preparation failed", error);
+    imageSelections.value = { ...imageSelections.value, [mealId]: undefined };
+    errorMessage.value = "这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。";
+  }
 }
 
 async function uploadMealImage(meal: Meal) {
@@ -204,8 +274,28 @@ async function searchFoods(mealId: string) { searchingMealId.value = mealId; err
 function useFoodSearchResult(mealId: string, value: FoodSearchResult) { contributionForms[mealId] = { mode: "item", label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false }; editingContributionId.value = null; notice.value = `已带入“${value.label}”，确认份量和营养后再计入`; }
 async function deleteContribution(meal: Meal, value: MealContribution) { if (!window.confirm(`从当前汇总中移除“${value.label}”？旧值仍保留在修订记录中。`)) return; saving.value = true; try { const saved = await nutritionApi.deleteContribution(meal.id, value.id, meal.revision, value.revision); meals.value = meals.value.map((item) => item.id === saved.id ? saved : item); await refreshSummary(); notice.value = "这项内容已从当前汇总移除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时移除不了这项内容"; } finally { saving.value = false; } }
 async function deleteMeal(meal: Meal) { if (!window.confirm("删除整顿饭？它会从当天汇总中排除。")) return; saving.value = true; try { await nutritionApi.deleteMeal(meal.id, meal.revision); meals.value = meals.value.filter((value) => value.id !== meal.id); delete analysesByMeal[meal.id]; await refreshSummary(); notice.value = "这顿饭已从当前汇总中排除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时删除不了这顿饭"; } finally { saving.value = false; } }
-async function refreshSummary() { summary.value = await nutritionApi.getDaySummary(selectedDate.value, browserTimeZone()); }
-async function setCoverage(event: Event) { const confirmed = (event.target as HTMLInputElement).checked; try { await nutritionApi.setCoverage(selectedDate.value, confirmed); if (summary.value !== null) summary.value = { ...summary.value, coverageConfirmed: confirmed }; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了全天覆盖状态"; } }
+async function refreshSummary(expectedDate = selectedDate.value) {
+  const refreshed = await nutritionApi.getDaySummary(expectedDate, browserTimeZone());
+  if (selectedDate.value === expectedDate) summary.value = refreshed;
+}
+async function setCoverage(event: Event) {
+  const confirmed = (event.target as HTMLInputElement).checked;
+  const expectedDate = selectedDate.value;
+  coverageSaving.value = true;
+  errorMessage.value = "";
+  try {
+    await nutritionApi.setCoverage(expectedDate, confirmed);
+    if (selectedDate.value === expectedDate && summary.value?.localDate === expectedDate) {
+      summary.value = { ...summary.value, coverageConfirmed: confirmed };
+    }
+  } catch (error) {
+    if (selectedDate.value === expectedDate) {
+      errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了全天覆盖状态";
+    }
+  } finally {
+    coverageSaving.value = false;
+  }
+}
 
 watch(() => route.query.date, (value) => { const next = typeof value === "string" ? value : localDate(new Date()); if (next !== selectedDate.value) { selectedDate.value = next; void load(); } });
 onMounted(() => { void load(); pollTimer = window.setInterval(() => void pollImageAnalyses(), 2_000); });
@@ -213,12 +303,8 @@ onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTi
 </script>
 
 <template>
-  <div class="prototype-shell nutrition-page">
-    <aside class="desktop-rail" aria-label="主要导航"><div class="brand-block"><span class="brand-mark" aria-hidden="true">EA</span><div><strong>Exercise App</strong><small>训练与饮食记录</small></div></div><nav class="rail-nav"><button v-for="item in navigationItems" :key="item.id" class="nav-button" :class="{ 'is-active': item.id === 'nutrition' }" type="button" @click="openSection(item.id)"><span class="nav-button__short" aria-hidden="true">{{ item.shortLabel }}</span><span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span></button></nav><p class="rail-note">没记录的内容不会被当作 0。</p></aside>
-    <div class="app-column">
-      <header class="mobile-header"><strong class="mobile-brand">EA / 饮食</strong><span>{{ sessionStore.account?.username }}</span></header>
-      <main class="app-main">
-        <header class="view-header"><div><p class="date-line">按天记录</p><h1>饮食</h1><p>系统给出参考；你把真正吃下去的内容逐项扣掉。</p></div><label class="date-picker">查看日期<input v-model="selectedDate" type="date" @change="changeDate" /></label></header>
+  <AppShell page-class="nutrition-page" rail-note="没记录的内容不会被当作 0。">
+        <header class="view-header"><div><p class="date-line">按天记录</p><h1>饮食</h1><p>系统给出参考；你把真正吃下去的内容逐项扣掉。</p></div><label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || coverageSaving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label></header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p><p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
         <div v-else class="view-stack">
@@ -234,7 +320,7 @@ onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTi
             <div v-if="dietPlans.length" class="diet-plan-list"><article v-for="plan in dietPlans" :key="plan.id"><header><div><strong>{{ plan.title }}</strong><span>{{ plan.dateFrom === plan.dateTo ? plan.dateFrom : `${plan.dateFrom} 至 ${plan.dateTo}` }}</span></div><span class="row-actions"><button class="text-action" type="button" @click="startDietPlan(plan)">编辑</button><button class="text-action danger-text" type="button" @click="archiveDietPlan(plan)">归档</button></span></header><p v-if="plan.note">{{ plan.note }}</p><ul v-if="plan.entries.filter((entry) => entry.localDate === null || entry.localDate === selectedDate).length"><li v-for="entry in plan.entries.filter((value) => value.localDate === null || value.localDate === selectedDate)" :key="entry.id"><strong>{{ entry.mealName ?? (entry.localDate === null ? '范围内原则' : '当天安排') }}</strong><span>{{ entry.foodPlan }}</span><small v-if="entry.note">{{ entry.note }}</small></li></ul><small v-else>这份计划覆盖今天，但没有为今天单列餐次；可按整体原则执行。</small></article></div>
             <p v-else-if="dietPlanForm === null" class="empty-copy">今天还没有适用的饮食安排。需要时再写，不是必填任务。</p>
           </section>
-          <section class="balance-panel" aria-labelledby="remaining-title"><div class="panel-heading"><div><h2 id="remaining-title">还可以吃</h2><p>系统参考减去当前记录；负数表示已经超出。</p></div><span class="status-chip">{{ summary?.coverageConfirmed ? '已确认全天记录完整' : '全天覆盖未知' }}</span></div><dl class="metric-list"><div><dt>能量</dt><dd>{{ remainingText(summary?.energyKcal.remaining ?? null, 'kcal') }}</dd><span>已记录 {{ nutrientText(summary?.energyKcal.recorded ?? null, 'kcal') }} · {{ summary?.energyKcal.complete ? '本项完整' : '本项有未知值' }}</span></div><div><dt>蛋白质</dt><dd>{{ remainingText(summary?.proteinGrams.remaining ?? null, 'g') }}</dd><span>已记录 {{ nutrientText(summary?.proteinGrams.recorded ?? null, 'g') }} · {{ summary?.proteinGrams.complete ? '本项完整' : '本项有未知值' }}</span></div><div><dt>碳水</dt><dd>{{ remainingText(summary?.carbohydrateGrams.remaining ?? null, 'g') }}</dd><span>已记录 {{ nutrientText(summary?.carbohydrateGrams.recorded ?? null, 'g') }} · {{ summary?.carbohydrateGrams.complete ? '本项完整' : '本项有未知值' }}</span></div><div><dt>脂肪</dt><dd>{{ remainingText(summary?.fatGrams.remaining ?? null, 'g') }}</dd><span>已记录 {{ nutrientText(summary?.fatGrams.recorded ?? null, 'g') }} · {{ summary?.fatGrams.complete ? '本项完整' : '本项有未知值' }}</span></div></dl><label class="checkbox-row"><input type="checkbox" :checked="summary?.coverageConfirmed" @change="setCoverage" />我确认这一天吃过的内容都已记录</label></section>
+          <section class="balance-panel" aria-labelledby="remaining-title"><div class="panel-heading"><div><h2 id="remaining-title">还可以吃</h2><p>系统参考减去当前记录；负数表示已经超出。</p></div><span class="status-chip">{{ summary?.coverageConfirmed ? '已确认全天记录完整' : '全天覆盖未知' }}</span></div><dl class="metric-list"><div><dt>能量</dt><dd>{{ remainingText(summary?.energyKcal.remaining ?? null, 'kcal') }}</dd><span>已记录 {{ nutrientText(summary?.energyKcal.recorded ?? null, 'kcal') }} · {{ summary?.energyKcal.complete ? '本项完整' : '本项有未知值' }}</span></div><div><dt>蛋白质</dt><dd>{{ remainingText(summary?.proteinGrams.remaining ?? null, 'g') }}</dd><span>已记录 {{ nutrientText(summary?.proteinGrams.recorded ?? null, 'g') }} · {{ summary?.proteinGrams.complete ? '本项完整' : '本项有未知值' }}</span></div><div><dt>碳水</dt><dd>{{ remainingText(summary?.carbohydrateGrams.remaining ?? null, 'g') }}</dd><span>已记录 {{ nutrientText(summary?.carbohydrateGrams.recorded ?? null, 'g') }} · {{ summary?.carbohydrateGrams.complete ? '本项完整' : '本项有未知值' }}</span></div><div><dt>脂肪</dt><dd>{{ remainingText(summary?.fatGrams.remaining ?? null, 'g') }}</dd><span>已记录 {{ nutrientText(summary?.fatGrams.recorded ?? null, 'g') }} · {{ summary?.fatGrams.complete ? '本项完整' : '本项有未知值' }}</span></div></dl><label class="checkbox-row"><input type="checkbox" :checked="summary?.coverageConfirmed" :disabled="coverageSaving" @change="setCoverage" />我确认这一天吃过的内容都已记录</label></section>
           <section class="work-panel meal-log" aria-labelledby="meal-log-title"><div class="panel-heading"><div><h2 id="meal-log-title">这一天吃了什么</h2><p>{{ meals.length === 0 ? '还没有餐食记录。' : `共 ${meals.length} 顿；每项营养都可以留空未知。` }}</p></div><button class="action-button" type="button" @click="creatingMeal = !creatingMeal">{{ creatingMeal ? '取消' : '记一顿' }}</button></div>
             <form v-if="creatingMeal" class="inline-form meal-create-form" @submit.prevent="createMeal"><label>餐次名称（可选）<input v-model="mealForm.name" placeholder="例如：午饭" /></label><label>用餐时间<input v-model="mealForm.time" type="time" required /></label><label>备注（可选）<input v-model="mealForm.note" placeholder="例如：食堂二楼" /></label><button class="primary-button" :disabled="saving" type="submit">建立餐次</button></form>
             <article v-for="meal in meals" :key="meal.id" class="meal-card"><header><div><strong>{{ meal.name ?? '未命名餐次' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div><button class="text-action danger-text" type="button" @click="deleteMeal(meal)">删除整顿</button></header>
@@ -326,8 +412,5 @@ onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTi
             </article>
           </section>
         </div>
-      </main>
-      <nav class="mobile-dock" aria-label="主要导航"><button v-for="item in navigationItems" :key="item.id" class="dock-button" :class="{ 'is-active': item.id === 'nutrition' }" type="button" @click="openSection(item.id)"><span aria-hidden="true">{{ item.shortLabel }}</span><strong>{{ item.label }}</strong></button></nav>
-    </div>
-  </div>
+  </AppShell>
 </template>

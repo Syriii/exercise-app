@@ -7,11 +7,10 @@ import { nutritionApi, type NutritionDaySummary, type NutritionValueSummary } fr
 import { planningApi, type DailyPlanningReference } from "../api/planning";
 import { reminderApi, type MeasurementReminderStatus, type NutritionReminderStatus, type TrainingReminderStatus } from "../api/reminders";
 import { trainingApi, type TrainingSchedule, type TrainingSession } from "../api/training";
-import { navigationItems, type AppSection } from "../app/modules";
-import { useSessionStore } from "../stores/session";
+import AppShell from "../app/AppShell.vue";
+import { type AppSection } from "../app/modules";
 
 const router = useRouter();
-const sessionStore = useSessionStore();
 const schedules = ref<TrainingSchedule[]>([]);
 const sessions = ref<TrainingSession[]>([]);
 const loading = ref(true);
@@ -90,8 +89,7 @@ function reportError(error: unknown) {
 async function load() {
   loading.value = true;
   errorMessage.value = "";
-  try {
-    const [loadedSchedules, loadedSessions, loadedReminderStatus, loadedNutritionReminderStatus, loadedMeasurementReminderStatus, loadedReference, loadedNutritionSummary] = await Promise.all([
+  const results = await Promise.allSettled([
       trainingApi.listSchedules(today, today),
       trainingApi.listSessions(today, today),
       reminderApi.getTrainingStatus(today, browserTimeZone()),
@@ -99,21 +97,30 @@ async function load() {
       reminderApi.getMeasurementStatus(today, browserTimeZone()),
       planningApi.getDailyReference(today, browserTimeZone()),
       nutritionApi.getDaySummary(today, browserTimeZone()),
-    ]);
-    schedules.value = loadedSchedules;
-    sessions.value = loadedSessions;
-    reminderStatus.value = loadedReminderStatus;
-    nutritionReminderStatus.value = loadedNutritionReminderStatus;
-    measurementReminderStatus.value = loadedMeasurementReminderStatus;
-    dailyReference.value = loadedReference;
-    nutritionSummary.value = loadedNutritionSummary;
-    maybeShowBrowserNotification(loadedReminderStatus);
-    maybeShowOtherBrowserNotifications(loadedNutritionReminderStatus, loadedMeasurementReminderStatus);
-  } catch (error) {
-    reportError(error);
-  } finally {
-    loading.value = false;
+  ] as const);
+  const [scheduleResult, sessionResult, trainingReminderResult, nutritionReminderResult, measurementReminderResult, referenceResult, summaryResult] = results;
+
+  if (scheduleResult.status === "fulfilled") schedules.value = scheduleResult.value;
+  if (sessionResult.status === "fulfilled") sessions.value = sessionResult.value;
+  if (trainingReminderResult.status === "fulfilled") {
+    reminderStatus.value = trainingReminderResult.value;
+    maybeShowBrowserNotification(trainingReminderResult.value);
   }
+  if (nutritionReminderResult.status === "fulfilled") nutritionReminderStatus.value = nutritionReminderResult.value;
+  if (measurementReminderResult.status === "fulfilled") measurementReminderStatus.value = measurementReminderResult.value;
+  if (nutritionReminderResult.status === "fulfilled" && measurementReminderResult.status === "fulfilled") {
+    maybeShowOtherBrowserNotifications(nutritionReminderResult.value, measurementReminderResult.value);
+  }
+  if (referenceResult.status === "fulfilled") dailyReference.value = referenceResult.value;
+  if (summaryResult.status === "fulfilled") nutritionSummary.value = summaryResult.value;
+
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    console.error("Today page loaded partially", failed.reason);
+    const detail = failed.reason instanceof ApiError ? failed.reason.message : "部分内容暂时读取不了";
+    errorMessage.value = `${detail}；其他可用内容已保留，可以稍后重试。`;
+  }
+  loading.value = false;
 }
 
 async function snoozeReminder() {
@@ -175,20 +182,7 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <div class="prototype-shell today-page">
-    <aside class="desktop-rail" aria-label="主要导航">
-      <div class="brand-block"><span class="brand-mark" aria-hidden="true">EA</span><div><strong>Exercise App</strong><small>训练与饮食记录</small></div></div>
-      <nav class="rail-nav">
-        <button v-for="item in navigationItems" :key="item.id" class="nav-button" :class="{ 'is-active': item.id === 'today' }" type="button" :aria-current="item.id === 'today' ? 'page' : undefined" @click="openSection(item.id)">
-          <span class="nav-button__short" aria-hidden="true">{{ item.shortLabel }}</span><span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
-        </button>
-      </nav>
-      <p class="rail-note">今天只显示已经安排或开始的训练。</p>
-    </aside>
-
-    <div class="app-column">
-      <header class="mobile-header"><strong class="mobile-brand">EA / 今天</strong><span>{{ sessionStore.account?.username }}</span></header>
-      <main class="app-main">
+  <AppShell page-class="today-page" rail-note="今天只显示已经安排或开始的训练。">
         <header class="view-header">
           <div><p class="date-line">{{ displayDate(today) }} · 今天</p><h1>今天</h1><p>安排会放在这里；没选的方案不会算作今天没完成。</p></div>
           <button class="action-button" type="button" @click="openSection('training')">安排或开始训练</button>
@@ -263,10 +257,5 @@ onMounted(() => void load());
             <button class="text-action" type="button" @click="openSection('history')">查看历史 →</button>
           </section>
         </div>
-      </main>
-      <nav class="mobile-dock" aria-label="主要导航">
-        <button v-for="item in navigationItems" :key="item.id" class="dock-button" :class="{ 'is-active': item.id === 'today' }" type="button" :aria-current="item.id === 'today' ? 'page' : undefined" @click="openSection(item.id)"><span aria-hidden="true">{{ item.shortLabel }}</span><strong>{{ item.label }}</strong></button>
-      </nav>
-    </div>
-  </div>
+  </AppShell>
 </template>

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
+import AppShell from "../app/AppShell.vue";
 import { nutritionApi, type Meal } from "../api/nutrition";
 import { planningApi, type BodyMeasurement } from "../api/planning";
 import {
@@ -15,11 +16,8 @@ import {
   type TrainingSessionRevision,
   type TrainingSetInput,
 } from "../api/training";
-import { navigationItems, type AppSection } from "../app/modules";
-import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
-const sessionStore = useSessionStore();
 const sessions = ref<TrainingSession[]>([]);
 const meals = ref<Meal[]>([]);
 const measurements = ref<BodyMeasurement[]>([]);
@@ -361,47 +359,40 @@ async function saveCorrection(training: TrainingSession, item: TrainingSessionIt
   }
 }
 
-function openSection(section: AppSection) {
-  void router.push({ name: section });
-}
-
 async function load() {
   loading.value = true;
   errorMessage.value = "";
-  try {
-    [sessions.value, meals.value, expenditureActivities.value, measurements.value] = await Promise.all([
+  const results = await Promise.allSettled([
       trainingApi.listSessions(daysAgo(89), localDate(new Date())),
       nutritionApi.listMeals(daysAgo(89), localDate(new Date())),
       trainingApi.listExpenditureActivities(),
       planningApi.listMeasurements(),
-    ]);
-  } catch (error) {
-    console.error("History load failed", error);
-    errorMessage.value = error instanceof ApiError ? error.message : "暂时读取不了历史记录";
-  } finally {
-    loading.value = false;
+  ] as const);
+  const [sessionsResult, mealsResult, activitiesResult, measurementsResult] = results;
+  if (sessionsResult.status === "fulfilled") sessions.value = sessionsResult.value;
+  if (mealsResult.status === "fulfilled") meals.value = mealsResult.value;
+  if (activitiesResult.status === "fulfilled") expenditureActivities.value = activitiesResult.value;
+  if (measurementsResult.status === "fulfilled") measurements.value = measurementsResult.value;
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    console.error("History page loaded partially", failed.reason);
+    const detail = failed.reason instanceof ApiError ? failed.reason.message : "部分历史内容暂时读取不了";
+    errorMessage.value = `${detail}；其他可用内容已保留，可以稍后重试。`;
   }
+  loading.value = false;
 }
 
 onMounted(() => void load());
 </script>
 
 <template>
-  <div class="prototype-shell history-page">
-    <aside class="desktop-rail" aria-label="主要导航">
-      <div class="brand-block"><span class="brand-mark" aria-hidden="true">EA</span><div><strong>Exercise App</strong><small>训练与饮食记录</small></div></div>
-      <nav class="rail-nav"><button v-for="item in navigationItems" :key="item.id" class="nav-button" :class="{ 'is-active': item.id === 'history' }" type="button" :aria-current="item.id === 'history' ? 'page' : undefined" @click="openSection(item.id)"><span class="nav-button__short" aria-hidden="true">{{ item.shortLabel }}</span><span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span></button></nav>
-      <p class="rail-note">历史优先回答实际做了什么。</p>
-    </aside>
-    <div class="app-column">
-      <header class="mobile-header"><strong class="mobile-brand">EA / 历史</strong><span>{{ sessionStore.account?.username }}</span></header>
-      <main class="app-main">
+  <AppShell page-class="history-page" rail-note="历史优先回答实际做了什么。">
         <header class="view-header"><div><p class="date-line">最近 90 天</p><h1>按天回看</h1><p>训练和饮食按日期放在一起，也可以单独筛选。</p></div></header>
         <div class="history-filters" aria-label="筛选历史内容"><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button><button type="button" :aria-pressed="filter === 'training'" @click="filter = 'training'">训练</button><button type="button" :aria-pressed="filter === 'nutrition'" @click="filter = 'nutrition'">饮食</button></div>
         <section v-if="!loading" class="work-panel history-trends" aria-labelledby="history-trends-title">
           <div class="panel-heading"><div><h2 id="history-trends-title">最近 90 天的记录趋势</h2><p>只汇总实际保存的数据；没有记录的日期不会补成 0。</p></div></div>
           <dl class="history-trend-summary"><div><dt>实际训练</dt><dd>{{ trendSummary.sessions }} 次</dd><span>{{ trendSummary.completedActions }} 个完成动作</span></div><div><dt>有饮食记录</dt><dd>{{ trendSummary.mealDays }} 天</dd><span>未知营养不参与求和</span></div><div><dt>记录体重变化</dt><dd>{{ trendSummary.weightChange === null ? '—' : `${trendSummary.weightChange > 0 ? '+' : ''}${trendSummary.weightChange} kg` }}</dd><span>{{ measurements.length < 2 ? '至少两次测量后显示' : '按首末有效测量' }}</span></div></dl>
-          <div v-if="trendRows.length" class="history-trend-table-wrap"><table class="history-trend-table"><thead><tr><th>日期</th><th>训练</th><th>能量</th><th>蛋白质</th><th>体重</th></tr></thead><tbody><tr v-for="row in trendRows" :key="row.date"><th scope="row">{{ row.date.slice(5) }}</th><td>{{ row.sessions === 0 ? '—' : `${row.sessions} 次 / ${row.completedActions} 动作` }}</td><td>{{ row.energyKcal === null ? '—' : `${row.energyKcal} kcal` }}</td><td>{{ row.proteinGrams === null ? '—' : `${row.proteinGrams} g` }}</td><td>{{ row.weightKg === null ? '—' : `${row.weightKg} kg` }}</td></tr></tbody></table></div>
+          <p v-if="trendRows.length" class="horizontal-scroll-hint">表格可以左右滑动查看完整数据。</p><div v-if="trendRows.length" class="history-trend-table-wrap" tabindex="0" aria-label="最近 90 天趋势表，可左右滚动"><table class="history-trend-table"><thead><tr><th>日期</th><th>训练</th><th>能量</th><th>蛋白质</th><th>体重</th></tr></thead><tbody><tr v-for="row in trendRows" :key="row.date"><th scope="row">{{ row.date.slice(5) }}</th><td>{{ row.sessions === 0 ? '—' : `${row.sessions} 次 / ${row.completedActions} 动作` }}</td><td>{{ row.energyKcal === null ? '—' : `${row.energyKcal} kcal` }}</td><td>{{ row.proteinGrams === null ? '—' : `${row.proteinGrams} g` }}</td><td>{{ row.weightKg === null ? '—' : `${row.weightKg} kg` }}</td></tr></tbody></table></div>
           <p v-else class="empty-copy">还没有足够记录形成趋势。</p>
         </section>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
@@ -498,8 +489,5 @@ onMounted(() => void load());
             <span class="status-chip">{{ day.sessions.length }} 次训练 · {{ day.meals.length }} 顿</span>
           </article>
         </section>
-      </main>
-      <nav class="mobile-dock" aria-label="主要导航"><button v-for="item in navigationItems" :key="item.id" class="dock-button" :class="{ 'is-active': item.id === 'history' }" type="button" :aria-current="item.id === 'history' ? 'page' : undefined" @click="openSection(item.id)"><span aria-hidden="true">{{ item.shortLabel }}</span><strong>{{ item.label }}</strong></button></nav>
-    </div>
-  </div>
+  </AppShell>
 </template>

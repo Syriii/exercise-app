@@ -40,7 +40,6 @@ const identityService = new IdentityService({
   sessionSecret: config.sessionSecret,
   sessionTtlHours: config.sessionTtlHours,
   maxAccounts: config.maxAccounts,
-  onAuthenticated: (account) => databaseUserContext.enter(account.id),
 });
 const operationsService = new PostgresOperationsService({
   database: database.database,

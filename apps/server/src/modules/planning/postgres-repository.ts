@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { and, desc, eq, lte, sql } from "drizzle-orm";
 
 import type { Database } from "../../db/database.js";
@@ -62,6 +64,18 @@ function measurementFromRow(row: typeof bodyMeasurements.$inferSelect): BodyMeas
     revision: row.revision,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function referenceFromRow(row: typeof dailyPlanningReferences.$inferSelect): DailyPlanningReference {
+  return {
+    id: row.id,
+    revision: row.revision,
+    methodVersion: row.methodVersion,
+    evidenceIds: row.evidenceIds,
+    inputSnapshot: row.inputSnapshot as unknown as PlanningInputSnapshot,
+    result: row.result as unknown as DailyPlanningResult,
+    createdAt: row.createdAt,
   };
 }
 
@@ -177,21 +191,21 @@ export class PostgresPlanningRepository implements PlanningRepository {
   public async getLatestReference(userId: string, localDate: string): Promise<DailyPlanningReference | null> {
     const [row] = await this.database.select().from(dailyPlanningReferences).where(and(eq(dailyPlanningReferences.userId, userId), eq(dailyPlanningReferences.localDate, localDate))).orderBy(desc(dailyPlanningReferences.revision)).limit(1);
     if (row === undefined) return null;
-    return {
-      id: row.id,
-      revision: row.revision,
-      methodVersion: row.methodVersion,
-      evidenceIds: row.evidenceIds,
-      inputSnapshot: row.inputSnapshot as unknown as PlanningInputSnapshot,
-      result: row.result as unknown as DailyPlanningResult,
-      createdAt: row.createdAt,
-    };
+    return referenceFromRow(row);
   }
 
   public async createReference(userId: string, methodVersion: string, evidenceIds: readonly string[], inputSnapshot: PlanningInputSnapshot, result: DailyPlanningResult): Promise<DailyPlanningReference> {
     const row = await this.database.transaction(async (transaction) => {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${`daily-planning:${userId}:${result.localDate}`}))`);
-      const [latest] = await transaction.select({ revision: dailyPlanningReferences.revision }).from(dailyPlanningReferences).where(and(eq(dailyPlanningReferences.userId, userId), eq(dailyPlanningReferences.localDate, result.localDate))).orderBy(desc(dailyPlanningReferences.revision)).limit(1);
+      const [latest] = await transaction.select().from(dailyPlanningReferences).where(and(eq(dailyPlanningReferences.userId, userId), eq(dailyPlanningReferences.localDate, result.localDate))).orderBy(desc(dailyPlanningReferences.revision)).limit(1);
+      if (
+        latest !== undefined &&
+        latest.methodVersion === methodVersion &&
+        isDeepStrictEqual(latest.evidenceIds, evidenceIds) &&
+        isDeepStrictEqual(latest.inputSnapshot, inputSnapshot)
+      ) {
+        return latest;
+      }
       const [saved] = await transaction.insert(dailyPlanningReferences).values({
         userId,
         localDate: result.localDate,
@@ -204,14 +218,6 @@ export class PostgresPlanningRepository implements PlanningRepository {
       if (saved === undefined) throw new Error("created daily planning reference not returned");
       return saved;
     });
-    return {
-      id: row.id,
-      revision: row.revision,
-      methodVersion: row.methodVersion,
-      evidenceIds: row.evidenceIds,
-      inputSnapshot: row.inputSnapshot as unknown as PlanningInputSnapshot,
-      result: row.result as unknown as DailyPlanningResult,
-      createdAt: row.createdAt,
-    };
+    return referenceFromRow(row);
   }
 }

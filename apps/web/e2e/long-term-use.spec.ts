@@ -54,7 +54,8 @@ test("a person can manage independent reminders and download a private JSON expo
 test("a person can copy and download a privacy-limited problem report", async ({ context, page }, testInfo) => {
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   const username = `report_${projectKey}_${Date.now()}`;
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:4174" });
+  const testOrigin = new URL(String(testInfo.project.use.baseURL)).origin;
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: testOrigin });
   await register(page, username, "problem report browser password");
   await page.goto("/settings");
 

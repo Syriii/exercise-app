@@ -1,6 +1,5 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Workbench · theme: Sport (continued system) · enrichment: none · nav: mobile dock / desktop rail · footer: Ft2 · contrast: pass (40–41) · slop: pass (1–58) */
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
-@import url("https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;700&display=swap");
+/* Hallmark · genre: modern-minimal · tone: sport/workbench · palette: warm orange · macrostructure: Workbench · nav: mobile dock / desktop rail · footer: Ft2 · contrast: pass (40–41) · mobile: pass (34, 49, 50–57) · slop: pass (1–58) */
+/* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V4 */
 @import "./tokens.css";
 
 *,
@@ -33,9 +32,24 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   color: inherit;
   font: inherit;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  min-height: 2.75rem;
+  font-size: var(--text-base);
 }
 
 button,
@@ -45,6 +59,7 @@ input[type="checkbox"] {
 }
 
 button {
+  min-width: 2.75rem;
   cursor: pointer;
 }
 
@@ -71,6 +86,10 @@ h3,
 dl,
 dd {
   margin: 0;
+}
+
+small {
+  font-size: var(--text-sm);
 }
 
 h1,
@@ -116,7 +135,7 @@ ol {
   border: var(--rule-thin) solid var(--color-rule);
   border-radius: var(--radius-md);
   background: var(--color-surface);
-  box-shadow: 0 1.5rem 4rem rgb(20 23 22 / 9%);
+  box-shadow: 0 var(--space-lg) var(--space-2xl) var(--color-shadow);
 }
 
 .access-brand {
@@ -174,6 +193,17 @@ ol {
   padding: var(--space-sm);
   border-left: 0.25rem solid var(--color-error);
   background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface));
+}
+
+.form-notice {
+  padding: var(--space-sm) var(--space-md);
+  border-inline-start: 0.25rem solid var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface));
+}
+
+.field-help {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
 }
 
 .admin-page {
@@ -302,6 +332,19 @@ ol {
   min-height: 100dvh;
 }
 
+.brand-mark {
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 800;
+}
+
 .app-column {
   min-width: 0;
   min-height: 100dvh;
@@ -335,6 +378,14 @@ ol {
   font-weight: 800;
   letter-spacing: 0.035em;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.mobile-account-name {
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -448,6 +499,7 @@ ol {
 }
 
 .action-button,
+.primary-button,
 .text-action,
 .nav-button,
 .dock-button {
@@ -469,6 +521,19 @@ ol {
     background-color var(--dur-short) var(--ease-out),
     color var(--dur-short) var(--ease-out),
     transform var(--dur-micro) var(--ease-out);
+}
+
+.primary-button {
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: var(--space-md);
+  border: var(--rule-thin) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-weight: 700;
 }
 
 .action-button--primary {
@@ -1037,6 +1102,34 @@ ol {
   background-color: var(--color-paper);
 }
 
+@media (max-width: 59.99rem) {
+  .prototype-shell,
+  .app-column {
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .app-column {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+
+  .app-main {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: var(--space-xl);
+  }
+
+  .app-column > .mobile-dock {
+    position: static;
+    width: min(calc(100% - 2 * var(--space-md)), 30rem);
+    margin-block: var(--space-xs) max(var(--space-xs), env(safe-area-inset-bottom));
+    justify-self: center;
+  }
+}
+
 .field-grid input::placeholder {
   color: var(--color-neutral);
 }
@@ -1229,19 +1322,6 @@ ol {
     gap: var(--space-sm);
   }
 
-  .brand-mark {
-    width: 2.75rem;
-    height: 2.75rem;
-    display: grid;
-    place-items: center;
-    border-radius: var(--radius-sm);
-    background-color: var(--color-accent);
-    color: var(--color-accent-ink);
-    font-family: var(--font-display);
-    font-size: var(--text-md);
-    font-weight: 800;
-  }
-
   .brand-block > div {
     display: grid;
   }
@@ -1388,10 +1468,8 @@ ol {
 
 .template-item-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: var(--space-lg);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper);
+  padding-block: var(--space-lg);
+  border-top: var(--rule-thin) solid var(--color-rule);
 }
 
 .template-item-form__heading,
@@ -1458,7 +1536,7 @@ ol {
 
 .problem-report-preview textarea {
   min-height: 20rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: 400;
   white-space: pre;
@@ -1547,10 +1625,8 @@ ol {
 
 .suggestion-form {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper-2);
+  padding-block: var(--space-md);
+  border-block: var(--rule-thin) solid var(--color-rule);
 }
 
 .suggestion-form > label:not(.checkbox-row) {
@@ -1618,10 +1694,8 @@ ol {
 }
 
 .program-unit-editor {
-  padding: var(--space-lg);
-  border: var(--rule-thin) solid var(--color-rule-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper-2);
+  padding-block: var(--space-lg);
+  border-block: var(--rule-thin) solid var(--color-rule);
 }
 
 .program-unit-editor select {
@@ -1655,10 +1729,8 @@ ol {
 }
 
 .program-week {
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper-2);
+  padding-block: var(--space-md);
+  border-top: var(--rule-thin) solid var(--color-rule);
 }
 
 .program-week__empty {
@@ -1667,11 +1739,8 @@ ol {
 }
 
 .program-unit-card {
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-inline-start: 0.3rem solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  padding-block: var(--space-md);
+  border-top: var(--rule-thin) solid var(--color-accent);
 }
 
 .program-unit-card > div:first-child {
@@ -1684,19 +1753,16 @@ ol {
 }
 
 .actual-exercise-list > li {
-  padding: var(--space-lg);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-inline-start-width: 0.3rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-paper);
+  padding-block: var(--space-lg);
+  border-top: var(--rule-thin) solid var(--color-rule);
 }
 
 .actual-exercise-list > li.is-completed {
-  border-inline-start-color: var(--color-success);
+  border-top-color: var(--color-success);
 }
 
 .actual-exercise-list > li.is-skipped {
-  border-inline-start-color: var(--color-rule-strong);
+  border-top-color: var(--color-rule-strong);
   opacity: 0.78;
 }
 
@@ -1716,10 +1782,8 @@ ol {
 .exercise-guidance {
   display: grid;
   gap: var(--space-md);
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper-2);
+  padding-block: var(--space-md);
+  border-block: var(--rule-thin) solid var(--color-rule);
 }
 
 .guidance-columns {
@@ -1849,10 +1913,8 @@ ol {
 .history-trend-summary > div {
   display: grid;
   gap: var(--space-3xs);
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper-2);
+  padding-block: var(--space-md);
+  border-top: var(--rule-thin) solid var(--color-rule);
 }
 
 .history-trend-summary dt,
@@ -1869,6 +1931,13 @@ ol {
 
 .history-trend-table-wrap {
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.horizontal-scroll-hint {
+  display: none;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
 }
 
 .history-trend-table {
@@ -1971,7 +2040,7 @@ ol {
 
 .reminder-form {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
   align-items: end;
   gap: var(--space-md);
 }
@@ -2092,8 +2161,30 @@ ol {
 }
 
 .meal-create-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
   align-items: end;
+}
+
+.meal-create-form > *,
+.reminder-form > * {
+  min-width: 0;
+}
+
+.meal-create-form input,
+.reminder-form input,
+.reminder-form select,
+.contribution-form input,
+.contribution-form select,
+.diet-plan-form input,
+.diet-plan-form select,
+.diet-plan-form textarea,
+.meal-food-search input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding-inline: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
 }
 
 .meal-card {
@@ -2151,6 +2242,17 @@ ol {
   border: var(--rule-thin) solid var(--color-rule);
   border-radius: var(--radius-md);
   background: var(--color-paper-2);
+}
+
+.meal-card .meal-image-panel,
+.meal-card .meal-food-search,
+.meal-card .contribution-form {
+  padding-inline: 0;
+  padding-bottom: 0;
+  border-inline: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .meal-image-panel__heading,
@@ -2241,10 +2343,8 @@ ol {
 .diet-plan-list > article {
   display: grid;
   gap: var(--space-sm);
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper-2);
+  padding-block: var(--space-md);
+  border-top: var(--rule-thin) solid var(--color-rule);
 }
 
 .diet-plan-list header,
@@ -2271,10 +2371,8 @@ ol {
 }
 
 .image-analysis-card {
-  padding: var(--space-md);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  background: var(--color-paper);
+  padding-block: var(--space-md);
+  border-top: var(--rule-thin) solid var(--color-rule);
 }
 
 .observed-foods,
@@ -2302,7 +2400,7 @@ ol {
 
 .analysis-failure {
   justify-items: start;
-  color: var(--color-danger, #a63d31);
+  color: var(--color-error);
 }
 
 .form-row {
@@ -2333,7 +2431,7 @@ ol {
 }
 
 .danger-text {
-  color: var(--color-danger, #a63d31);
+  color: var(--color-error);
 }
 
 .account-deletion-form {
@@ -2341,9 +2439,9 @@ ol {
   gap: var(--space-md);
   margin-top: var(--space-md);
   padding: var(--space-md);
-  border: var(--rule-thin) solid color-mix(in srgb, var(--color-danger, #a63d31) 45%, var(--color-rule));
+  border: var(--rule-thin) solid color-mix(in srgb, var(--color-error) 45%, var(--color-rule));
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--color-danger, #a63d31) 4%, var(--color-paper));
+  background: color-mix(in srgb, var(--color-error) 4%, var(--color-paper));
 }
 
 .account-deletion-form > div:first-child {
@@ -2353,8 +2451,8 @@ ol {
 
 .danger-action {
   justify-self: start;
-  border-color: var(--color-danger, #a63d31);
-  color: var(--color-danger, #a63d31);
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .metric-list dd small {
@@ -2383,16 +2481,31 @@ ol {
 }
 
 .reminder-card {
-  border-inline-start: 0.35rem solid var(--color-accent);
+  border-top: 0.2rem solid var(--color-accent);
   background: var(--color-accent-soft);
 }
 
 .reminder-card--quiet {
-  border-inline-start-color: var(--color-rule-strong);
+  border-top-color: var(--color-rule-strong);
   background: var(--color-paper-2);
 }
 
 @media (max-width: 42rem) {
+  .horizontal-scroll-hint {
+    display: block;
+  }
+
+  .panel-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .panel-heading > .status-chip,
+  .panel-heading > .action-button,
+  .panel-heading > .text-action {
+    align-self: flex-start;
+  }
+
   .history-trend-summary {
     grid-template-columns: 1fr;
   }

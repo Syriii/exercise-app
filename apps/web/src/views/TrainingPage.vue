@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
+import AppShell from "../app/AppShell.vue";
 import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
 import {
   trainingApi,
@@ -15,8 +15,6 @@ import {
   type TrainingTemplate,
   type TrainingTemplateInput,
 } from "../api/training";
-import { navigationItems, type AppSection } from "../app/modules";
-import { useSessionStore } from "../stores/session";
 
 interface TemplateItemForm {
   exerciseName: string;
@@ -40,8 +38,6 @@ interface ActualForm {
   sets: SetForm[];
 }
 
-const router = useRouter();
-const sessionStore = useSessionStore();
 const templates = ref<TrainingTemplate[]>([]);
 const programs = ref<TrainingProgram[]>([]);
 const suggestions = ref<TrainingSuggestion[]>([]);
@@ -123,10 +119,6 @@ function currentLocalDate(): string {
   }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
-}
-
-function openSection(section: AppSection) {
-  void router.push({ name: section });
 }
 
 function weekNumbers(program: TrainingProgram): number[] {
@@ -286,23 +278,27 @@ async function toggleGuidance(item: TrainingSessionItem) {
 async function load() {
   loading.value = true;
   errorMessage.value = "";
-  try {
-    const [loadedTemplates, loadedPrograms, activeSessions, loadedSuggestions] = await Promise.all([
+  const results = await Promise.allSettled([
       trainingApi.listTemplates(),
       trainingApi.listPrograms(),
       trainingApi.listActiveSessions(),
       trainingSuggestionApi.list(),
-    ]);
-    templates.value = loadedTemplates;
-    programs.value = loadedPrograms;
-    suggestions.value = loadedSuggestions;
-    activeSession.value = activeSessions[0] ?? null;
+  ] as const);
+  const [templatesResult, programsResult, sessionsResult, suggestionsResult] = results;
+  if (templatesResult.status === "fulfilled") templates.value = templatesResult.value;
+  if (programsResult.status === "fulfilled") programs.value = programsResult.value;
+  if (suggestionsResult.status === "fulfilled") suggestions.value = suggestionsResult.value;
+  if (sessionsResult.status === "fulfilled") {
+    activeSession.value = sessionsResult.value[0] ?? null;
     if (activeSession.value !== null) syncActualForms(activeSession.value);
-  } catch (error) {
-    reportError(error);
-  } finally {
-    loading.value = false;
   }
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    console.error("Training page loaded partially", failed.reason);
+    const detail = failed.reason instanceof ApiError ? failed.reason.message : "部分训练内容暂时读取不了";
+    errorMessage.value = `${detail}；其他可用内容已保留，可以稍后重试。`;
+  }
+  loading.value = false;
 }
 
 async function generateSuggestion() {
@@ -685,36 +681,7 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <div class="prototype-shell training-page">
-    <aside class="desktop-rail" aria-label="主要导航">
-      <div class="brand-block">
-        <span class="brand-mark" aria-hidden="true">EA</span>
-        <div><strong>Exercise App</strong><small>训练与饮食记录</small></div>
-      </div>
-      <nav class="rail-nav">
-        <button
-          v-for="item in navigationItems"
-          :key="item.id"
-          class="nav-button"
-          :class="{ 'is-active': item.id === 'training' }"
-          type="button"
-          :aria-current="item.id === 'training' ? 'page' : undefined"
-          @click="openSection(item.id)"
-        >
-          <span class="nav-button__short" aria-hidden="true">{{ item.shortLabel }}</span>
-          <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
-        </button>
-      </nav>
-      <p class="rail-note">计划可以改，练过的不会变。</p>
-    </aside>
-
-    <div class="app-column">
-      <header class="mobile-header">
-        <strong class="mobile-brand">EA / 训练</strong>
-        <span>{{ sessionStore.account?.username }}</span>
-      </header>
-
-      <main class="app-main">
+  <AppShell page-class="training-page" rail-note="计划可以改，练过的不会变。" show-footer>
         <header class="view-header training-view-header">
           <div>
             <p class="date-line">训练</p>
@@ -1095,22 +1062,5 @@ onMounted(() => void load());
             </div>
           </section>
         </div>
-      </main>
-
-      <footer class="prototype-footer"><p>Exercise App · MIT License</p></footer>
-      <nav class="mobile-dock" aria-label="主要导航">
-        <button
-          v-for="item in navigationItems"
-          :key="item.id"
-          class="dock-button"
-          :class="{ 'is-active': item.id === 'training' }"
-          type="button"
-          :aria-current="item.id === 'training' ? 'page' : undefined"
-          @click="openSection(item.id)"
-        >
-          <span aria-hidden="true">{{ item.shortLabel }}</span><strong>{{ item.label }}</strong>
-        </button>
-      </nav>
-    </div>
-  </div>
+  </AppShell>
 </template>

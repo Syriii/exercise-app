@@ -7,11 +7,7 @@ export class DatabaseUserContext {
     return this.#storage.getStore() ?? null;
   }
 
-  public clear(): void {
-    this.#storage.enterWith(null);
-  }
-
-  public enter(userId: string): void {
-    this.#storage.enterWith(userId);
+  public run<T>(userId: string | null, callback: () => T): T {
+    return this.#storage.run(userId, callback);
   }
 }

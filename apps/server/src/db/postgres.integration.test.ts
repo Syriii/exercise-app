@@ -7,6 +7,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDatabase } from "./database.js";
+import { DatabaseUserContext } from "./user-context.js";
 import { ensureApiDatabaseRole, grantApiDatabaseRole } from "./runtime-role.js";
 import { PostgresIdentityRepository } from "../modules/identity/postgres-repository.js";
 import { IdentityService } from "../modules/identity/service.js";
@@ -32,6 +33,14 @@ const queue = new PgBossTaskQueue({
 });
 const transactionQueueName = "exercise-integration-transaction";
 const crashQueueName = "exercise-integration-crash";
+const apiRolePassword = "integration-only-api-role-password";
+
+function apiRoleDatabaseUrl(): string {
+  const url = new URL(databaseUrl);
+  url.username = "exercise_api";
+  url.password = apiRolePassword;
+  return url.toString();
+}
 
 function waitForWorkerStart(child: ChildProcess): Promise<string> {
   return new Promise((resolveStart, rejectStart) => {
@@ -81,7 +90,7 @@ async function waitForCompletedJob(jobId: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  await ensureApiDatabaseRole(database.pool, "integration-only-api-role-password");
+  await ensureApiDatabaseRole(database.pool, apiRolePassword);
   await migrate(database.database, {
     migrationsFolder: resolve(import.meta.dirname, "../../drizzle"),
   });
@@ -578,6 +587,46 @@ describe("PostgreSQL integration", () => {
     expect(second.inputSnapshot.measurement?.weightKg).toBe(64);
     expect(first.inputSnapshot.measurement?.weightKg).toBe(63);
     await expect(planning.listMeasurements(randomUUID())).resolves.toEqual([]);
+  });
+
+  it("creates a needs-profile daily reference through the restricted API role", async () => {
+    const identity = new IdentityService({
+      repository: new PostgresIdentityRepository(database.database),
+      sessionSecret: "a-restricted-planning-integration-secret-long-enough",
+      sessionTtlHours: 1,
+    });
+    const username = `restricted_planning_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
+    const account = (await identity.register(username, "a restricted planning integration password")).account;
+    const context = new DatabaseUserContext();
+    const apiDatabase = createDatabase(apiRoleDatabaseUrl(), context);
+
+    try {
+      const planning = new PlanningService(new PostgresPlanningRepository(apiDatabase.database));
+      const references = await context.run(account.id, () =>
+        Promise.all([
+          planning.getDailyReference(account.id, "2026-08-28", "Asia/Shanghai"),
+          planning.getDailyReference(account.id, "2026-08-28", "Asia/Shanghai"),
+        ]),
+      );
+
+      expect(references[0]).toMatchObject({
+        revision: 1,
+        result: {
+          status: "needs_profile",
+          localDate: "2026-08-28",
+        },
+      });
+      expect(references[1]).toMatchObject({ id: references[0].id, revision: 1 });
+      const stored = await database.pool.query<{ count: number; maximum_revision: number }>(
+        `select count(*)::int as count, max(revision)::int as maximum_revision
+         from daily_planning_references
+         where user_id = $1 and local_date = $2`,
+        [account.id, "2026-08-28"],
+      );
+      expect(stored.rows).toEqual([{ count: 1, maximum_revision: 1 }]);
+    } finally {
+      await apiDatabase.close();
+    }
   });
 
   it("persists account-scoped meals, contribution corrections, coverage, and soft deletion", async () => {

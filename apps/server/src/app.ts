@@ -12,7 +12,7 @@ import { ImageAnalysisError } from "./modules/image-analysis/errors.js";
 import { registerImageAnalysisRoutes } from "./modules/image-analysis/routes.js";
 import type { ImageAnalysisService } from "./modules/image-analysis/service.js";
 import { IdentityError } from "./modules/identity/errors.js";
-import { registerIdentityRoutes } from "./modules/identity/routes.js";
+import { registerIdentityRoutes, sessionCookieName } from "./modules/identity/routes.js";
 import type { IdentityService } from "./modules/identity/service.js";
 import { NutritionError } from "./modules/nutrition/errors.js";
 import { registerNutritionRoutes } from "./modules/nutrition/routes.js";
@@ -71,11 +71,34 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     },
     requestIdHeader: "x-request-id",
   });
-  if (dependencies.databaseUserContext !== undefined) {
-    app.addHook("onRequest", async () => dependencies.databaseUserContext!.clear());
-  }
-
   await app.register(cookie);
+  if (
+    dependencies.databaseUserContext !== undefined &&
+    dependencies.identityService !== undefined
+  ) {
+    // Callback form is intentional: run(done) keeps the context around the downstream handler,
+    // whereas setting it inside an awaited authenticate() call does not reach the caller continuation.
+    app.addHook("preHandler", (request, _reply, done) => {
+      const requestPath = request.url.split("?", 1)[0] ?? request.url;
+      const needsAccountContext =
+        requestPath.startsWith("/api/v1/") &&
+        !requestPath.startsWith("/api/v1/auth/") &&
+        !requestPath.startsWith("/api/v1/health/");
+      if (!needsAccountContext) {
+        dependencies.databaseUserContext!.run(null, done);
+        return;
+      }
+      const sessionToken = request.cookies[sessionCookieName];
+      if (sessionToken === undefined) {
+        dependencies.databaseUserContext!.run(null, done);
+        return;
+      }
+      void dependencies.identityService!.authenticate(sessionToken).then(
+        (account) => dependencies.databaseUserContext!.run(account.id, done),
+        (error: unknown) => done(error instanceof Error ? error : new Error("authentication failed")),
+      );
+    });
+  }
   await app.register(helmet, {
     contentSecurityPolicy: false,
   });

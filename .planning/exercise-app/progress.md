@@ -978,3 +978,28 @@
 - smoke 后继续观察约 70 秒：API healthy/restart 0，最近 5 次 healthcheck 均 exit 0；Worker running/restart 0 且心跳新鲜；PostgreSQL healthy/restart 0，setup exited 0/restart 0。live/ready 均为 HTTP 200，5011 双栈监听，PostgreSQL 与 Worker 没有宿主机端口。
 - 本机作为服务器外部环境绕过代理直连 `http://<server-ip>:5011`，live 与 ready 均返回 HTTP 200，耗时约 0.09 秒。Nginx 6 个进程和 80/443 监听保持，Docker 安装后新增 OOM 为 0；Docker/containerd active、项目对象集合和两个 volume 符合预期，没有执行清理。
 - 首次启动目标至此完成。真实 DeepSeek、容器重建持久化、pg-boss 故障注入、备份恢复和 HTTPS 不属于本次完成条件，继续保留为独立专项验收，不用本次 smoke 冒充。
+
+# 2026-08-28：首次真实使用缺陷收口开始
+
+- 产品所有者首次登录后，生成 `needs_profile` 每日规划参考时，`daily_planning_references` 插入失败；错误参数表明业务结果本身合法，需继续核对生产 migration、RLS、JSONB、唯一约束和仓储错误传播，不能把它简化为“请先补档案”。
+- 同时观察到前端卡片重叠、字号忽大忽小和整体结构异常。当前目标扩展为全站缺陷收口：数据库正确性、桌面/手机结构、溢出、字体层级、交互与错误状态必须一起验证。
+- 按产品所有者要求启用三个并行智能体：数据库根因与测试、前端结构/视觉只读审计、独立质量与验收矩阵；主 Agent 负责浏览器复现、代码整合和最终回归。
+- 使用 planning-with-files 持续记录；Hallmark 仅作为现有界面审计和视觉约束，不进行未经确认的产品结构重做；真实浏览器结果每两次观察后写回 findings/progress。
+- 首次向 findings 写入浏览器基线时使用了不存在的旧标题锚点，补丁被完整拒绝且未产生部分修改；读取文件真实末尾后改为按最后一条部署发现追加，并把本次工具错误一并记录。
+- 启动本机内存 E2E 服务的首次命令在任何新监听创建前以 `EADDRINUSE 127.0.0.1:4174` 退出；`lsof` 一度看到已有 Node 监听，但紧接着 curl 连接失败，说明可能是旧测试进程正在退出或沙箱观察不一致。不会重复启动同一命令，先只读确认进程和端口真实状态，再决定复用或换受控端口。
+- 沙箱外只读复核确认 4174 是本项目已运行约两分钟的 `node dist/testing/e2e-server.js`，健康接口正常；但其内存账号状态已被先前 E2E 改动，固定 `desktop_admin` 测试密码登录失败。不会猜测被改后的密码，也不终止该进程；改用独立 4175 端口启动一份全新内存服务供本轮视觉审查。
+- 训练页首次布局脚本在页面上下文调用 `parseFloat` 时遇到同名覆盖并以 TypeError 退出，没有改变页面；第二次改用 `Number(...replace('px',''))` 后成功取得布局、溢出和字号指标。后续浏览器审计统一使用该转换，不重复失败表达式。
+- 数据库智能体已形成生产修复与回归测试：把完整受保护 handler 放进 `DatabaseUserContext.run(account.id, done)`，移除不会传播到外层 continuation 的 `enterWith` 路径，并新增跨异步/跨账号 app 测试与受限 `exercise_api` PostgreSQL 集成用例；其定向与全量本地验证通过，待主 Agent审查 diff 和真实 PostgreSQL 执行。
+- 独立 QA 基线完成且未改生产文件，确认固定移动 dock 覆盖、11.52–12.8px 字号、低于44px控件和生产形态数据库测试缺口；已给出页面×视口×状态矩阵和修复后硬门，稍后会由同一智能体独立复核成品。
+# 2026-08-28：首次真实使用缺陷修复与回归
+
+- 数据库智能体通过失败测试确认：`AsyncLocalStorage.enterWith()` 在身份认证内部 Promise 中设置用户 ID，不能覆盖外层 Fastify 路由 continuation，导致生产 `exercise_api` 的 RLS 上下文为空。
+- 受保护 API 现由 Fastify `preHandler` 使用 `DatabaseUserContext.run(account.id, done)` 包住完整请求；新增两个账号并发请求测试，证明异步写入前后上下文均保持各自账号且不串扰。
+- PostgreSQL 同日规划写入继续使用事务级 advisory lock，并在锁内对同方法、证据和输入快照做幂等返回；内存仓储同步该语义。真实 PostgreSQL 用例覆盖受限角色、RLS、空档案、两个并发请求，并断言只保存 revision 1。
+- 五个业务页统一使用 `AppShell.vue`；移动端改为 header / 独立滚动 main / dock 三行布局，底栏不再覆盖表单或卡片。全局辅助文字提高到至少 14px，表单与按钮触控高度统一到至少 44px，移除外部 Google Font 依赖并使用本地中文字体栈。
+- Today、Training、Nutrition、History、Settings 的聚合加载改为保留成功模块；500 错误在服务端与客户端双重脱敏。营养图片状态轮询增加重入保护和异常捕获，图片预处理失败提供可操作提示。
+- 新增布局回归：登录、五个业务页和管理员页覆盖 320、375、414、768、960、1440，检查横向溢出、同级面板相交、底栏覆盖、44px 控件、14px 辅助文字、控制台错误和异常网络响应。
+- 独立终审发现并推动关闭两处跨日期竞态：新日期局部失败时旧餐食可能串页，以及旧日期“全天记录完整”响应可能回写到新日期。当前按请求日期和加载世代提交结果，日期作用域变化会清空关联状态，异步覆盖状态与照片轮询均校验日期归属。
+- 本轮最终通过：全仓类型检查、25 个服务端测试文件 102 项测试、生产构建、OpenAPI 合约、`git diff --check`，以及桌面/手机 31 项 Playwright E2E；独立智能体确认全部 blocker 已关闭。
+- 真实浏览器复核：320×900 设置页和饮食页均无横向溢出或面板重叠，正文与底栏间隔 8px，辅助文字最小 14px；1440×900 训练页侧栏 288px、主内容 1152px且移动底栏隐藏。
+- 本机未配置 `TEST_DATABASE_URL`，所以新增的受限 PostgreSQL 集成用例尚未在本地执行；必须在服务器显式 `_test` 数据库执行，不能连接生产库。

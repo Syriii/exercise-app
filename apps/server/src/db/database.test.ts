@@ -73,11 +73,12 @@ describe("database user context pool wrapping", () => {
   it("still configures transaction-local user context for promise clients", async () => {
     const { pool, rawClientQuery } = createPoolDouble();
     const context = new DatabaseUserContext();
-    context.enter("00000000-0000-4000-8000-000000000001");
     installUserContext(pool, context);
 
-    const connectedClient = await pool.connect();
-    await connectedClient.query("begin");
+    await context.run("00000000-0000-4000-8000-000000000001", async () => {
+      const connectedClient = await pool.connect();
+      await connectedClient.query("begin");
+    });
 
     expect(rawClientQuery).toHaveBeenNthCalledWith(1, "begin");
     expect(rawClientQuery).toHaveBeenNthCalledWith(

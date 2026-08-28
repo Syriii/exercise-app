@@ -17,7 +17,6 @@ export interface IdentityServiceOptions {
   readonly sessionSecret: string;
   readonly sessionTtlHours: number;
   readonly maxAccounts?: number;
-  readonly onAuthenticated?: (account: Account) => void;
   readonly now?: () => Date;
 }
 
@@ -44,7 +43,6 @@ export class IdentityService {
   readonly #sessionSecret: string;
   readonly #sessionTtlHours: number;
   readonly #maxAccounts: number;
-  readonly #onAuthenticated: ((account: Account) => void) | undefined;
   readonly #now: () => Date;
 
   public constructor(options: IdentityServiceOptions) {
@@ -52,7 +50,6 @@ export class IdentityService {
     this.#sessionSecret = options.sessionSecret;
     this.#sessionTtlHours = options.sessionTtlHours;
     this.#maxAccounts = options.maxAccounts ?? 10;
-    this.#onAuthenticated = options.onAuthenticated;
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -145,7 +142,6 @@ export class IdentityService {
     if (session.account.status !== "active") {
       throw new IdentityError("account_disabled", "账号已停用", 403);
     }
-    this.#onAuthenticated?.(session.account);
     return session.account;
   }
 

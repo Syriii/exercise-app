@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type { PlanningRepository } from "./repository.js";
 import type {
@@ -104,6 +105,15 @@ export class MemoryPlanningRepository implements PlanningRepository {
   public async createReference(userId: string, methodVersion: string, evidenceIds: readonly string[], inputSnapshot: PlanningInputSnapshot, result: DailyPlanningResult): Promise<DailyPlanningReference> {
     const key = `${userId}:${result.localDate}`;
     const values = this.#references.get(key) ?? [];
+    const latest = values.at(-1);
+    if (
+      latest !== undefined &&
+      latest.methodVersion === methodVersion &&
+      isDeepStrictEqual(latest.evidenceIds, evidenceIds) &&
+      isDeepStrictEqual(latest.inputSnapshot, inputSnapshot)
+    ) {
+      return clone(latest);
+    }
     const saved = { id: randomUUID(), revision: values.length + 1, methodVersion, evidenceIds: [...evidenceIds], inputSnapshot: clone(inputSnapshot), result: clone(result), createdAt: new Date() };
     values.push(saved);
     this.#references.set(key, values);

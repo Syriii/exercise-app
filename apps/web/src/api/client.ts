@@ -20,6 +20,15 @@ export class ApiError extends Error {
   }
 }
 
+function publicErrorBody(status: number, body: ApiErrorBody): ApiErrorBody {
+  if (status < 500) return body;
+  return {
+    code: body.code ?? "internal_error",
+    message: "服务器暂时无法处理请求，请稍后重试",
+    ...(body.requestId === undefined ? {} : { requestId: body.requestId }),
+  };
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const startedAt = performance.now();
   const method = init.method ?? "GET";
@@ -54,7 +63,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       code: body.code,
       requestId: body.requestId ?? response.headers.get("x-request-id") ?? undefined,
     });
-    throw new ApiError(response.status, body);
+    throw new ApiError(response.status, publicErrorBody(response.status, body));
   }
   recordApiOutcome({
     method,
@@ -90,7 +99,7 @@ export function uploadBinary<T>(path: string, file: File, onProgress: (percent: 
       }
       const errorBody = typeof body === "object" && body !== null ? body as ApiErrorBody : {};
       recordApiOutcome({ method: "POST", path, status: request.status, durationMs: performance.now() - startedAt, code: errorBody.code, requestId: errorBody.requestId ?? request.getResponseHeader("x-request-id") ?? undefined });
-      reject(new ApiError(request.status, errorBody));
+      reject(new ApiError(request.status, publicErrorBody(request.status, errorBody)));
     });
     request.addEventListener("error", () => { recordApiOutcome({ method: "POST", path, status: 0, durationMs: performance.now() - startedAt, code: "network_error" }); reject(new ApiError(0, { code: "network_error", message: "网络连接中断，照片尚未上传完成" })); });
     request.addEventListener("abort", () => { recordApiOutcome({ method: "POST", path, status: 0, durationMs: performance.now() - startedAt, code: "upload_aborted" }); reject(new ApiError(0, { code: "upload_aborted", message: "照片上传已取消" })); });

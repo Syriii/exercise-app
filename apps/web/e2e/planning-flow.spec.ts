@@ -43,5 +43,6 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await expect(page.getByText("误录的身体测量已修正，旧值仍可追溯。")).toBeVisible();
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: "今天还可以吃" })).toBeVisible();
-  await expect(page.getByText("采用 2026-08-26 的体重")).toBeVisible();
+  const measurementDate = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  await expect(page.getByText(`采用 ${measurementDate} 的体重`)).toBeVisible();
 });
