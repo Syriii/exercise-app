@@ -972,3 +972,5 @@
 - 按产品所有者此前对失效远程任务的处理授权归档旧任务并创建续接 4；新任务发现 `adf00b0` 已在空回合窗口内实际构建。镜像时间、大小、入口、healthcheck、Web revision 与约 650 MB cache 增量一致；无网络/挂载的非 root 隔离探针完成 16 次 callback query 且 16 次 release，证明镜像内容为修复版本。
 - API 只执行一次 Compose 替换后 healthy/restart 0；live/ready 首次 200，8 并行+8 连续 readiness 全通过，70 秒后最近 5 次 health 均 exit 0、无 timeout。Worker 随后只启动一次，Node PID1、UID/GID1000、CapEff0、NoNewPrivs1、无端口、ready日志与首次 heartbeat 均通过。
 - smoke 只执行一次并通过容器、live/ready、4表、Argon2id约束、受限角色、32 RLS、secret隔离与heartbeat，随后在私有端口检查停止。Compose 5.4.0 的 `compose port postgres 5432` 对未发布端口返回 `invalid IP:0`；Docker PortBindings为空、`docker container port` 0行且宿主机3306无监听，属于脚本兼容误报。临时媒体探针尚未执行。
+- 端口修复 `fba997c` 推送并在服务器单次 fast-forward，私有镜像版本仍为 `adf00b0`，未重建/重启容器。第二次 smoke 通过此前所有检查与新私有端口检查，随后临时媒体写入返回 Permission denied；探针未创建，目录为空。
+- 只读权限审计确认媒体目录为 UID/GID1000、0755，实际 API PID1 UID1000 可写；`compose exec` 则默认使用镜像 Config.User=root，但该容器 cap_drop ALL，root 没有 DAC_OVERRIDE，无法写他人0755目录。验收探针应显式用1000:1000执行，不能为测试放宽目录权限或恢复capability。

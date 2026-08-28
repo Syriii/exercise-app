@@ -78,7 +78,7 @@ worker_port=$(published_container_port worker 3000)
 [ -z "$worker_port" ] || fail "worker is unexpectedly published at $worker_port"
 
 log "checking temporary-media volume write access"
-compose exec -T api sh -eu -c \
+compose exec -T --user 1000:1000 api sh -eu -c \
   'umask 077; probe="/app/.runtime/media/verification-$$"; printf "ok" > "$probe"; test "$(cat "$probe")" = "ok"; rm -f "$probe"'
 
 log "smoke check passed"

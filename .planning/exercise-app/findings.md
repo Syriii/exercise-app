@@ -1457,3 +1457,4 @@
 - 远程任务变为 `notLoaded` 后，连续两个构建指令与一个无命令状态探测都产生 completed 但 items 为空的回合；这证明问题位于任务执行通道，而不是 Docker/build。服务器在最后一个有证据的回合仍为 `adf00b0`、preflight 通过、API stopped、5011 空闲、新镜像不存在；不得把空回合当成构建尝试或构建失败。
 - 后续镜像创建时间、Docker缓存和磁盘增量证明第一个空回合实际完成了 `adf00b0` 构建，只是任务记录丢失；因此“空回合没有服务器变化”这一推断被更强运行时证据修正。门禁因镜像已存在而停止重复构建，随后通过隔离行为探针确认镜像真实性。
 - Docker Compose 5.4.0 的 `compose port` 可对未发布端口输出非空占位 `invalid IP:0`，不能再用“输出非空”判断私有服务是否发布。运行态应查询具体容器的 `docker container port <id> <port>/tcp`，并以 PortBindings/宿主机监听作为后验；当前 PostgreSQL 与 Worker 实际均未发布端口。
+- 镜像保持 `USER root` 仅用于入口复制 secret 后由 gosu 降权；`docker compose exec` 仍默认按镜像用户启动，而不是复用 PID1 的 UID。cap_drop ALL 后 root 没有任意写入能力，因此 smoke 的媒体探针必须显式 `--user 1000:1000` 模拟实际 API，而不是把 0755 volume 改成全员可写或给 exec 恢复 capability。

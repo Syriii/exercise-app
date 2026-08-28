@@ -31,5 +31,6 @@ describe("container runtime secret boundary", () => {
     expect(smokeCheck).toContain('docker container port "$container_id" "$container_port/tcp"');
     expect(smokeCheck).not.toContain("compose port postgres 5432");
     expect(smokeCheck).not.toContain("compose port worker 3000");
+    expect(smokeCheck).toContain("compose exec -T --user 1000:1000 api sh -eu -c");
   });
 });
