@@ -77,9 +77,9 @@
 ## 当前阶段
 
 - **阶段：** 6 — 使用与扩展（正在执行首次真实服务器部署验收）
-- **状态：** 提交 `29f143f` 已推送并在服务器同步，私有版本元数据已修正并通过预检。腾讯云 Node/PostgreSQL 镜像入口可用，但首次完整构建从 Debian 官方源下载依赖极慢；远程 Codex 平台会话随后以 403 中断并取消 BuildKit 上下文。审计确认目标镜像未生成，0 容器、0 named volume、5011 与既有服务保持正常，约 332.5 MB 缓存继续保留。项目现已增加可选 `DEBIAN_MIRROR`，默认保持官方源，腾讯云部署可仅在项目私有 `.env` 中切换到腾讯云统一软件源
+- **状态：** 项目级 Debian 软件源参数化已由提交 `852fe74` 推送到 GitHub `main`；默认仍使用 Debian 官方源，腾讯云部署可只在项目私有 `.env` 中切换统一软件源。目标服务器仍停留在 `29f143f`，没有应用镜像、容器或业务 volume，5011 与既有服务保持正常，约 332.5 MB 缓存继续保留
 - **当前产出：** 完整 Web 实现、本地自动化验收、公开仓库提交、快速部署与诊断交接均已完成
-- **下一步：** 提交并推送项目级 Debian 软件源参数化；服务器只 fast-forward 拉取该提交，再经单独批准向私有 `.env` 增加 `DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian` 并运行无副作用 preflight。实际重启构建仍需独立确认并持续监控 Swap、内存、磁盘、5011 和既有服务；不清理现有缓存，不 enable Docker，不修改 Docker daemon、宿主机软件源、`fstab`、挂载、Nginx 或其他项目。
+- **下一步：** 经单独批准，让服务器只 fast-forward 拉取 `852fe74`，确认 Git 与私有配置元数据不变；之后再单独批准向私有 `.env` 增加 `DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian` 并运行无副作用 preflight。实际重启构建仍需独立确认并持续监控 Swap、内存、磁盘、5011 和既有服务；不清理现有缓存，不 enable Docker，不修改 Docker daemon、宿主机软件源、`fstab`、挂载、Nginx 或其他项目。
 
 ## 首次完整提交审查
 

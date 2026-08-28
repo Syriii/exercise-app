@@ -911,3 +911,4 @@
 - 第二次腾讯云构建成功复用 Node 基础层，但 Debian 官方源极慢：索引耗时约 5 分 42 秒，83.2 MB 编译依赖下载持续约一小时。远程 Codex 平台后端 403 中断后，BuildKit 以 `context canceled` 退出；目标镜像未生成，0 容器/0 named volume、5011、原有服务和 OOM 状态正常。
 - 审计保留约 332.5 MB 构建缓存，不执行 prune。项目新增可选 `DEBIAN_MIRROR` build arg，默认保持 Debian 官方源；腾讯云部署示例使用官方公布的 `https://mirrors.cloud.tencent.com/debian`，只改变镜像构建内部的软件源，不修改宿主机或 Docker daemon。
 - 同步更新 `.env.example`、快速部署和完整自托管手册，移除实际 BuildKit 401 的 DaoCloud 推荐示例。静态配置检查、脚本语法、`git diff --check`、严格类型检查、23 个文件 96 项服务端测试、生产构建和 OpenAPI 合约均通过。
+- 上述 8 个项目与规划文件已提交为 `852fe74 fix(deployment): support configurable Debian mirror` 并推送 GitHub `main`；服务器尚未拉取，私有 `.env` 尚未增加 Debian 源覆盖，构建也没有自动重启。
