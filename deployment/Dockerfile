@@ -5,9 +5,11 @@ FROM ${NODE_BASE_IMAGE} AS build
 WORKDIR /app
 
 ARG APP_BUILD_REVISION=local
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
 ENV VITE_APP_BUILD_REVISION=$APP_BUILD_REVISION
 
-RUN apt-get update \
+RUN sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR%/}|g" /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
   && apt-get install -y --no-install-recommends build-essential python3 \
   && rm -rf /var/lib/apt/lists/*
 

@@ -900,3 +900,14 @@
 - 已完成参数化：Dockerfile 用全局 `NODE_BASE_IMAGE` 驱动 build/runtime 两个外部 `FROM`，Compose 的普通与 verification 构建目标都传入该参数，PostgreSQL 使用独立 `POSTGRES_IMAGE`；两个默认值保持原 Docker Hub 固定版本。
 - `.env.example`、快速部署和完整自托管文档已同步；文档说明项目级覆盖、恢复默认值、公共代理边界以及自有仓库的长期建议。
 - 本地验证通过：`git diff --check`、Compose YAML 解析、全部部署脚本 `sh -n`、镜像入口结构断言、全仓库 TypeScript/Vue 检查、23 个文件 96 项服务端测试、生产构建和 OpenAPI 合约生成。没有业务或界面变化，因此未重复 Playwright。
+- 参数化提交 `29f143f` 已推送并在服务器 fast-forward，同步范围恰好 8 个预期文件；私有 `.env` 与 secret 元数据未变，Compose 默认展开验证通过。
+- 产品所有者批准后，服务器私有 `.env` 增加 DaoCloud Node/PostgreSQL 两项并通过 preflight；随后 API build 在 `load metadata` 阶段因 `m.daocloud.io` HEAD 401 退出，没有下载层、生成镜像或创建容器。
+- 结束审计保持 0 镜像/0 容器/0 named volume，5011 和现有服务正常；containerd 仅增加约 115 KiB 请求元数据。下一步改为只读验证 DaoCloud 官方公开的 Docker Hub 替换域名，不重复同一失败命令。
+- 产品所有者确认主机属于腾讯云。官方内网镜像 `mirror.ccs.tencentyun.com` 直连 DNS/TCP/TLS/Registry API 正常，Node/PostgreSQL 固定 manifest 均约 1 秒返回并包含 `linux/amd64`；私有 `.env` 已精确从 DaoCloud 改为腾讯云地址且 preflight 通过，未修改 daemon。
+- 腾讯云首次 API build 启动前，远程基线已显示镜像 tag 为旧 `1bdf535` 而 HEAD 为 `29f143f`，但远程任务错误地继续启动。主任务发现后立即发送停止指令，构建以 130 退出，停在 apt 索引阶段，未进入 npm、应用编译或最终镜像导出。
+- 中断后仍为 0 最终镜像/0 容器/0 named volume，5011、现有服务与 OOM 正常；保留 9 条约 332.5 MB 构建缓存和腾讯云 Node 基础层，预计可用于修正版本后的下一次构建，不执行清理。
+- 当前必须先把私有 `.env` 的 `APP_IMAGE_TAG`、`APP_BUILD_REVISION` 精确更新为 `29f143f` 并单独预检；不得把版本修正与重新构建合并为同一未审查动作。
+- 服务器私有版本键随后精确更新为 `29f143f`，同一 inode、root:root 0600 与其他 `.env` 内容保持不变；preflight 和 Compose 展开均通过。
+- 第二次腾讯云构建成功复用 Node 基础层，但 Debian 官方源极慢：索引耗时约 5 分 42 秒，83.2 MB 编译依赖下载持续约一小时。远程 Codex 平台后端 403 中断后，BuildKit 以 `context canceled` 退出；目标镜像未生成，0 容器/0 named volume、5011、原有服务和 OOM 状态正常。
+- 审计保留约 332.5 MB 构建缓存，不执行 prune。项目新增可选 `DEBIAN_MIRROR` build arg，默认保持 Debian 官方源；腾讯云部署示例使用官方公布的 `https://mirrors.cloud.tencent.com/debian`，只改变镜像构建内部的软件源，不修改宿主机或 Docker daemon。
+- 同步更新 `.env.example`、快速部署和完整自托管手册，移除实际 BuildKit 401 的 DaoCloud 推荐示例。静态配置检查、脚本语法、`git diff --check`、严格类型检查、23 个文件 96 项服务端测试、生产构建和 OpenAPI 合约均通过。

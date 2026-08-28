@@ -99,6 +99,7 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 - `APP_PORT`：服务器对外端口，例如 `3000`；访问地址为 `http://服务器IP:APP_PORT`。
 - `NODE_BASE_IMAGE`：构建镜像使用的 Node 基础镜像，默认 `node:24.19.0-bookworm-slim`。只在目标主机无法稳定访问 Docker Hub 且替代仓库已验证时覆盖。
 - `POSTGRES_IMAGE`：PostgreSQL 服务镜像，默认 `postgres:18.6-bookworm`。首次初始化后不得通过这个变量跨主版本升级数据库。
+- `DEBIAN_MIRROR`：Node 构建镜像内部安装编译依赖时使用的 Debian 软件源根地址，默认 `http://deb.debian.org/debian`。它同时替换基础源与 `debian-security` 地址的共同前缀，只影响镜像构建，不修改宿主机 `/etc/apt`。
 - `COOKIE_SECURE=false`：只适用于受信局域网或 VPN 内的纯 HTTP。公共互联网必须先配置 HTTPS，再改为 `true`。
 - `POSTGRES_DB` 和 `POSTGRES_USER`：首次初始化后不要随意改变；它们与已有 volume 中的数据库身份有关。
 - `WORKER_HEARTBEAT_INTERVAL_SECONDS`：worker 写入 PostgreSQL 存活信号的间隔，默认 15 秒。
@@ -131,18 +132,19 @@ docker compose logs setup
 docker compose logs --tail=100 api worker postgres
 ```
 
-#### Docker Hub 不可达时切换项目镜像
+#### 上游镜像或 Debian 软件源不稳定时切换项目下载源
 
 镜像地址由项目 `.env` 控制，不需要修改 `/etc/docker/daemon.json`。这对于承载其他项目的共享服务器尤其重要：daemon 级 `registry-mirrors` 会改变所有 Docker 工作负载的拉取行为，并需要重新加载或重启 Docker。
 
-当前已验证的 DaoCloud 写法为：
+腾讯云服务器可以使用以下项目级配置：
 
 ```dotenv
-NODE_BASE_IMAGE=m.daocloud.io/docker.io/library/node:24.19.0-bookworm-slim
-POSTGRES_IMAGE=m.daocloud.io/docker.io/library/postgres:18.6-bookworm
+NODE_BASE_IMAGE=mirror.ccs.tencentyun.com/library/node:24.19.0-bookworm-slim
+POSTGRES_IMAGE=mirror.ccs.tencentyun.com/library/postgres:18.6-bookworm
+DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian
 ```
 
-切换前先用不会下载镜像层的 manifest 检查确认固定标签存在并包含目标架构；切换后重新运行 `./scripts/preflight.sh`。公共代理有缓存、白名单和限流边界，不能把一次成功当作永久可用保证。生产环境更稳定的做法是把经过验证的固定镜像同步到自己控制的容器仓库，再把上述变量指向自有地址。Dockerfile 使用官方支持的 `ARG` 参数化 `FROM`，没有设置变量时仍回到 Docker Hub 原始标签：[Dockerfile `ARG` 与 `FROM`](https://docs.docker.com/reference/dockerfile/#understand-how-arg-and-from-interact)、[Compose build args](https://docs.docker.com/reference/compose-file/build/#args)、[DaoCloud 公共镜像代理](https://github.com/DaoCloud/public-image-mirror)。
+`mirrors.cloud.tencent.com` 是腾讯云公布的公网与内网统一域名；云服务器位于腾讯云 VPC 且保留默认 DNS 时会优先走内网链路。切换前仍应使用不会下载镜像层的 manifest 检查确认固定容器标签存在并包含目标架构；切换后重新运行 `./scripts/preflight.sh`。镜像代理存在缓存、白名单和限流边界，不能把一次成功当作永久保证。生产环境更稳定的做法是把经过验证的固定镜像同步到自己控制的容器仓库，再把镜像变量指向自有地址。Dockerfile 使用官方支持的 `ARG` 参数化 `FROM` 与构建软件源，没有设置变量时仍回到原始上游：[Dockerfile `ARG` 与 `FROM`](https://docs.docker.com/reference/dockerfile/#understand-how-arg-and-from-interact)、[Compose build args](https://docs.docker.com/reference/compose-file/build/#args)、[腾讯云软件源](https://cloud.tencent.com/document/product/213/8623)。
 
 上面的基础命令不会挂载 DeepSeek Key，训练和手工饮食照常可用，拍照入口会明确提示“尚未配置”。启用拍照估餐时，确认 `secrets/deepseek_api_key` 已写入真实 Key，然后在所有 Compose 命令中同时加入覆盖文件：
 

@@ -64,14 +64,15 @@ COOKIE_SECURE=false
 
 `COOKIE_SECURE=false` 只适用于局域网或受信 VPN 中的 HTTP 测试。如果这个端口直接暴露在公共互联网，先按完整手册配置 HTTPS，再改为 `true`；不要通过公网明文发送密码、照片和健康记录。
 
-默认从 Docker Hub 获取固定版本的 Node 与 PostgreSQL 镜像。如果服务器访问 Docker Hub 不稳定，可以在确认代理支持对应版本后，只为本项目修改 `.env`：
+默认从 Docker Hub 获取固定版本的 Node 与 PostgreSQL 镜像，并从 Debian 官方软件源安装构建依赖。如果服务器位于腾讯云且访问这些上游不稳定，可以只为本项目修改 `.env`：
 
 ```dotenv
-NODE_BASE_IMAGE=m.daocloud.io/docker.io/library/node:24.19.0-bookworm-slim
-POSTGRES_IMAGE=m.daocloud.io/docker.io/library/postgres:18.6-bookworm
+NODE_BASE_IMAGE=mirror.ccs.tencentyun.com/library/node:24.19.0-bookworm-slim
+POSTGRES_IMAGE=mirror.ccs.tencentyun.com/library/postgres:18.6-bookworm
+DEBIAN_MIRROR=https://mirrors.cloud.tencent.com/debian
 ```
 
-这两个变量只改变本项目使用的镜像，不修改 Docker daemon，也不需要重启 Docker。公共代理可能限流或缓存旧标签，使用前应先检查 manifest；长期生产部署更适合把固定镜像同步到自己控制的容器仓库。恢复默认值时删除这两行，或改回 `.env.example` 中的 Docker Hub 地址。
+这些变量只影响本项目的镜像与镜像内部的软件包下载，不修改宿主机软件源或 Docker daemon，也不需要重启 Docker。镜像代理可能限流或缓存旧标签，使用前应先检查 manifest；长期生产部署更适合把固定镜像同步到自己控制的容器仓库。恢复默认值时删除这些覆盖项，或改回 `.env.example` 中的值。
 
 ## 4. 构建并启动
 

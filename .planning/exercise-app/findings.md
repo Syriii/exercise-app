@@ -1423,3 +1423,10 @@
 - DaoCloud 公共代理声明支持 `m.daocloud.io/docker.io/...` 前缀并保持上游摘要语义，但存在缓存、白名单和限流边界，仍应固定明确版本并在目标主机实际验证。
 - 目标服务器只读验证通过：`m.daocloud.io` DNS、直连 TCP 443、TLS 1.3 与 Registry challenge 正常；Node `24.19.0-bookworm-slim` 和 PostgreSQL `18.6-bookworm` manifest 均在约 2 秒内取得且包含 `linux/amd64`。该验证没有拉取镜像层，不能替代完整构建。
 - 当前仓库只有两个外部基础镜像入口：Dockerfile 的 Node 标签和 Compose 的 PostgreSQL 标签。推荐分别用 `NODE_BASE_IMAGE` build arg 与 `POSTGRES_IMAGE` 环境变量参数化，默认保持原始 Docker Hub 短名。
+- 服务器使用参数化后的 `m.daocloud.io/docker.io/library/node:24.19.0-bookworm-slim` 实际构建时，BuildKit 在 metadata HEAD 阶段收到 401；没有下载镜像层。DaoCloud 项目 issue #35515 记录了相同的 `m.daocloud.io/docker.io/library/...` BuildKit 401 形态，说明只读 imagetools 成功不足以证明 BuildKit 构建兼容。
+- DaoCloud 官方 README 同时提供 `docker.m.daocloud.io/library/...` 的 Docker Hub 前缀替换地址，并明确说该方式由人工规则维护、优先级低于统一前缀。下一步只能先在目标机只读验证该固定 Node/PostgreSQL 地址；不能直接把一次 manifest 成功当作构建成功。
+- 腾讯云直连 Node 基础镜像后，真正瓶颈转为镜像内部的 Debian 官方软件源：索引约 9.4 MB 下载耗时 5 分 42 秒，随后 83.2 MB 编译依赖在一小时左右仍未完成。构建没有进入 npm、应用编译或最终镜像导出。
+- 远程 Codex 平台后端 403 会使附着于该任务的长时间构建客户端上下文被取消；Docker 日志记录 BuildKit `Solve` 为 `context canceled`。这不是服务器 OOM或原有服务故障，但说明不能让慢速上游把单次受控构建拖到平台会话极限。
+- 中断后审计确认目标镜像不存在、0 容器、0 named volume、5011 空闲、关键服务 active、无新 OOM；约 332.5 MB BuildKit 缓存保留，`/var/lib/docker` 仍不存在。
+- 腾讯云官方说明 `mirrors.cloud.tencent.com` 是公网与内网统一域名，腾讯云 VPC 默认 DNS 会优先解析到内网链路。最小方案是在 Dockerfile 与 Compose 增加项目级 `DEBIAN_MIRROR` build arg，默认仍为 `http://deb.debian.org/debian`；目标服务器只在私有 `.env` 覆盖，不修改宿主机 `/etc/apt` 或 Docker daemon。
+- 本机普通 SSH 进程没有远程项目所用密钥，直接只读连接被公钥认证拒绝；后续服务器操作仍必须通过 Codex 远程项目。远程任务在审计后又出现空 turn，实际腾讯云 Debian 源速度仍需在下一次可用的远程任务中先只读验证。
