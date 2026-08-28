@@ -974,3 +974,7 @@
 - smoke 只执行一次并通过容器、live/ready、4表、Argon2id约束、受限角色、32 RLS、secret隔离与heartbeat，随后在私有端口检查停止。Compose 5.4.0 的 `compose port postgres 5432` 对未发布端口返回 `invalid IP:0`；Docker PortBindings为空、`docker container port` 0行且宿主机3306无监听，属于脚本兼容误报。临时媒体探针尚未执行。
 - 端口修复 `fba997c` 推送并在服务器单次 fast-forward，私有镜像版本仍为 `adf00b0`，未重建/重启容器。第二次 smoke 通过此前所有检查与新私有端口检查，随后临时媒体写入返回 Permission denied；探针未创建，目录为空。
 - 只读权限审计确认媒体目录为 UID/GID1000、0755，实际 API PID1 UID1000 可写；`compose exec` 则默认使用镜像 Config.User=root，但该容器 cap_drop ALL，root 没有 DAC_OVERRIDE，无法写他人0755目录。验收探针应显式用1000:1000执行，不能为测试放宽目录权限或恢复capability。
+- 媒体探针修复 `9cdda61` 推送并由服务器单次 fast-forward；没有重建或重启正在运行的容器。最终 smoke 只执行一次并完整通过，应用 UID/GID1000 可在临时媒体目录完成写入、读取和删除，探针前后文件名与数量一致且零残留。
+- smoke 后继续观察约 70 秒：API healthy/restart 0，最近 5 次 healthcheck 均 exit 0；Worker running/restart 0 且心跳新鲜；PostgreSQL healthy/restart 0，setup exited 0/restart 0。live/ready 均为 HTTP 200，5011 双栈监听，PostgreSQL 与 Worker 没有宿主机端口。
+- 本机作为服务器外部环境绕过代理直连 `http://<server-ip>:5011`，live 与 ready 均返回 HTTP 200，耗时约 0.09 秒。Nginx 6 个进程和 80/443 监听保持，Docker 安装后新增 OOM 为 0；Docker/containerd active、项目对象集合和两个 volume 符合预期，没有执行清理。
+- 首次启动目标至此完成。真实 DeepSeek、容器重建持久化、pg-boss 故障注入、备份恢复和 HTTPS 不属于本次完成条件，继续保留为独立专项验收，不用本次 smoke 冒充。

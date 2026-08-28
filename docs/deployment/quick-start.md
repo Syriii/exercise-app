@@ -106,6 +106,8 @@ docker compose logs setup
 curl --fail http://127.0.0.1:3000/api/v1/health/ready
 ```
 
+项目的首台 OpenCloudOS 9 服务器已经按上述分步语义完成真实首次启动：PostgreSQL、setup、API、Worker、非破坏性 smoke 和外部 `IP:5011` 健康访问均通过。这个记录证明当前部署路径可运行，不替代每台新服务器自己的预检，也不代表备份恢复、故障注入或 DeepSeek 真实请求已经验收。
+
 ## 5. 用手机访问
 
 在手机浏览器打开：

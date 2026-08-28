@@ -2,7 +2,7 @@
 
 一个面向训练与饮食记录的开源健身辅助应用。项目先以响应式 Web App 验证真实使用体验，成熟后再封装为 Android APK。
 
-当前仓库采用单仓库、多应用结构；Vue Web、Fastify 服务端、PostgreSQL migration、pg-boss worker、账号会话和 Compose 部署定义已经完成。训练计划与实际记录、证据化训练建议和消耗估算、官方营养规划、独立饮食安排、手工与图片估餐、暂定值核对、历史趋势、三类提醒、账号导出/删除及朋友版安全边界均已有可运行实现，并已通过本地自动化验收。真实 Docker、PostgreSQL、DeepSeek 和备份恢复仍等待目标服务器验收；大型公共食物目录等待合法数据源，Android 在 Web 版获得实际使用确认后实现。
+当前仓库采用单仓库、多应用结构；Vue Web、Fastify 服务端、PostgreSQL migration、pg-boss worker、账号会话和 Compose 部署定义已经完成。训练计划与实际记录、证据化训练建议和消耗估算、官方营养规划、独立饮食安排、手工与图片估餐、暂定值核对、历史趋势、三类提醒、账号导出/删除及朋友版安全边界均已有可运行实现，并已通过本地自动化验收。首台 OpenCloudOS 9 服务器的 Compose 首次启动、真实 migration/RLS、API/Worker 健康、非破坏性 smoke 和外部 `IP:5011` 访问已经通过；DeepSeek 真实请求、容器重建持久化、队列故障恢复和备份恢复仍待专项验收。大型公共食物目录等待合法数据源，Android 在 Web 版获得实际使用确认后实现。
 
 ## 已确认的两个功能域
 

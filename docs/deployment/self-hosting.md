@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | Web 长期运行部署基线；OpenCloudOS 9 首台主机已完成容器环境、私有配置和 API 镜像构建，等待首次启动 |
+| 状态 | Web 长期运行部署基线；OpenCloudOS 9 首台主机已完成首次启动与非破坏性 smoke，专项故障和备份验收待执行 |
 | 最后更新 | 2026-08-28 |
 | 适用范围 | 单台长期运行服务器、Docker Compose、IP + 端口访问 |
 
@@ -344,15 +344,25 @@ docker compose exec postgres pg_isready -U "${POSTGRES_USER:-exercise}" -d "${PO
 - “过期未删”持续大于 0：检查 worker 的媒体清理日志和目录权限；不要直接删除数据库记录来隐藏告警。
 - 备份或恢复验证显示失败：先保留失败日志和现有备份，确认数据库、磁盘和镜像版本；不要用一次新的成功记录覆盖调查过程。
 
-## 9. 尚待真实服务器验收
+## 9. 首台服务器验收状态
 
-当前开发机没有 Docker 与 PostgreSQL，因此以下项目不能在本机伪报为已通过：
+2026-08-28 已在一台同时承载其他项目的 OpenCloudOS 9 服务器完成首次启动。验收始终比较本次部署前后差异，没有修改 Nginx、历史 failed unit、`fstab`、防火墙或其他项目配置。
 
-- Compose 构建、启动顺序和健康检查；
+已经通过：
+
+- Compose 构建以及 PostgreSQL → setup → API → Worker 的分步启动；
+- 19 份 Drizzle migration、pg-boss schema、受限数据库角色和 32 个 RLS 表的真实执行；
+- PostgreSQL healthy、setup exited 0、API healthy、Worker 运行和持续心跳，全部 restart 0；
+- live/ready、Argon2id 约束、secret 隔离、私有数据库/Worker 端口和临时媒体读写删除 smoke；
+- 从服务器外部通过 `IP:5011` 访问 live/ready，均返回 HTTP 200；
+- 启动后的资源、OOM、Docker 对象、宿主机既有进程与 80/443 监听差异审计。
+
+首次启动没有执行下列具有额外影响或依赖的专项验收，因此不能把它们写成已通过：
+
 - PostgreSQL volume 在容器重建后的持久化；
-- Drizzle 与 pg-boss migration 的真实数据库执行；
-- 事务提交/回滚、SIGKILL、数据库断线和任务恢复；
+- 事务提交/回滚、Worker SIGKILL、数据库断线和任务恢复；
 - `pg_dump` / `pg_restore` 备份恢复演练；
-- 目标服务器端口、防火墙、磁盘、内存和 CPU 参数。
+- 真实 DeepSeek Key、模型响应和分析后原图生命周期；
+- HTTPS、域名以及首次登录后的真实业务使用体验。
 
-首次取得目标服务器环境后，应按本节清单逐项记录实际结果，再把部署状态从“基线”改为“已验收”。
+执行这些项目时继续使用隔离目标和显式影响确认，不用首次启动成功替代故障恢复证据。
