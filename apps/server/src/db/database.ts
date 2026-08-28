@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 
 import { schema } from "./schema/index.js";
 import type { DatabaseUserContext } from "./user-context.js";
@@ -26,7 +26,13 @@ export function createDatabase(databaseUrl: string, userContext?: DatabaseUserCo
   };
 }
 
-function installUserContext(pool: Pool, userContext: DatabaseUserContext): void {
+type PoolConnectCallback = (
+  error: Error | undefined,
+  client: PoolClient | undefined,
+  done: (release?: unknown) => void,
+) => void;
+
+export function installUserContext(pool: Pool, userContext: DatabaseUserContext): void {
   const rawConnect = pool.connect.bind(pool);
   const rawPoolQuery = pool.query.bind(pool);
 
@@ -48,8 +54,7 @@ function installUserContext(pool: Pool, userContext: DatabaseUserContext): void 
     }
   }) as typeof pool.query;
 
-  pool.connect = (async () => {
-    const client = await rawConnect();
+  const configureClient = (client: PoolClient): PoolClient => {
     const userId = userContext.userId;
     if (userId === null) return client;
     const rawClientQuery = client.query.bind(client);
@@ -63,6 +68,20 @@ function installUserContext(pool: Pool, userContext: DatabaseUserContext): void 
       return result;
     }) as typeof client.query;
     return client;
+  };
+
+  pool.connect = ((callback?: PoolConnectCallback) => {
+    if (callback === undefined) {
+      return rawConnect().then(configureClient);
+    }
+
+    return rawConnect((error, client, done) => {
+      if (error !== undefined || client === undefined) {
+        callback(error, client, done);
+        return;
+      }
+      callback(undefined, configureClient(client), done);
+    });
   }) as typeof pool.connect;
 }
 

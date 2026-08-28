@@ -17,6 +17,7 @@ describe("container runtime secret boundary", () => {
     expect(dockerfile).toContain("COPY --from=build /usr/sbin/gosu /usr/local/bin/gosu");
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/exercise-app-entrypoint"]');
     expect(dockerfile).toContain('CMD ["node", "apps/server/dist/entrypoints/api.js"]');
+    expect(dockerfile).toContain("process.exit(r.ok?0:1)");
     expect(entrypoint).toContain("/tmp/exercise-app-secrets");
     expect(entrypoint).toContain('chmod 0440 "$target_path"');
     expect(entrypoint).toContain('exec /usr/local/bin/gosu node:node "$@"');

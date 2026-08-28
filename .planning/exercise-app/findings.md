@@ -1449,3 +1449,8 @@
 - Compose 本地 file-backed secrets 在目标 Docker/Compose 中保留宿主机 root:root 0600 元数据，非 root 镜像用户不能直接读取；`uid/gid/mode` 对 file bind source 不能作为可移植修复。把宿主机 secret 改为 0644、让应用长期以 root 运行或把 secret 填入环境变量都会削弱当前边界。
 - 当前修复采用短暂 root 入口 + tmpfs 副本 + gosu 降权：原始 bind secret 继续 0600，副本 root:node 0440 且只存在容器 `/tmp`；API/setup/worker 的实际 Node 进程仍为非 root，直接入口同时减少 npm PID 代理。真实验证必须检查副本权限、主进程 UID/GID、无 secret 回显和 setup 幂等边界。
 - root UID 在容器 `cap_drop: ALL` 后不能完成 chown/setgroups/setgid/setuid；入口需要的最小启动能力是 CHOWN、SETGID、SETUID。它们只用于准备 tmpfs secret 并由 gosu 降权，实际 Node 进程必须通过 `/proc/self/status` 验证 `CapEff=0`，同时保持 `no-new-privileges`，不能为方便而恢复默认 capability 集合。
+- 服务器隔离探针验证了完整运行边界：root:root 0600 原始 mount 对 node 不可读，tmpfs 副本 root:node 0440 可读，实际进程 UID/GID 1000、CapEff=0、NoNewPrivs=1；无网络、数据库、volume 或端口副作用。该证据闭合了静态镜像检查无法证明的实际降权行为。
+- API 首次单服务启动没有触发容器重启或应用退出，而是镜像内置 healthcheck 连续返回 Docker 执行码 `-1`，最终使 Compose `--wait` 超时。该状态优先指向健康检查进程无法创建或执行，不能在读取 healthcheck 状态输出、容器进程身份和必要的限量日志前推断 API 业务启动失败，也不能通过增加等待时间掩盖。
+- 后续只读诊断修正了上一条的“没有应用退出”判断：API 的 PID 1 确实曾以退出码 1 结束并由 `unless-stopped` 自动拉起一次；Docker 不会仅因 unhealthy 自动重启容器。重启后的 PID 1 是预期 Node API，UID/GID 1000、CapEff=0、NoNewPrivs=1，容器内重新出现 3000 监听。
+- healthcheck 每次恰好运行到 5 秒 timeout，而镜像命令的成功分支只检查 `r.ok`、没有显式 `process.exit(0)`。Node 内置 fetch 的连接池可继续保持事件循环，因而“HTTP 已成功但探针进程不退出”是当前最强候选；应先用可单测的探针函数或显式成功退出修复，不应放宽健康超时。主进程退出码 1 仍需单独用生命周期和应用代码证据解释。
+- 最终只读证据确认 readiness 的 31 个请求都有进入日志但没有完成日志，容器内 3000 和宿主机 5011 映射正常；`pg.Pool.query` 源码明确通过 `this.connect(callback)` 取连接，而项目包装忽略 callback。每 30 秒泄漏 1 个连接、池上限 10、连接等待超时 5 秒，与约 5 分 36 秒后的退出码 1、无业务异常日志和自动拉起完整吻合，因此连接池契约缺失为高置信根因；显式 healthcheck 退出仍是必须单独修复的次要缺陷。

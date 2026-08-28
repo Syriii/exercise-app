@@ -956,3 +956,14 @@
 - 本地已新增入口脚本、Compose 直接 Node 命令、secret 符号链接拒绝和回归测试；Shell 语法、严格类型检查、24 个文件 97 项服务端测试、生产构建和 OpenAPI 合约均通过。本机无 Docker，真实入口仍需服务器镜像探针验证。
 - 镜像 `exercise-app:8f58e9a` 在服务器单次重建成功，约 111.7 MiB；构建约 100 秒，`/newdata` 增加约 632 MiB、缓存增至约 1.82 GB。PostgreSQL、失败 setup、端口、服务和 OOM 状态保持，旧镜像未删除。
 - 设计探针时发现 Compose `cap_drop: ALL` 同时会阻止 root 入口执行 chown/setgid/setuid。真实探针前补充最小 `CHOWN`、`SETGID`、`SETUID` bootstrap capabilities；gosu 降为 node 后必须验证有效能力为 0，`no-new-privileges` 保留。未在这一缺口修复前运行探针或重试 setup。
+- 最小能力补丁 `9f2f400` 推送并同步服务器，私有版本键精确更新后单次构建成功，生成约 111.7 MiB 镜像；旧镜像、PostgreSQL 和失败 setup 现场均保留。隔离探针一次通过：实际 UID/GID 1000，tmpfs副本 root:node 0440，原始 0600 mount 对 node 返回 EACCES，CapEff=0、NoNewPrivs=1，退出后自动删除。
+- 删除旧失败 setup 容器只移除了其元数据、日志和可写层，两个 volume、数据库、网络和镜像完整保留。修复后的防重复门禁通过后 setup 只执行一次，约 6.9 秒退出 0。
+- 结构性验证返回 19 个业务 migration、pgboss schema 存在、exercise_api 角色存在、32 个 RLS 表、admin 初始化成功；只读取计数/布尔，没有输出账号行、哈希、密码或 secret。PostgreSQL 仍 healthy/restart 0，5011/3306 未监听，无新增 OOM或既有服务变化。
+- API 启动前的 Git、版本、镜像、PostgreSQL/setup、端口、资源、OOM、Nginx、preflight 与 Compose 静态门禁全部通过；healthcheck 的 Compose JSON 时长表示差异经只读复核确认不是配置缺失。
+- API 只执行一次 `--no-build --pull never --no-deps --wait` 启动，约 124.9 秒后因 120 秒健康等待超时退出码 1；未自动重试。容器保留为 running/unhealthy/restart 0，连续 4 次 healthcheck 执行码均为 -1，5011 已监听；worker 未启动。
+- 失败后 PostgreSQL 仍 healthy/restart 0、setup 仍 exited 0/restart 0，四个 secret、两个 volume、网络和镜像集合不变；Nginx 进程及 80/443、Docker/containerd、OOM 与资源均无异常。尚未请求 live/ready、读取日志或修改配置，下一步只读诊断 healthcheck 执行失败。
+- 只读诊断确认数据库 `Pool.connect` 包装丢失 callback 签名，导致 readiness 的 `pool.query` 永久等待并按 30 秒周期泄漏连接；池满后未处理的连接超时使 API 约每 5 分半退出并被 `unless-stopped` 拉起。healthcheck 成功分支没有显式退出是独立的 5 秒 timeout 缺陷。
+- 本地首轮修复同时保留 `Pool.connect` Promise/callback 契约，并让 healthcheck 成功显式退出 0；首轮定向类型检查仅发现新增测试替身的对象字面量 `this` 被推断为 `{}`，生产代码没有报错。测试改为显式引用替身对象后重跑，不弱化断言。
+- 修正替身类型后服务端严格类型检查通过；定向测试 3 项中 2 项通过，唯一失败是事务测试断言观察了已被生产包装替换的 `client.query`，Vitest 正确指出它不再是 spy。测试改为保留并断言原始 query spy 的调用顺序，不改变生产代码或预期行为。
+- 定向修复验证最终通过：服务端严格类型检查与 3 项连接池/容器运行时测试通过。随后全仓库类型检查、25 个文件 99 项服务端测试、生产构建和 OpenAPI 合约全部通过；Web 构建仍为 51 个模块，未改变 API 契约。
+- 为停止持续连接泄漏，只人工停止 API 一次；停止时旧进程因连接池卡死未能在 30 秒内优雅退出，最终 exited 137，但 Docker 安装后 OOM 仍为 0。人工停止后 restart count 固定、5011 释放；PostgreSQL/setup、两个 volume、network、secret 元数据、Nginx 和资源基线均保持。

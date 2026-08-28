@@ -77,9 +77,9 @@
 ## 当前阶段
 
 - **阶段：** 6 — 使用与扩展（正在执行首次真实服务器部署验收）
-- **状态：** PostgreSQL 已 running/healthy。首次 setup 单次执行在任何数据库连接或 migration 之前失败：非 root `node` 无法读取 Compose 以宿主机 `root:root 0600` 原样挂载的 secret；退出码 1，现场已保留，数据库仍为空且健康，API/worker 未启动。正在修复容器 secret 降权入口，宿主机 secret 权限不降低
+- **状态：** PostgreSQL running/healthy，setup exited 0 且数据库结构验证通过。API 首次启动暴露两个独立缺陷：`Pool.connect` 包装丢失 callback 契约导致 readiness 泄漏连接并周期性退出，healthcheck 成功分支也未显式退出。故障 API 已人工停止并保持停止，5011 已释放；本地修复及 99 项服务端测试、全仓库类型检查、生产构建和 OpenAPI 合约均通过，正在提交并构建修复镜像
 - **当前产出：** 完整 Web 实现、本地自动化验收、公开仓库提交、快速部署与诊断交接均已完成
-- **下一步：** 完成容器 secret 入口的本地验证、提交和推送；服务器 fast-forward 后更新镜像版本并重建应用镜像。先用不连接数据库的容器探针确认 secret 临时副本可由 node 读取且主进程 UID/GID 已降权，再删除失败的 setup 容器并重新执行一次 setup。不得在修复验证前重跑 migration。
+- **下一步：** 审查并推送本地修复，服务器 fast-forward 后更新私有镜像版本并单次构建；删除的目标只能是已停止的旧 API 容器元数据，不删除日志前先保留必要诊断结论，不碰 volume。以新镜像单独启动 API，通过连续 readiness、无连接泄漏/重启与宿主机后验后再启动 worker。
 
 ## 首次完整提交审查
 
@@ -97,7 +97,7 @@
 |---|---|---|
 | 0. 仓库与主机基线 | 拉取当前部署提交，确认工作区、系统规格、Docker/Compose、端口和已有容器/volume | **已通过：服务器仓库干净同步到 `1bdf535`** |
 | 1. 运行环境、本机配置与预检 | 逐条审查 Docker 软件包、数据目录和服务启动；每项变更后复验宿主机与现有项目，再创建项目私有配置并运行 preflight | **已通过：Docker/Moby 29.3.1、Compose 5.4.0、root 用户级 Buildx 0.31.1、`/newdata` 数据目录、四个私有 secret 与 preflight 均通过；现有服务保持正常** |
-| 2. 首次启动 | 构建镜像、setup migration、API/worker/PostgreSQL 健康检查 | **进行中：API 镜像 `exercise-app:5516fc3` 已成功构建；容器、数据库、迁移和健康检查尚未启动** |
+| 2. 首次启动 | 构建镜像、setup migration、API/worker/PostgreSQL 健康检查 | **进行中：PostgreSQL 与 setup 已通过；API 首次单次启动因 healthcheck 连续返回执行码 -1 而 unhealthy，容器现场已保留，worker 未启动** |
 | 3. 数据与故障验收 | 测试数据库、RLS、事务、worker 崩溃恢复、volume 持久化、备份恢复 | 待执行 |
 | 4. 模型与访问 | 真实 DeepSeek 请求、临时图片删除、手机 IP+端口访问 | 待真实 Key 与前述阶段通过 |
 
