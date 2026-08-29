@@ -272,7 +272,7 @@ docker compose exec postgres psql -U "${POSTGRES_USER:-exercise}" -d exercise_re
 ALLOW_CONTAINER_RECREATE_TEST=true ./scripts/verify-increment0.sh persistence
 ```
 
-- `database` 创建并重置 `${POSTGRES_DB}_test`，使用只在 verification 镜像目标中存在的 Vitest 执行 Drizzle、pg-boss 事务提交/回滚、worker 强杀恢复、Argon2id 和运行心跳集成测试，结束后删除该测试库。
+- `database` 要求 PostgreSQL 容器已经在运行，脚本不会启动或重建它；随后创建并重置 `${POSTGRES_DB}_test`，使用只在 verification 镜像目标中存在的 Vitest 执行 Drizzle、pg-boss 事务提交/回滚、worker 强杀恢复、Argon2id 和运行心跳集成测试，结束后删除该测试库。由于 PostgreSQL 角色是同一实例内跨数据库共享的，verification 容器会只读挂载现有 `api_database_password`；测试发现 `exercise_api` 已存在时禁止执行 `ALTER ROLE`，只用该 secret 实际连接验证，凭据不匹配则直接失败。只有全新测试实例尚无此角色时才创建。不得给共享实例上的该角色改用固定测试密码。
 - `backup` 把当前业务库临时导出到宿主机的 `mktemp` 私有目录，恢复到名称以 `exercise_restore_check_` 开头的隔离库，验证结构后同时删除临时库和临时备份。
 - `persistence` 创建名称以 `exercise_volume_check_` 开头的探针库，强制重新创建 PostgreSQL 容器但不删除 volume，确认探针仍存在后清理。该步骤会造成短暂数据库中断，所以必须显式设置开关。
 

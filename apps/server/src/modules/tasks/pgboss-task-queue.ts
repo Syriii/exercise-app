@@ -13,6 +13,7 @@ interface PgBossTaskQueueOptions {
   readonly schema?: string;
   readonly applicationName?: string;
   readonly superviseIntervalSeconds?: number;
+  readonly monitorIntervalSeconds?: number;
   readonly logger?: QueueLogger;
 }
 
@@ -34,6 +35,9 @@ export class PgBossTaskQueue implements TaskQueue {
       ...(options.superviseIntervalSeconds === undefined
         ? {}
         : { superviseIntervalSeconds: options.superviseIntervalSeconds }),
+      ...(options.monitorIntervalSeconds === undefined
+        ? {}
+        : { monitorIntervalSeconds: options.monitorIntervalSeconds }),
     });
 
     this.#boss.on("error", (error) => {

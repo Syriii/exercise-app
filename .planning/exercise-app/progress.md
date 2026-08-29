@@ -1003,3 +1003,17 @@
 - 本轮最终通过：全仓类型检查、25 个服务端测试文件 102 项测试、生产构建、OpenAPI 合约、`git diff --check`，以及桌面/手机 31 项 Playwright E2E；独立智能体确认全部 blocker 已关闭。
 - 真实浏览器复核：320×900 设置页和饮食页均无横向溢出或面板重叠，正文与底栏间隔 8px，辅助文字最小 14px；1440×900 训练页侧栏 288px、主内容 1152px且移动底栏隐藏。
 - 本机未配置 `TEST_DATABASE_URL`，所以新增的受限 PostgreSQL 集成用例尚未在本地执行；必须在服务器显式 `_test` 数据库执行，不能连接生产库。
+
+# 2026-08-29：修复版本重新部署
+
+- 产品所有者确认本任务不能停留在本地修复与 GitHub 推送，目标延伸到服务器重新部署并用真实登录与页面证明问题关闭。
+- 目标提交为 `2409d08`；服务器最后可信状态为仓库 `e459347`、API/Worker 镜像 `exercise-app:adf00b0`、PostgreSQL healthy、setup exited 0、API/Worker restart 0、5011 对外可访问。
+- 更新边界：只修改 `/newdata/data/xiesh/exercise-app` 的 Git fast-forward、本项目私有版本键、`exercise-app:2409d08` 镜像及 Exercise App API/Worker/setup 容器；不重启 Docker、PostgreSQL、Nginx、宿主机或其他项目，不删除 volume。构建会临时占用 CPU/内存/磁盘，API/Worker 重建会造成 5011 短暂不可用。
+- 当前先执行完全只读门禁，确认远程状态没有漂移后再进入写操作。
+- 远程任务 `Exercise App 服务器部署续接 4` 连续三次在执行任何服务器命令前被 Codex 后端以 `403 Forbidden` 拒绝；显式切换当前模型后结果不变，因此没有远程改动。
+- 本机直接 SSH 可以完成 TCP 握手并核对既有主机指纹，但本机没有私钥文件；尝试使用 Codex 创建的 SSH agent socket 时，认证代理在签名阶段无响应。已终止本次诊断留下的 3 个本机挂起进程，服务器仍未执行任何命令。
+- 公网只读验证显示 `http://114.132.232.9:5011/api/v1/health/live` 返回 `{"status":"ok"}`，ready 返回 `{"status":"ready"}`；但首页仍引用旧资源 `index-BczaDGEF.js` 与 `index-CDTb_84z.css`。本地修复构建资源为 `index-5oHtKnny.js` 与 `index-FV4UF5RT.css`，因此可以确定线上服务虽然健康，但修复版本尚未部署。
+- 新远程任务恢复执行通道后，只读门禁通过；服务器仓库从 `e459347` fast-forward 到 `2409d08`，私有 `.env` 仅把 `APP_IMAGE_TAG`/`APP_BUILD_REVISION` 改为 `2409d08`，排除两行后的哈希保持不变。`exercise-app:2409d08` 构建成功，期间无 OOM、容器重启或其他项目/Nginx 指纹变化。
+- 首次 `exercise_test` 集成验证共 14 项，12 项通过；用户原始故障对应的受限 `exercise_api` 角色每日规划并发写入用例通过。失败项为测试账号数超过默认 10 个，以及 pg-boss 强杀恢复 40 秒超时。
+- 验证结束后生产 ready 变为 503。根因是 PostgreSQL 登录角色跨数据库共享，而集成测试对全局 `exercise_api` 执行了固定测试密码轮换；测试库虽隔离，角色凭据未隔离。使用唯一获准的 `docker compose ... run --rm --no-deps setup` 恢复生产密码后，live/ready 连续三次为 200；所有生产容器 ID、restart、volume、Docker/containerd、Nginx 和其他项目指纹不变。
+- 本地补丁改为让 verification 容器只读使用现有 `api_database_password`，并在共享实例角色已存在时禁止 `ALTER ROLE`、仅通过真实连接验证；测试专用账号上限设为 100。强杀恢复改用测试专属 monitor/supervise=1 秒、heartbeat=10 秒、expire=120 秒、总超时 60 秒并断言 SIGKILL，使心跳恢复与普通过期可区分。首轮类型检查、105 项服务端测试、生产构建、OpenAPI 和 `git diff --check` 已通过；两位独立审查发现的 SCRAM 重写与 pg-boss 无效/伪阳性配置阻断项均已关闭，待复核。

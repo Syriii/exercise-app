@@ -9,7 +9,9 @@ SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
   "set ALLOW_TEST_DATABASE_RESET=true to create and remove the isolated integration database"
 
 require_compose
-compose up -d postgres
+running_services=$(compose ps --services --status running)
+printf '%s\n' "$running_services" | grep -Fx postgres >/dev/null || fail \
+  "postgres must already be running; database verification never starts or recreates it"
 wait_for_postgres
 
 source_database=$(postgres_database_name)
@@ -33,6 +35,6 @@ log "building the verification-only image target"
 compose --profile verification build integration
 
 log "running Drizzle, pg-boss transaction/crash recovery, Argon2id, and heartbeat tests"
-compose --profile verification run --rm integration
+compose --profile verification run --rm --no-deps integration
 
 log "database integration verification passed"

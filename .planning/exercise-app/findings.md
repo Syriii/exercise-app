@@ -1491,3 +1491,12 @@
 - 外部 Google Font 会让中国网络、自托管和离线环境出现字体回退与视觉跳变；当前改为系统已有的苹方、Noto Sans CJK、微软雅黑及本地窄体标题回退，不再依赖运行时字体网络请求。
 - 模块级 `Promise.allSettled` 不能只“保留成功结果”：当查询作用域从日期 A 切到 B 时，失败模块必须先清空 A 的旧状态，并用 request date / generation 拒绝迟到响应，否则会在 B 标题下展示甚至允许操作 A 的数据。
 - 写操作也需要同样的作用域保护。饮食覆盖确认、图片轮询和汇总刷新均捕获发起时日期；成功、失败和提示只有仍属于该日期时才回写。定向 E2E 通过延迟 A 请求、强制切换 B、再释放 A 响应验证 B 不受污染。
+# 2026-08-29：共享 PostgreSQL 上的集成验证隔离缺口
+
+- `${POSTGRES_DB}_test` 只能隔离数据库对象，不能隔离 PostgreSQL 集群角色；`exercise_api` 是实例级角色。
+- 原集成测试调用 `ensureApiDatabaseRole(..., "integration-only-api-role-password")`，会在共享生产 PostgreSQL 容器中改变生产 API 角色密码。实测测试后 API ready=503，标准幂等 setup 恢复生产密码后连续恢复为 200。
+- 服务器 verification 容器必须只读挂载现有 `api_database_password` 并通过 `TEST_API_DATABASE_PASSWORD_FILE` 使用相同凭据；测试初始化发现 `exercise_api` 已存在时必须保留其密码，只通过实际受限连接验证，只有全新测试实例没有该角色时才创建。不得在共享实例上对该角色执行 `ALTER ROLE`，即使输入密码看起来相同也不行，因为 PostgreSQL 会重写 SCRAM verifier。
+- `verify-database.sh` 原先的 `compose up -d postgres` 在配置漂移时理论上可能重建生产 PostgreSQL，不能作为共享服务器的安全验证入口。修正后它要求 Postgres 已运行，否则失败；只允许 exec 创建/删除 `_test` 数据库，不负责生产容器生命周期。
+- integration 临时容器的 `compose run` 也必须使用 `--no-deps`；否则 Compose 仍可能根据 `depends_on` 尝试启动 PostgreSQL。加上该参数后，构建期间若数据库停止，测试只能失败，不能自行改变生产容器生命周期。
+- 集成文件会创建超过 10 个账号，不能用产品默认账号上限验证互不相关的数据路径；测试构造的 `IdentityService` 使用测试专用上限 100，生产默认值不变。
+- pg-boss 强杀恢复测试原 `expire=30s`、总超时 40s，在低资源服务器上几乎没有调度余量。pg-boss 12.27.0 要求 `heartbeatSeconds >= 10`，且 heartbeat/timeout 扫描还受默认 60 秒 `monitorIntervalSeconds` 节流；只缩短 expire 会让普通过期冒充心跳恢复。修正后测试实例使用 monitor/supervise=1 秒、heartbeat=10 秒、expire=120 秒、总超时 60 秒，并断言子进程确由 SIGKILL 结束；因此测试窗口内只能通过 heartbeat 回收，不能靠普通 expire。

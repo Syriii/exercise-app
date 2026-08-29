@@ -7,12 +7,13 @@ const repositoryRoot = resolve(import.meta.dirname, "../../../..");
 
 describe("container runtime secret boundary", () => {
   it("keeps host secrets private and drops privileges before starting application code", async () => {
-    const [dockerfile, entrypoint, compose, preflight, smokeCheck] = await Promise.all([
+    const [dockerfile, entrypoint, compose, preflight, smokeCheck, databaseVerification] = await Promise.all([
       readFile(resolve(repositoryRoot, "deployment/Dockerfile"), "utf8"),
       readFile(resolve(repositoryRoot, "deployment/container-entrypoint.sh"), "utf8"),
       readFile(resolve(repositoryRoot, "deployment/compose.yaml"), "utf8"),
       readFile(resolve(repositoryRoot, "deployment/scripts/preflight.sh"), "utf8"),
       readFile(resolve(repositoryRoot, "deployment/scripts/smoke-check.sh"), "utf8"),
+      readFile(resolve(repositoryRoot, "deployment/scripts/verify-database.sh"), "utf8"),
     ]);
 
     expect(dockerfile).toContain("COPY --from=build /usr/sbin/gosu /usr/local/bin/gosu");
@@ -25,6 +26,9 @@ describe("container runtime secret boundary", () => {
     expect(entrypoint).not.toContain("printf '%s' \"$source_path\"");
     expect(compose).toContain('command: ["node", "apps/server/dist/entrypoints/setup.js"]');
     expect(compose).toContain('command: ["node", "apps/server/dist/entrypoints/worker.js"]');
+    expect(compose).toContain(
+      "TEST_API_DATABASE_PASSWORD_FILE: /run/secrets/api_database_password",
+    );
     expect(compose).toContain("cap_add:\n    - CHOWN\n    - SETGID\n    - SETUID\n  cap_drop:\n    - ALL");
     expect(compose).toContain("no-new-privileges:true");
     expect(preflight).toContain('[ ! -L "$file_path" ]');
@@ -32,5 +36,10 @@ describe("container runtime secret boundary", () => {
     expect(smokeCheck).not.toContain("compose port postgres 5432");
     expect(smokeCheck).not.toContain("compose port worker 3000");
     expect(smokeCheck).toContain("compose exec -T --user 1000:1000 api sh -eu -c");
+    expect(databaseVerification).toContain("postgres must already be running");
+    expect(databaseVerification).not.toContain("compose up -d postgres");
+    expect(databaseVerification).toContain(
+      "compose --profile verification run --rm --no-deps integration",
+    );
   });
 });

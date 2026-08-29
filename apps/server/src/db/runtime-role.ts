@@ -2,7 +2,15 @@ import type { Pool } from "pg";
 
 export const apiDatabaseRole = "exercise_api";
 
-export async function ensureApiDatabaseRole(pool: Pool, password: string): Promise<void> {
+export interface EnsureApiDatabaseRoleOptions {
+  readonly preserveExistingPassword?: boolean;
+}
+
+export async function ensureApiDatabaseRole(
+  pool: Pool,
+  password: string,
+  options: EnsureApiDatabaseRoleOptions = {},
+): Promise<void> {
   const role = await pool.query<{ exists: boolean }>(
     "select exists(select 1 from pg_roles where rolname = $1) as exists",
     [apiDatabaseRole],
@@ -11,8 +19,12 @@ export async function ensureApiDatabaseRole(pool: Pool, password: string): Promi
     await pool.query(
       `create role ${apiDatabaseRole} login nosuperuser nocreatedb nocreaterole noinherit nobypassrls`,
     );
+    await pool.query(`alter role ${apiDatabaseRole} password ${quoteLiteral(password)}`);
+    return;
   }
-  await pool.query(`alter role ${apiDatabaseRole} password ${quoteLiteral(password)}`);
+  if (options.preserveExistingPassword !== true) {
+    await pool.query(`alter role ${apiDatabaseRole} password ${quoteLiteral(password)}`);
+  }
 }
 
 export async function grantApiDatabaseRole(pool: Pool): Promise<void> {

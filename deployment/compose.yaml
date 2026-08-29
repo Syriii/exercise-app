@@ -146,8 +146,10 @@ services:
       TEST_DATABASE_NAME: ${POSTGRES_DB:-exercise}_test
       TEST_DATABASE_USER: ${POSTGRES_USER:-exercise}
       TEST_DATABASE_PASSWORD_FILE: /run/secrets/database_password
+      TEST_API_DATABASE_PASSWORD_FILE: /run/secrets/api_database_password
     secrets:
       - database_password
+      - api_database_password
     command: ["npm", "run", "test:integration", "--workspace", "@exercise-app/server"]
     depends_on:
       postgres:

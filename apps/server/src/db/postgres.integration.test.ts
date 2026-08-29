@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 
@@ -23,6 +24,7 @@ import { migratePgBoss, PgBossTaskQueue } from "../modules/tasks/pgboss-task-que
 import { PostgresTrainingRepository } from "../modules/training/postgres-repository.js";
 import { TrainingService } from "../modules/training/service.js";
 import { loadTestDatabaseUrl } from "../testing/test-database-url.js";
+import { readSecretValue } from "../config/environment.js";
 
 const databaseUrl = loadTestDatabaseUrl();
 const database = createDatabase(databaseUrl);
@@ -30,10 +32,17 @@ const queue = new PgBossTaskQueue({
   databaseUrl,
   applicationName: "exercise-app-integration-test",
   superviseIntervalSeconds: 1,
+  monitorIntervalSeconds: 1,
 });
 const transactionQueueName = "exercise-integration-transaction";
 const crashQueueName = "exercise-integration-crash";
-const apiRolePassword = "integration-only-api-role-password";
+const apiRolePassword =
+  process.env.TEST_API_DATABASE_PASSWORD === undefined &&
+  process.env.TEST_API_DATABASE_PASSWORD_FILE === undefined
+    ? "integration-only-api-role-password"
+    : readSecretValue("TEST_API_DATABASE_PASSWORD", process.env, (path) =>
+        readFileSync(path, "utf8"),
+      );
 
 function apiRoleDatabaseUrl(): string {
   const url = new URL(databaseUrl);
@@ -75,14 +84,14 @@ function waitForWorkerStart(child: ChildProcess): Promise<string> {
   });
 }
 
-async function waitForCompletedJob(jobId: string): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const result = await database.pool.query<{ state: string }>(
-      "select state from pgboss.job where id = $1",
+async function waitForCompletedJob(jobId: string): Promise<number> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const result = await database.pool.query<{ state: string; retry_count: number }>(
+      "select state, retry_count from pgboss.job where id = $1",
       [jobId],
     );
     if (result.rows[0]?.state === "completed") {
-      return;
+      return result.rows[0].retry_count;
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
   }
@@ -90,7 +99,9 @@ async function waitForCompletedJob(jobId: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  await ensureApiDatabaseRole(database.pool, apiRolePassword);
+  await ensureApiDatabaseRole(database.pool, apiRolePassword, {
+    preserveExistingPassword: true,
+  });
   await migrate(database.database, {
     migrationsFolder: resolve(import.meta.dirname, "../../drizzle"),
   });
@@ -111,7 +122,7 @@ beforeAll(async () => {
     retryLimit: 1,
     retryDelaySeconds: 1,
     retryBackoff: false,
-    expireInSeconds: 30,
+    expireInSeconds: 120,
     heartbeatSeconds: 10,
     deleteAfterSeconds: 60,
   });
@@ -203,6 +214,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "an-integration-test-session-secret-that-is-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `test_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
 
@@ -260,6 +272,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-training-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `training_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a training integration secure password")).account;
@@ -371,6 +384,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-cycle-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `cycle_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a cycle integration secure password")).account;
@@ -451,6 +465,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-schedule-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `schedule_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a schedule integration secure password")).account;
@@ -509,6 +524,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-reminder-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `reminder_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a reminder integration secure password")).account;
@@ -540,6 +556,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-planning-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `planning_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a planning integration secure password")).account;
@@ -594,6 +611,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-restricted-planning-integration-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `restricted_planning_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a restricted planning integration password")).account;
@@ -634,6 +652,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "a-nutrition-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `nutrition_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a nutrition integration secure password")).account;
@@ -694,6 +713,7 @@ describe("PostgreSQL integration", () => {
       repository: new PostgresIdentityRepository(database.database),
       sessionSecret: "an-image-integration-session-secret-long-enough",
       sessionTtlHours: 1,
+      maxAccounts: 100,
     });
     const username = `image_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "an image integration secure password")).account;
@@ -767,7 +787,7 @@ describe("PostgreSQL integration", () => {
 
   it(
     "recovers a heartbeat-protected job after its worker is killed",
-    { timeout: 40_000 },
+    { timeout: 60_000 },
     async () => {
       const taskId = `crash-task-${randomUUID()}`;
       const jobId = await queue.enqueue(crashQueueName, taskId);
@@ -782,8 +802,9 @@ describe("PostgreSQL integration", () => {
 
       try {
         await expect(waitForWorkerStart(child)).resolves.toBe(taskId);
-        child.kill("SIGKILL");
+        expect(child.kill("SIGKILL")).toBe(true);
         await once(child, "exit");
+        expect(child.signalCode).toBe("SIGKILL");
 
         let resolveHandled: (value: string) => void = () => undefined;
         const handled = new Promise<string>((resolveTask) => {
@@ -794,7 +815,7 @@ describe("PostgreSQL integration", () => {
         });
 
         await expect(handled).resolves.toBe(taskId);
-        await waitForCompletedJob(jobId);
+        await expect(waitForCompletedJob(jobId)).resolves.toBe(1);
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");
