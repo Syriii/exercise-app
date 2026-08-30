@@ -1127,3 +1127,6 @@
 - 本机没有 Docker CLI，两组 `docker compose config --quiet` 以 `command not found` 退出；改用 Ruby 完成三份 Compose YAML 语法检查，并用静态边界断言确认覆盖文件只修改 API。真实 Compose 合并仍留给服务器只读验证，不把本机工具缺失冒充配置失败。
 - 完整 E2E 首次因沙箱禁止监听 `127.0.0.1:4174` 而未启动用例；按既有受控权限原样重跑后桌面/手机 33/33 通过。
 - `.runtime/` 继续由 `.gitignore` 排除，`git ls-files '.runtime/**'` 为 0；本轮没有复制、改名或修改任何 JPG/GIF。
+- 功能与部署文档提交 `67897fc` 已推送 `origin/main`。远程 `gpt-5.6-sol` / high 任务按“不启用媒体覆盖文件”的边界完成且无系统 error；跨任务接口仍未返回其命令正文或最终摘要，因此不在本记录中虚构 Compose 输出、容器 ID 或 mount 明细。
+- 主任务从公网独立确认当前首页脚本为 `index-BOHyBSP9.js`，脚本包含目标提交 `67897fc`，live 返回 `ok`、ready 返回 `ready`。这证明新代码已部署，但不把它冒充为媒体目录已经挂载。
+- 创建服务器媒体目录、传输约 137 MiB JPG/GIF、设置读取权限和以 `compose.exercise-media.yaml` 替换 API 容器均未纳入本轮自动发布；这些会改变宿主机文件与容器 mount，继续等待单独授权。
