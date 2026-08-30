@@ -29,7 +29,7 @@ afterEach(() => {
 describe("exercise catalog media", () => {
   it("only publishes media URLs when a separately supplied local file exists", () => {
     const withoutMedia = listExerciseCatalog({ query: "3/4 sit-up" });
-    expect(withoutMedia[0]).toMatchObject({ id: "0001", imageUrl: null, animationUrl: null, mediaAttribution: null });
+    expect(withoutMedia[0]).toMatchObject({ id: "0001", imageUrl: null, animationUrl: null });
 
     const root = createMediaRoot();
     const withMedia = listExerciseCatalog({ query: "3/4 sit-up" }, root);
@@ -37,7 +37,6 @@ describe("exercise catalog media", () => {
       id: "0001",
       imageUrl: "/api/v1/training/exercises/0001/media/image",
       animationUrl: "/api/v1/training/exercises/0001/media/animation",
-      mediaAttribution: "© Gym visual — https://gymvisual.com/",
     });
     expect(findCatalogExerciseGuidance("3/4 sit-up", root)).toMatchObject({
       imageUrl: "/api/v1/training/exercises/0001/media/image",

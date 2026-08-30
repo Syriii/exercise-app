@@ -35,7 +35,6 @@ const showingAnimation = ref(false);
             type="button"
             @click="showingAnimation = !showingAnimation"
           >{{ showingAnimation ? '查看静态图' : '播放动作动画' }}</button>
-          <span v-if="guidance.mediaAttribution">{{ guidance.mediaAttribution }}</span>
         </figcaption>
       </figure>
       <div v-if="guidance.commonMistakes.length > 0" class="guidance-columns">

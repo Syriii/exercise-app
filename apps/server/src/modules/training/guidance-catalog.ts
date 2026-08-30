@@ -5,7 +5,6 @@ const sharedMetadata = {
   videoUrl: null,
   imageUrl: null,
   animationUrl: null,
-  mediaAttribution: null,
   sourceName: "Exercise App 项目贡献者",
   sourceUrl: null,
   license: "MIT",

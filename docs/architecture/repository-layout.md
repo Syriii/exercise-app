@@ -41,7 +41,6 @@ exercise-app/
 │   │   └── calculation-evidence.md # 训练与营养规划官方证据登记
 │   ├── experience/              # 体验结构、流程、原型范围与交互状态
 │   ├── deployment/              # 自托管、持久化、备份恢复与部署验收
-│   ├── licenses/                # 第三方数据与素材许可边界
 │   ├── product.md               # 当前产品事实源
 │   └── product-decisions.md     # 重要产品决定
 ├── .runtime/                    # 本地运行状态与私有源资料，始终忽略

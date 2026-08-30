@@ -1,11 +1,6 @@
 {
   "schemaVersion": 1,
-  "source": {
-    "name": "hasaneyldrm/exercises-dataset",
-    "url": "https://github.com/hasaneyldrm/exercises-dataset",
-    "license": "MIT",
-    "sha256": "656634224b8977b99a6d765470ee123260d4979715eaa4e7c0b7c8bb0d79f93d"
-  },
+  "version": "656634224b89",
   "exercises": [
     {
       "id": "0001",

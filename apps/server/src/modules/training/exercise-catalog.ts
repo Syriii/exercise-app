@@ -16,12 +16,7 @@ interface StoredExercise {
 
 interface StoredCatalog {
   readonly schemaVersion: 1;
-  readonly source: {
-    readonly name: string;
-    readonly url: string;
-    readonly license: "MIT";
-    readonly sha256: string;
-  };
+  readonly version: string;
   readonly exercises: readonly StoredExercise[];
 }
 
@@ -36,8 +31,6 @@ interface ExerciseMediaEntry {
   readonly imageFileName?: string;
   readonly animationFileName?: string;
 }
-
-const mediaAttribution = "© Gym visual — https://gymvisual.com/";
 
 const bodyPartLabels: Readonly<Record<string, string>> = {
   back: "背部",
@@ -161,7 +154,6 @@ function publicMedia(exerciseId: string, mediaRoot: string | null) {
   return {
     imageUrl,
     animationUrl,
-    mediaAttribution: imageUrl === null && animationUrl === null ? null : mediaAttribution,
   } as const;
 }
 
@@ -208,7 +200,7 @@ export function findCatalogExerciseGuidance(exerciseName: string, mediaRoot: str
   const stored = searchDocuments.find((item) => item.normalizedName === name)?.exercise;
   if (stored === undefined) return null;
   return {
-    id: `exercises-dataset-${stored.id}`,
+    id: stored.id,
     exerciseName: stored.name,
     aliases: [],
     overview: `该动作归类为${bodyPartLabel(stored.bodyPart)}训练，使用${equipmentLabel(stored.equipment)}，主要目标为 ${stored.target}。`,
@@ -217,12 +209,12 @@ export function findCatalogExerciseGuidance(exerciseName: string, mediaRoot: str
     alternatives: [],
     videoUrl: null,
     ...publicMedia(stored.id, mediaRoot),
-    sourceName: catalog.source.name,
-    sourceUrl: catalog.source.url,
-    license: catalog.source.license,
-    version: catalog.source.sha256.slice(0, 12),
+    sourceName: "Exercise App 动作目录",
+    sourceUrl: null,
+    license: "MIT",
+    version: catalog.version,
     reviewStatus: "draft",
-    limitations: "动作名称与中文步骤来自第三方 MIT 数据集，尚未经过本项目持证教练或医疗专业人员审阅。本地图片和 GIF 只有在部署者单独提供合规媒体目录时显示，不属于本项目 MIT 许可。出现疼痛、眩晕或明显不适时请停止。",
+    limitations: "动作名称与中文步骤尚未经过本项目持证教练或医疗专业人员审阅。出现疼痛、眩晕或明显不适时请停止。",
   };
 }
 

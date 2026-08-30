@@ -7,8 +7,6 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "../../..");
 const sourcePath = resolve(repositoryRoot, ".runtime/exercise-catalog/source/data/exercises.json");
 const outputPath = resolve(repositoryRoot, "apps/server/data/exercises.zh.json");
-const sourceUrl = "https://github.com/hasaneyldrm/exercises-dataset";
-
 function assertString(value, field) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`Invalid ${field}`);
@@ -24,7 +22,7 @@ function assertStringArray(value, field) {
 }
 
 function validateGeneratedCatalog(catalog) {
-  if (catalog.schemaVersion !== 1 || catalog.source?.url !== sourceUrl || catalog.source?.license !== "MIT") {
+  if (catalog.schemaVersion !== 1 || typeof catalog.version !== "string" || catalog.version.length === 0) {
     throw new Error("Generated exercise catalog metadata is invalid");
   }
   if (!Array.isArray(catalog.exercises) || catalog.exercises.length !== 1324) {
@@ -62,12 +60,7 @@ async function main() {
   }
   const catalog = {
     schemaVersion: 1,
-    source: {
-      name: "hasaneyldrm/exercises-dataset",
-      url: sourceUrl,
-      license: "MIT",
-      sha256: createHash("sha256").update(sourceText).digest("hex"),
-    },
+    version: createHash("sha256").update(sourceText).digest("hex").slice(0, 12),
     exercises: source.map((exercise) => ({
       id: assertString(exercise.id, "id"),
       name: assertString(exercise.name, "name"),

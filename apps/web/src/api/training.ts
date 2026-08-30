@@ -14,7 +14,6 @@ export interface ExerciseCatalogItem {
   readonly target: string;
   readonly imageUrl: string | null;
   readonly animationUrl: string | null;
-  readonly mediaAttribution: string | null;
 }
 
 export interface ExerciseGuidance {
@@ -28,7 +27,6 @@ export interface ExerciseGuidance {
   readonly videoUrl: string | null;
   readonly imageUrl: string | null;
   readonly animationUrl: string | null;
-  readonly mediaAttribution: string | null;
   readonly sourceName: string;
   readonly sourceUrl: string | null;
   readonly license: string;

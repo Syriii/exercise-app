@@ -315,7 +315,7 @@ const sessionRevisionResponseSchema = {
 const exerciseGuidanceResponseSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "exerciseName", "aliases", "overview", "steps", "commonMistakes", "alternatives", "videoUrl", "imageUrl", "animationUrl", "mediaAttribution", "sourceName", "sourceUrl", "license", "version", "reviewStatus", "limitations"],
+  required: ["id", "exerciseName", "aliases", "overview", "steps", "commonMistakes", "alternatives", "videoUrl", "imageUrl", "animationUrl", "sourceName", "sourceUrl", "license", "version", "reviewStatus", "limitations"],
   properties: {
     id: { type: "string" },
     exerciseName: { type: "string" },
@@ -327,7 +327,6 @@ const exerciseGuidanceResponseSchema = {
     videoUrl: nullableString,
     imageUrl: nullableString,
     animationUrl: nullableString,
-    mediaAttribution: nullableString,
     sourceName: { type: "string" },
     sourceUrl: nullableString,
     license: { type: "string" },
@@ -340,7 +339,7 @@ const exerciseGuidanceResponseSchema = {
 const exerciseCatalogItemResponseSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "name", "bodyPart", "bodyPartLabel", "equipment", "equipmentLabel", "target", "imageUrl", "animationUrl", "mediaAttribution"],
+  required: ["id", "name", "bodyPart", "bodyPartLabel", "equipment", "equipmentLabel", "target", "imageUrl", "animationUrl"],
   properties: {
     id: { type: "string" },
     name: { type: "string" },
@@ -351,7 +350,6 @@ const exerciseCatalogItemResponseSchema = {
     target: { type: "string" },
     imageUrl: nullableString,
     animationUrl: nullableString,
-    mediaAttribution: nullableString,
   },
 } as const;
 
