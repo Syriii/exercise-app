@@ -1053,3 +1053,4 @@
 - 服务器只读日志诊断通过远程任务标题脱敏回传根因：`PUT /api/v1/planning/profile` 把 `revision=0` 带入 `personal_profiles` 首次 insert，触发 `personal_profiles_revision_positive_ck`。跨任务正文仍不可见；尝试使用 Computer Use 只读查看 Codex 自身界面被安全策略明确拒绝，未操作界面，随后改用可逆的远程任务临时标题传回错误路径和约束。
 - 修复在 planning/reminder 路由先解构移除 `revision`，服务层再以白名单对象调用仓储；同步覆盖首次个人档案、目标策略、训练/饮食/身体测量提醒。新增单测证明即使服务收到带传输字段的运行时对象，仓储输入也不含 `revision`；PostgreSQL 集成用例以同样输入保护 CHECK 默认值。
 - 本轮本地验证通过：全仓类型检查、26 个文件 107 项服务端测试、生产构建、OpenAPI 合约和 `git diff --check`。首次 E2E 在沙箱内绑定 `127.0.0.1:4174` 被 `EPERM` 拒绝；按既有受控权限在沙箱外重跑后桌面/手机 33/33 通过。
+- 修复提交 `096b502` 已推送并完成受限部署；远程任务以 completed/no error 结束，只授权应用代码 fast-forward、镜像构建与 API/Worker 切换，没有授权 migration、数据库写入或共享服务变更。主任务从公网独立确认 live=`ok`、ready=`ready`，首页资源为 `index-DCpd7rNj.js` / `index-Celm8J5G.css`，公开 JavaScript 内包含 `096b502`。为避免替产品所有者向真实账号提交健康资料，线上写入由产品所有者刷新页面后按原操作手动复核。
