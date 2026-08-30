@@ -1,0 +1,11 @@
+services:
+  api:
+    environment:
+      EXERCISE_MEDIA_ROOT: /app/private/exercise-media
+    volumes:
+      - type: bind
+        source: ${EXERCISE_MEDIA_HOST_PATH:?set EXERCISE_MEDIA_HOST_PATH to an existing absolute directory}
+        target: /app/private/exercise-media
+        read_only: true
+        bind:
+          create_host_path: false

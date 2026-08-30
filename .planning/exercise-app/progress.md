@@ -1115,3 +1115,15 @@
 - 完整 E2E 首次在沙箱内因 `127.0.0.1:4174` 监听权限退出，产品用例尚未运行；按既有受控权限原样重跑后桌面/手机 33/33 通过。
 - 目录治理提交 `65df57a` 已推送 `origin/main`。既有远程部署任务以 completed 且无 error 结束，但跨任务接口没有回传命令或最终摘要，因此本记录不虚构容器 ID、Worker 心跳或共享服务指纹。
 - 主任务独立从公网确认部署已经生效：首页资源切换为 `index-CTjSTPec.js` / `index-CjiT1e5x.css`，JavaScript 包含 `65df57a`，live=`ok`、ready=`ready`。线上仍未配置、上传或挂载第三方动作媒体。
+
+# 2026-08-30 私有动作媒体部署入口
+
+- 产品所有者确认目标运行方式为本人私有服务器、本地独立媒体目录、媒体不进 GitHub，并要求解除通用本地读取代码的实现阻断。
+- 审查确认已有代码已经按登录会话、固定动作 ID 与固定媒体类型流式返回 JPG/GIF；本轮不复制或修改媒体文件，只补生产绝对路径约束和部署挂载入口。
+- 新增可选 `compose.exercise-media.yaml`：宿主机 `EXERCISE_MEDIA_HOST_PATH` 只读挂载到 API 容器 `/app/private/exercise-media`，不影响 setup、worker、PostgreSQL、镜像层或数据库。
+- preflight 在变量非空时验证绝对路径、非符号链接、固定子目录和至少一个 JPG/GIF，并校验基础、DeepSeek 与媒体覆盖文件的组合配置。
+- 文档组合补丁首次因 progress 标题是否带冒号的锚点不一致而整体未应用；拆分并使用真实标题后完成，无代码或媒体文件受到影响。
+- 本地严格类型检查、生产构建、API 合约和完整 27 个文件 114 项服务端测试通过；新增绝对路径配置与既有媒体鉴权路由的定向 18 项测试通过。
+- 本机没有 Docker CLI，两组 `docker compose config --quiet` 以 `command not found` 退出；改用 Ruby 完成三份 Compose YAML 语法检查，并用静态边界断言确认覆盖文件只修改 API。真实 Compose 合并仍留给服务器只读验证，不把本机工具缺失冒充配置失败。
+- 完整 E2E 首次因沙箱禁止监听 `127.0.0.1:4174` 而未启动用例；按既有受控权限原样重跑后桌面/手机 33/33 通过。
+- `.runtime/` 继续由 `.gitignore` 排除，`git ls-files '.runtime/**'` 为 0；本轮没有复制、改名或修改任何 JPG/GIF。

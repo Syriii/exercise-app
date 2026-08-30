@@ -22,7 +22,7 @@ exercise-app/
 └── apps/server/scripts/generate-exercise-catalog.mjs
 ```
 
-开发环境默认读取 `.runtime/exercise-catalog/source/`，也可通过 `EXERCISE_MEDIA_ROOT` 指向其他目录。媒体目录只接受以下固定结构和文件名：
+开发环境默认读取 `.runtime/exercise-catalog/source/`，也可通过 `EXERCISE_MEDIA_ROOT` 指向其他目录；生产模式要求该值为绝对路径。Docker 部署不直接使用宿主机路径作为应用路径，而由 `compose.exercise-media.yaml` 把 `EXERCISE_MEDIA_HOST_PATH` 只读挂载到容器内固定绝对路径。媒体目录只接受以下固定结构和文件名：
 
 ```text
 source/

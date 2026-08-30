@@ -1580,3 +1580,10 @@
 - 当前稳定边界为：`.runtime/exercise-catalog/source/` 保存 Git/Docker 均忽略的本地原始资料；`apps/server/data/exercises.zh.json` 保存可发布的 MIT-only 生成目录；`apps/server/scripts/` 保存服务端专属生成/校验入口；`docs/licenses/` 只说明来源与许可边界。
 - 开发默认媒体根目录同步为 `.runtime/exercise-catalog/source/`；测试与生产仍默认关闭，生产若获得许可后仍必须显式设置 `EXERCISE_MEDIA_ROOT`。
 - 本地迁移前后均核对为 1,324 张 JPG、1,324 个 GIF、约 137 MiB；旧 `docs/exercises-dataset-main/` 已不存在，媒体文件没有进入 Git 变更。
+
+# 2026-08-30 私有动作媒体部署入口
+
+- 现有服务端已经具备登录校验、四位动作 ID/固定媒体类型校验、固定文件名索引、私有缓存和 404 回退；不需要引入公开静态目录插件。
+- 现有缺口在 Compose：生产配置可读取 `EXERCISE_MEDIA_ROOT`，但基础部署没有把宿主机独立目录挂进 API 容器。通用解决方式是独立覆盖文件，只读 bind mount 到固定容器绝对路径。
+- 宿主机绝对路径与容器绝对路径不能混为一谈。`.env` 保存 `EXERCISE_MEDIA_HOST_PATH`，Compose 将其挂到 `/app/private/exercise-media`，应用只读取后者。
+- 基础 Compose 保持无媒体默认值；只有显式加入 `compose.exercise-media.yaml` 才启用，因此普通开源部署不会意外要求或创建媒体目录。

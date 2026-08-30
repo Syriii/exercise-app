@@ -139,7 +139,44 @@ docker compose -f compose.yaml -f compose.deepseek.yaml logs --tail=100 worker
 
 之后查看日志、停止、更新或重建时都要带上相同的两个 `-f` 参数。Key 不要写进 `.env`、聊天、Issue 或 Git。
 
-## 7. 遇到问题时生成报告
+## 7. 读取服务器私有动作媒体（可选）
+
+动作图片和 GIF 不需要进入仓库或镜像。先在服务器准备一个位于仓库外的目录，目录结构必须是：
+
+```text
+/绝对路径/exercise-media/
+├── images/0001-<media-id>.jpg
+└── videos/0001-<media-id>.gif
+```
+
+在 `deployment/.env` 中填写这个已经存在的宿主机绝对路径：
+
+```dotenv
+EXERCISE_MEDIA_HOST_PATH=/绝对路径/exercise-media
+```
+
+预检会拒绝相对路径、符号链接、缺失目录或空的图片/GIF 目录。随后使用媒体覆盖文件启动：
+
+```bash
+./scripts/preflight.sh
+docker compose -f compose.yaml -f compose.exercise-media.yaml up -d --build
+```
+
+Compose 只把该目录以只读方式挂载到 API 容器的 `/app/private/exercise-media`。应用通过需要登录的媒体接口按动作 ID 读取固定文件名，不会把宿主机目录公开成可遍历的静态文件服务器。之后查看日志、停止、更新或重建时也要带上相同的两个 `-f` 参数。
+
+同时启用 DeepSeek 时使用三个 Compose 文件：
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.deepseek.yaml \
+  -f compose.exercise-media.yaml \
+  up -d --build
+```
+
+媒体目录仍由部署者自行管理，不进入数据库备份、GitHub、公开 Docker 镜像或应用导出。
+
+## 8. 遇到问题时生成报告
 
 页面还能打开时，进入“设置 → Bug 反馈”，填写刚才做了什么，点击“生成问题报告”。你可以检查后直接复制到问答中，或下载 `.txt` 文件。
 
@@ -160,7 +197,7 @@ docker compose logs --tail=200 setup api worker postgres
 
 不要把整个 `deployment/secrets/`、`.env`、数据库备份或照片目录发到问答中。
 
-## 8. 接下来必须做的事
+## 9. 接下来必须做的事
 
 快速启动成功不等于长期运行已经安全。开始积累真实训练和饮食记录前，继续按[完整自托管手册](self-hosting.md)完成：
 

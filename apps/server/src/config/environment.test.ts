@@ -31,6 +31,24 @@ describe("loadConfig", () => {
     expect(config.exerciseMediaRoot).toMatch(/private-exercise-media$/);
   });
 
+  it("requires an absolute exercise media path in production", () => {
+    const productionEnvironment = {
+      ...validEnvironment,
+      NODE_ENV: "production",
+      COOKIE_SECURE: "false",
+    } as const;
+
+    expect(() => loadConfig({
+      ...productionEnvironment,
+      EXERCISE_MEDIA_ROOT: "./private-exercise-media",
+    })).toThrow(/EXERCISE_MEDIA_ROOT must be an absolute path/);
+
+    expect(loadConfig({
+      ...productionEnvironment,
+      EXERCISE_MEDIA_ROOT: "/app/private/exercise-media",
+    }).exerciseMediaRoot).toBe("/app/private/exercise-media");
+  });
+
   it("uses the ignored runtime source directory for development media", () => {
     const config = loadConfig({ ...validEnvironment, NODE_ENV: "development" });
     expect(config.exerciseMediaRoot).toMatch(/\.runtime\/exercise-catalog\/source$/);
