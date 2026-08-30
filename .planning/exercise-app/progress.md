@@ -1102,3 +1102,6 @@
 - 第二轮完整 E2E 32/33；手机训练流通过，桌面流发现动作搜索在输入框失焦后仍可能由迟到响应重新打开，下拉内容遮挡“加入本次训练”。已在失焦关闭时取消待处理搜索并使进行中响应失效，属于新增搜索组件的真实竞态修复。
 - 定向桌面/手机训练流 2/2 通过；最终完整 E2E 33/33 通过。最终发布门同时通过全仓严格类型检查、27 个文件 112 项服务端测试、生产构建、API 合约、`git diff --check`、1,324 条目录校验与零媒体字段检查。
 - 发布范围审计确认：本地 1,324 张 JPG 和 1,324 个 GIF 均由 `.gitignore` 排除；提交中的生成目录约 912 KiB，没有超过 2 MiB 的新增文件、媒体路径字段、高置信凭据或私钥。
+- 功能提交 `b20f60a` 已推送 `origin/main`。远程既有部署任务按预检、fast-forward、目标 SHA 构建以及只切换 Exercise App API/Worker 的边界完成，任务状态 completed 且无 error；没有授权 setup/migration、数据库写入、PostgreSQL、Nginx、Docker 服务、端口、secret、volume、其他项目、媒体上传或清理操作。
+- 主任务从公网独立确认首页资源为 `index-BE5yrQHH.js` / `index-CjiT1e5x.css`，JavaScript 包含 `b20f60a`、“可搜索 1,324 个动作”和无媒体回退文案；live=`ok`、ready=`ready`。远程任务接口未回传命令正文，因此不虚构容器 ID、restart 或 Worker 心跳细节。
+- 生产环境没有配置或上传 Gym visual 媒体，线上按设计只启用 MIT 文字目录和可选媒体代码路径；本地开发环境存在 `docs/exercises-dataset-main/` 时可直接显示完整静态图与 GIF。
