@@ -15,6 +15,7 @@ export interface AppConfig {
   readonly workerHeartbeatIntervalSeconds: number;
   readonly workerHeartbeatStaleSeconds: number;
   readonly temporaryMediaRoot: string;
+  readonly exerciseMediaRoot: string | null;
   readonly webDistDirectory: string;
   readonly deepseekApiKey: string | null;
   readonly deepseekBaseUrl: string;
@@ -145,6 +146,11 @@ function readOptionalSecretValue(
   return rejectPublicExamplePlaceholder(name, value);
 }
 
+function optionalDirectory(value: string | undefined): string | null {
+  const cleaned = value?.trim();
+  return cleaned === undefined || cleaned.length === 0 ? null : resolve(cleaned);
+}
+
 export function loadConfig(
   environment: Environment = process.env,
   secretReader: SecretReader = (path) => readFileSync(path, "utf8"),
@@ -181,6 +187,10 @@ export function loadConfig(
     workerHeartbeatIntervalSeconds,
     workerHeartbeatStaleSeconds,
     temporaryMediaRoot: resolve(environment.TEMP_MEDIA_ROOT ?? ".runtime/media"),
+    exerciseMediaRoot: optionalDirectory(
+      environment.EXERCISE_MEDIA_ROOT
+        ?? (mode === "development" ? "docs/exercises-dataset-main" : undefined),
+    ),
     webDistDirectory: resolve(environment.WEB_DIST_DIR ?? "apps/web/dist"),
     deepseekApiKey: readOptionalSecretValue("DEEPSEEK_API_KEY", environment, secretReader),
     deepseekBaseUrl: environment.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",

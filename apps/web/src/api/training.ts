@@ -4,6 +4,19 @@ export type TrainingSessionStatus = "in_progress" | "completed" | "abandoned";
 export type TrainingItemStatus = "pending" | "completed" | "skipped";
 export type TrainingScheduleStatus = "scheduled" | "cancelled" | "started";
 
+export interface ExerciseCatalogItem {
+  readonly id: string;
+  readonly name: string;
+  readonly bodyPart: string;
+  readonly bodyPartLabel: string;
+  readonly equipment: string;
+  readonly equipmentLabel: string;
+  readonly target: string;
+  readonly imageUrl: string | null;
+  readonly animationUrl: string | null;
+  readonly mediaAttribution: string | null;
+}
+
 export interface ExerciseGuidance {
   readonly id: string;
   readonly exerciseName: string;
@@ -13,6 +26,9 @@ export interface ExerciseGuidance {
   readonly commonMistakes: readonly string[];
   readonly alternatives: readonly string[];
   readonly videoUrl: string | null;
+  readonly imageUrl: string | null;
+  readonly animationUrl: string | null;
+  readonly mediaAttribution: string | null;
   readonly sourceName: string;
   readonly sourceUrl: string | null;
   readonly license: string;
@@ -249,6 +265,8 @@ export interface TrainingSetInput {
 }
 
 export const trainingApi = {
+  listExercises: (query: string, limit = 12) =>
+    apiRequest<ExerciseCatalogItem[]>(`/api/v1/training/exercises?${new URLSearchParams({ q: query, limit: limit.toString() }).toString()}`),
   listExpenditureActivities: () =>
     apiRequest<TrainingExpenditureActivity[]>("/api/v1/training/expenditure-catalog"),
   getGuidance: (exerciseName: string) =>

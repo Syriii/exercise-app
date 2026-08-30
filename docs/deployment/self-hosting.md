@@ -124,6 +124,7 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 - `AUTH_RATE_LIMIT_*`、`WRITE_RATE_LIMIT_*`、`IMAGE_RATE_LIMIT_*`：单个 API 进程按来源 IP 限制登录注册、写操作与图片提交频率。默认值面向不超过 10 人的单机部署；多个 API 副本需要改用共享限流存储。
 - `MAX_ACTIVE_IMAGE_ANALYSES_PER_ACCOUNT`：单个账号同时等待或处理中的图片分析上限，默认 3。
 - `TEMP_MEDIA_MAX_BYTES_PER_ACCOUNT`：单个账号可占用的临时照片与导出空间上限，默认 256 MiB；采用结果或到期清理后释放。
+- `EXERCISE_MEDIA_ROOT`：可选动作图片/GIF 目录。默认生产部署不配置，也不会把第三方媒体打进公共镜像；只有取得适用于当前部署方式的媒体许可后，才为 API 容器配置只读目录。
 - `BACKUP_DIRECTORY` 与 `BACKUP_RETENTION_DAYS`：宿主机数据库备份目录与本机保留天数；默认 `deployment/backups/`、14 天。
 - `BACKUP_MIRROR_DIRECTORY`：可选的已存在目录。设置后，每次成功备份会把备份和 SHA-256 清单再复制一份；它应位于异地挂载或受保护的备份存储，而不是同一块磁盘的另一个目录。
 

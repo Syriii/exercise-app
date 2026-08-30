@@ -7,6 +7,7 @@ export type TrainingErrorCode =
   | "training_program_unit_started"
   | "training_schedule_not_found"
   | "training_schedule_unavailable"
+  | "exercise_media_not_found"
   | "training_session_closed"
   | "training_session_in_progress"
   | "training_revision_conflict"

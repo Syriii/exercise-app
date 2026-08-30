@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../../app.js";
@@ -15,6 +19,7 @@ const config = createTestConfig({
 });
 const password = "correct horse battery staple";
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
+const temporaryRoots: string[] = [];
 
 function cookieFrom(response: { headers: Record<string, unknown> }): string {
   const header = response.headers["set-cookie"];
@@ -22,7 +27,7 @@ function cookieFrom(response: { headers: Record<string, unknown> }): string {
   return header.split(";", 1)[0] ?? "";
 }
 
-async function createApp() {
+async function createApp(exerciseMediaRoot: string | null = null) {
   const identityService = new IdentityService({
     repository: new MemoryIdentityRepository(),
     sessionSecret: config.sessionSecret,
@@ -30,7 +35,7 @@ async function createApp() {
   });
   const trainingRepository = new MemoryTrainingRepository();
   const planningService = new PlanningService(new MemoryPlanningRepository());
-  const trainingService = new TrainingService({ repository: trainingRepository, planningService });
+  const trainingService = new TrainingService({ repository: trainingRepository, planningService, exerciseMediaRoot });
   const app = await buildApp({
     config,
     checkDatabase: async () => undefined,
@@ -63,9 +68,35 @@ const templatePayload = {
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map(async (app) => app.close()));
+  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe("training routes", () => {
+  it("streams separately supplied exercise media only to signed-in accounts", async () => {
+    const root = mkdtempSync(join(tmpdir(), "exercise-route-media-"));
+    temporaryRoots.push(root);
+    mkdirSync(join(root, "images"));
+    mkdirSync(join(root, "videos"));
+    const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const gif = Buffer.from("GIF89a", "ascii");
+    writeFileSync(join(root, "images", "0001-test.jpg"), jpg);
+    writeFileSync(join(root, "videos", "0001-test.gif"), gif);
+
+    const { app, firstCookie } = await createApp(root);
+    const anonymous = await app.inject({ method: "GET", url: "/api/v1/training/exercises/0001/media/image" });
+    expect(anonymous.statusCode).toBe(401);
+
+    const image = await app.inject({ method: "GET", url: "/api/v1/training/exercises/0001/media/image", headers: { cookie: firstCookie } });
+    expect(image.statusCode).toBe(200);
+    expect(image.headers["content-type"]).toContain("image/jpeg");
+    expect(image.rawPayload).toEqual(jpg);
+
+    const animation = await app.inject({ method: "GET", url: "/api/v1/training/exercises/0001/media/animation", headers: { cookie: firstCookie } });
+    expect(animation.statusCode).toBe(200);
+    expect(animation.headers["content-type"]).toContain("image/gif");
+    expect(animation.rawPayload).toEqual(gif);
+  });
+
   it("serves attributed guidance to a signed-in account", async () => {
     const { app, firstCookie } = await createApp();
     const response = await app.inject({

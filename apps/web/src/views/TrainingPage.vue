@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
+import ExerciseCatalogField from "../components/ExerciseCatalogField.vue";
 import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
 import {
@@ -786,7 +787,7 @@ onMounted(() => void load());
                     <strong>动作 {{ index + 1 }}</strong>
                     <button v-if="templateForm.items.length > 1" class="text-action" type="button" @click="templateForm.items.splice(index, 1)">移除</button>
                   </div>
-                  <label class="wide-field"><span>动作名称</span><input v-model="item.exerciseName" required maxlength="100" placeholder="例如：杠铃卧推" /></label>
+                  <ExerciseCatalogField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
                   <label><span>目标组数</span><input v-model="item.targetSets" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
                   <label><span>最低次数</span><input v-model="item.targetRepsMin" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
                   <label><span>最高次数</span><input v-model="item.targetRepsMax" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
@@ -921,7 +922,7 @@ onMounted(() => void load());
                           <strong>动作 {{ index + 1 }}</strong>
                           <button v-if="unitForm.items.length > 1" class="text-action" type="button" @click="unitForm.items.splice(index, 1)">移除</button>
                         </div>
-                        <label class="wide-field"><span>动作名称</span><input v-model="item.exerciseName" required maxlength="100" placeholder="例如：杠铃卧推" /></label>
+                        <ExerciseCatalogField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
                         <label><span>目标组数</span><input v-model="item.targetSets" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
                         <label><span>最低次数</span><input v-model="item.targetRepsMin" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
                         <label><span>最高次数</span><input v-model="item.targetRepsMax" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
@@ -993,7 +994,7 @@ onMounted(() => void load());
                 <ExerciseGuidanceCard v-if="guidanceOpenItemId === item.id" :exercise-name="item.exerciseName" :guidance="guidanceByItem[item.id]" />
 
                 <div v-if="actualForms[item.id]" class="actual-data-form">
-                  <label class="wide-field"><span>实际动作</span><input v-model="actualForms[item.id]!.performedExerciseName" required maxlength="100" :placeholder="item.exerciseName" /></label>
+                  <ExerciseCatalogField v-model="actualForms[item.id]!.performedExerciseName" class="wide-field" label="实际动作" required :placeholder="item.exerciseName" />
                   <div v-for="(set, setIndex) in actualForms[item.id]!.sets" :key="setIndex" class="set-row">
                     <strong>第 {{ setIndex + 1 }} 组</strong>
                     <label><span>次数</span><input v-model="set.reps" type="number" min="0" inputmode="numeric" placeholder="未记录" /></label>
@@ -1025,7 +1026,7 @@ onMounted(() => void load());
             </ul>
 
             <form class="extra-form" @submit.prevent="addExtra">
-              <label class="wide-field"><span>动作名称</span><input v-model="extraName" required maxlength="100" placeholder="例如：平板支撑" /></label>
+              <ExerciseCatalogField v-model="extraName" class="wide-field" label="动作名称" required placeholder="例如：平板支撑或 plank" />
               <div v-for="(set, index) in extraSets" :key="index" class="set-row">
                 <strong>第 {{ index + 1 }} 组</strong>
                 <label><span>次数</span><input v-model="set.reps" type="number" min="0" inputmode="numeric" placeholder="未记录" /></label>

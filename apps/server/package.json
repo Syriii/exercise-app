@@ -10,7 +10,7 @@
     "dev": "tsx watch src/entrypoints/api.ts",
     "dev:worker": "tsx watch src/entrypoints/worker.ts",
     "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run catalog:check && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
@@ -21,6 +21,8 @@
     "queue:migrate": "tsx src/entrypoints/queue-migrate.ts",
     "db:setup": "tsx src/entrypoints/setup.ts",
     "db:setup:prod": "node dist/entrypoints/setup.js",
+    "catalog:generate": "node scripts/generate-exercise-catalog.mjs",
+    "catalog:check": "node scripts/generate-exercise-catalog.mjs --check",
     "start": "node dist/entrypoints/api.js",
     "start:worker": "node dist/entrypoints/worker.js"
   },

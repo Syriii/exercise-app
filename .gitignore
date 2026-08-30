@@ -28,3 +28,7 @@ apps/android/**/build/
 deployment/secrets/*
 !deployment/secrets/*.example
 deployment/backups/
+
+# Local source import; generated MIT-only catalog lives in apps/server/data/.
+# Upstream Gym visual images and GIFs are not licensed for redistribution here.
+docs/exercises-dataset-main/

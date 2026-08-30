@@ -55,6 +55,7 @@ const nutritionService = new NutritionService(nutritionRepository);
 const trainingService = new TrainingService({
   repository: new PostgresTrainingRepository(database.database),
   planningService,
+  exerciseMediaRoot: config.exerciseMediaRoot,
 });
 const trainingSuggestionService = new TrainingSuggestionService({
   repository: new PostgresTrainingSuggestionRepository(database.database),

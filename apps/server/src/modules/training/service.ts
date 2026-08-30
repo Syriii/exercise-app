@@ -1,4 +1,5 @@
 import { TrainingError } from "./errors.js";
+import { getExerciseMediaFile, listExerciseCatalog, type ExerciseMediaKind } from "./exercise-catalog.js";
 import { findExerciseGuidance } from "./guidance-catalog.js";
 import type { PlanningService } from "../planning/service.js";
 import type { TrainingRepository } from "./repository.js";
@@ -248,10 +249,12 @@ export class TrainingService {
   readonly #repository: TrainingRepository;
   readonly #now: () => Date;
   readonly #planningService: PlanningService | null;
+  readonly #exerciseMediaRoot: string | null;
 
-  public constructor(options: { repository: TrainingRepository; planningService?: PlanningService; now?: () => Date }) {
+  public constructor(options: { repository: TrainingRepository; planningService?: PlanningService; exerciseMediaRoot?: string | null; now?: () => Date }) {
     this.#repository = options.repository;
     this.#planningService = options.planningService ?? null;
+    this.#exerciseMediaRoot = options.exerciseMediaRoot ?? null;
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -264,7 +267,15 @@ export class TrainingService {
     if (cleaned === null) {
       throw new TrainingError("invalid_training_input", "动作名称不能为空", 400);
     }
-    return findExerciseGuidance(cleaned);
+    return findExerciseGuidance(cleaned, this.#exerciseMediaRoot);
+  }
+
+  public listExerciseCatalog(options: { readonly query?: string; readonly bodyPart?: string; readonly equipment?: string; readonly limit?: number }) {
+    return listExerciseCatalog(options, this.#exerciseMediaRoot);
+  }
+
+  public getExerciseMedia(exerciseId: string, kind: ExerciseMediaKind) {
+    return getExerciseMediaFile(exerciseId, kind, this.#exerciseMediaRoot);
   }
 
   public listTemplates(userId: string, includeArchived = false): Promise<readonly TrainingTemplate[]> {

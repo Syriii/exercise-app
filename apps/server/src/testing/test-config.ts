@@ -15,6 +15,7 @@ export function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig 
     workerHeartbeatIntervalSeconds: 15,
     workerHeartbeatStaleSeconds: 45,
     temporaryMediaRoot: resolve(".runtime/test-media"),
+    exerciseMediaRoot: null,
     webDistDirectory: resolve("apps/web/dist"),
     deepseekApiKey: null,
     deepseekBaseUrl: "https://api.deepseek.com",

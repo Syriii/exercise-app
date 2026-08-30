@@ -44,6 +44,7 @@ COPY --from=production-dependencies /app/package.json /app/package-lock.json ./
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=production-dependencies /app/apps/server/package.json apps/server/package.json
 COPY --from=production-dependencies /app/apps/server/dist apps/server/dist
+COPY --from=production-dependencies /app/apps/server/data apps/server/data
 COPY --from=production-dependencies /app/apps/server/drizzle apps/server/drizzle
 COPY --from=production-dependencies /app/apps/web/package.json apps/web/package.json
 COPY --from=production-dependencies /app/apps/web/dist apps/web/dist

@@ -21,7 +21,7 @@ test("a person can turn a reusable plan into an actual workout", async ({ page }
   const templateCard = page.getByRole("article").filter({ hasText: "全身简易" }).first();
   await templateCard.getByRole("button", { name: "动作预览" }).click();
   await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
-  await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("当前先提供文字预览");
+  await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("本地未配置可用的动作媒体");
   await templateCard.getByRole("button", { name: "收起预览" }).click();
   await page.getByRole("button", { name: "用这份开始" }).click();
   await expect(page.getByRole("heading", { name: "这次训练" })).toBeVisible();
