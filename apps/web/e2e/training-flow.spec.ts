@@ -19,7 +19,7 @@ test("a person can turn a reusable plan into an actual workout", async ({ page }
 
   await expect(page.getByRole("heading", { name: "全身简易" })).toBeVisible();
   await page.getByRole("button", { name: "用这份开始" }).click();
-  await expect(page.getByRole("heading", { name: "这次实际练了什么" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "这次练了什么" })).toBeVisible();
 
   await page.getByRole("button", { name: "动作要点" }).click();
   await expect(page.getByRole("region", { name: "深蹲动作指导" })).toContainText("原创草案");
@@ -38,7 +38,7 @@ test("a person can turn a reusable plan into an actual workout", async ({ page }
   await expect(page.getByText("平板支撑")).toBeVisible();
 
   await page.getByRole("button", { name: "保存并结束" }).click();
-  await expect(page.getByRole("heading", { name: "选一个方案，或者直接开始" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "安排训练" })).toBeVisible();
   await expect(page.getByText("这次训练已保存")).toBeVisible();
 });
 
@@ -113,9 +113,9 @@ test("a person can schedule today's workout and find the actual record in histor
   await expect(page.getByText(/训练提醒已开启/)).toBeVisible();
 
   await page.goto("/today");
-  await expect(page.getByRole("heading", { name: "今天有 1 项训练安排还没开始" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "还有 1 项训练安排未开始" })).toBeVisible();
   await page.getByRole("button", { name: "一小时后再提醒" }).click();
-  await expect(page.getByRole("region", { name: "已暂缓的训练提醒" })).toContainText("训练安排没有改变");
+  await expect(page.getByRole("region", { name: "已暂缓的训练提醒" })).toContainText("再次提醒训练");
   const todayTraining = page.getByRole("region", { name: "今天还要练" });
   await expect(todayTraining.locator("strong").filter({ hasText: "今天的力量训练" })).toBeVisible();
   await todayTraining.getByRole("button", { name: "开始训练", exact: true }).click();

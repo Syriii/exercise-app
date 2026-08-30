@@ -146,7 +146,7 @@ onMounted(load);
     <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
     <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
     <section class="admin-accounts operations-health" aria-labelledby="operations-title">
-      <div class="panel-heading"><div><h2 id="operations-title">运行状态</h2><p>这里显示真实探测结果，不代表业务任务一定成功。</p></div><button class="text-action" type="button" :disabled="loading" @click="load">刷新</button></div>
+      <div class="panel-heading"><div><h2 id="operations-title">运行状态</h2><p>显示服务探测结果，任务状态见下方统计。</p></div><button class="text-action" type="button" :disabled="loading" @click="load">刷新</button></div>
       <p v-if="loading">正在检查…</p>
       <div v-else-if="operationsHealth" class="health-grid">
         <article v-for="component in ([['API', operationsHealth.api], ['PostgreSQL', operationsHealth.database], ['后台任务', operationsHealth.worker]] as const)" :key="component[0]" class="health-item">

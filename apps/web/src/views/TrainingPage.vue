@@ -681,12 +681,12 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <AppShell page-class="training-page" rail-note="计划可以改，练过的不会变。" show-footer>
+  <AppShell page-class="training-page" rail-note="计划可编辑，实际训练单独保存。" show-footer>
         <header class="view-header training-view-header">
           <div>
             <p class="date-line">训练</p>
-            <h1>{{ activeSession === null ? "选一个方案，或者直接开始" : "这次实际练了什么" }}</h1>
-            <p v-if="activeSession === null">方案只是备选。今天想练哪个就选哪个，也可以从空白开始。</p>
+            <h1>{{ activeSession === null ? "安排训练" : "这次练了什么" }}</h1>
+            <p v-if="activeSession === null">选一份方案开始，或直接记录。</p>
             <p v-else>{{ activeSessionLabel }} · {{ activeSession.localDate }}</p>
           </div>
           <button
@@ -710,7 +710,7 @@ onMounted(() => void load());
         <div v-else-if="activeSession === null" class="view-stack">
           <section class="work-panel training-suggestion-panel" aria-labelledby="training-suggestion-title">
             <div class="panel-heading">
-              <div><h2 id="training-suggestion-title">需要一个训练起点？</h2><p>系统只生成可修改候选；采用后就是你的普通方案，不会自动排进日程。</p></div>
+              <div><h2 id="training-suggestion-title">系统建议</h2><p>根据目标、经验和器械生成一份可编辑方案。</p></div>
               <button class="action-button" type="button" @click="suggestionFormOpen = !suggestionFormOpen">{{ suggestionFormOpen ? '收起' : '生成系统建议' }}</button>
             </div>
             <form v-if="suggestionFormOpen" class="suggestion-form" @submit.prevent="generateSuggestion">
@@ -745,7 +745,7 @@ onMounted(() => void load());
           </nav>
 
           <div class="schedule-toolbar">
-            <p>只想先记一个训练主题，也可以不选具体方案。</p>
+            <p>也可以只安排一个训练主题。</p>
             <button class="action-button" type="button" @click="openScheduleEditor({ title: '' })">安排训练主题</button>
           </div>
 
@@ -767,7 +767,7 @@ onMounted(() => void load());
             <div class="panel-heading">
               <div>
                 <h2 id="template-editor-title">{{ editingTemplate === null ? "新建单次训练方案" : "编辑训练方案" }}</h2>
-                <p>以后选择这个方案时，会复制当时的内容作为本次训练。</p>
+                <p>开始训练时会复制方案内容，之后互不影响。</p>
               </div>
               <button class="text-action" type="button" @click="editorOpen = false">收起</button>
             </div>
@@ -799,12 +799,12 @@ onMounted(() => void load());
 
           <section class="split-heading" aria-labelledby="templates-title">
             <div><h2 id="templates-title">我的单次训练方案</h2></div>
-            <p>这里不是按周排好的日历。你什么时候练、选哪一份，都由你决定。</p>
+            <p>保存常用动作组合，训练时任选一份。</p>
           </section>
 
           <section v-if="templates.length === 0" class="work-panel training-empty">
             <strong>还没有训练方案</strong>
-            <p>可以先建一份常用方案，也可以直接开始空白训练，边练边补动作。</p>
+            <p>创建常用方案，或从空白训练开始。</p>
             <div class="form-actions">
               <button class="action-button action-button--primary" type="button" @click="openCreateTemplate">建立第一份方案</button>
               <button class="action-button" type="button" :disabled="saving" @click="startTraining(null)">直接开始</button>
@@ -857,12 +857,12 @@ onMounted(() => void load());
 
             <section class="split-heading" aria-labelledby="programs-title">
               <div><h2 id="programs-title">我的周期计划</h2></div>
-              <p>适合多周安排。每一周可以不同，训练日也不必绑定星期几。</p>
+              <p>按周编排训练，每周都可以不同。</p>
             </section>
 
             <section v-if="programs.length === 0" class="work-panel training-empty">
               <strong>还没有周期计划</strong>
-              <p>如果单次方案已经够用，可以暂时不建。需要安排多周变化时再用这里。</p>
+              <p>需要多周变化时再创建。</p>
               <button class="action-button action-button--primary" type="button" @click="openCreateProgram">建立第一个周期计划</button>
             </section>
 
@@ -905,7 +905,7 @@ onMounted(() => void load());
                     </select>
                   </label>
                   <p v-if="editingUnit === null && unitForm.sourceTemplateId" class="source-copy-note wide-field">
-                    会复制方案当前的名称、动作和目标量。以后来源改变，这里不会自动跟着变。
+                    会复制当前方案。来源方案以后发生变化时，这里保持不变。
                   </p>
                   <template v-if="editingUnit !== null || !unitForm.sourceTemplateId">
                     <label class="wide-field"><span>训练日名称</span><input v-model="unitForm.name" required maxlength="80" placeholder="例如：胸部训练 A" /></label>
@@ -964,7 +964,7 @@ onMounted(() => void load());
             <div class="panel-heading">
               <div>
                 <h2 id="active-training-title">计划动作</h2>
-                <p>完成就勾上；没有记录的数字会保持为空，不会算成 0。</p>
+                <p>完成后勾选，需要时补充组数、重量或备注。</p>
               </div>
             </div>
 
@@ -989,7 +989,7 @@ onMounted(() => void load());
                   <p v-if="guidanceByItem[item.id] === undefined">正在读取动作要点…</p>
                   <template v-else-if="guidanceByItem[item.id] === null">
                     <strong>暂时没有许可和来源状态清楚的指导内容</strong>
-                    <p>训练记录不受影响；应用不会用许可不明的视频或临时生成的内容冒充标准示范。</p>
+                    <p>你仍然可以正常记录本次训练。</p>
                   </template>
                   <template v-else>
                     <div class="panel-heading"><div><strong>{{ guidanceByItem[item.id]!.exerciseName }}要点</strong><p>{{ guidanceByItem[item.id]!.overview }}</p></div><span class="status-chip">{{ guidanceByItem[item.id]!.reviewStatus === 'reviewed' ? '已审阅' : '原创草案' }}</span></div>
@@ -1027,7 +1027,7 @@ onMounted(() => void load());
 
           <section class="work-panel extra-training" aria-labelledby="extra-title">
             <div class="panel-heading">
-              <div><h2 id="extra-title">额外做了什么</h2><p>这里只加入本次实际训练，不会改动原方案。</p></div>
+              <div><h2 id="extra-title">额外动作</h2><p>只加入本次训练，不修改原方案。</p></div>
               <span class="status-chip">实际记录</span>
             </div>
 

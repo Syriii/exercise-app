@@ -1,5 +1,5 @@
 /* Hallmark · genre: modern-minimal · tone: sport/workbench · palette: warm orange · macrostructure: Workbench · nav: mobile dock / desktop rail · footer: Ft2 · contrast: pass (40–41) · mobile: pass (34, 49, 50–57) · slop: pass (1–58) */
-/* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V4 */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
 @import "./tokens.css";
 
 *,
@@ -99,8 +99,8 @@ h3 {
   overflow-wrap: anywhere;
   font-family: var(--font-display);
   font-style: normal;
-  font-weight: 800;
-  line-height: 1.04;
+  font-weight: 700;
+  line-height: 1.12;
 }
 
 ul,
@@ -591,7 +591,15 @@ ol {
 .capture-panel h2,
 .analysis-panel h2,
 .correction-panel h2 {
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
+}
+
+.date-field--clickable {
+  cursor: pointer;
+}
+
+.date-field--clickable input {
+  cursor: pointer;
 }
 
 .balance-panel,
@@ -1091,7 +1099,9 @@ ol {
   font-weight: 700;
 }
 
-.field-grid input {
+.field-grid input,
+.field-grid select,
+.field-grid textarea {
   width: 100%;
   min-height: 2.75rem;
   padding-inline: var(--space-sm);
@@ -1100,6 +1110,10 @@ ol {
   outline: 2px solid transparent;
   outline-offset: var(--space-3xs);
   background-color: var(--color-paper);
+}
+
+.field-grid textarea {
+  padding-block: var(--space-sm);
 }
 
 @media (max-width: 59.99rem) {
@@ -2120,12 +2134,39 @@ ol {
   font-size: var(--text-sm);
 }
 
+.reference-details {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.reference-details summary {
+  width: fit-content;
+  color: var(--color-ink-2);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reference-details[open] {
+  display: grid;
+  gap: var(--space-xs);
+}
+
 .date-picker {
   display: grid;
   gap: var(--space-3xs);
   color: var(--color-muted);
   font-size: var(--text-xs);
   font-weight: 700;
+}
+
+.date-picker input {
+  min-height: 2.75rem;
+  padding-inline: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  cursor: pointer;
 }
 
 .meal-log,
@@ -2202,6 +2243,17 @@ ol {
   border: var(--rule-thin) solid var(--color-rule-strong);
   border-radius: var(--radius-sm);
   background: var(--color-paper);
+}
+
+.reminder-form .switch-row {
+  min-height: 2.75rem;
+  align-self: end;
+}
+
+.reminder-form .switch-row input[type="checkbox"] {
+  width: 1rem;
+  min-height: 1rem;
+  padding: 0;
 }
 
 .meal-card {

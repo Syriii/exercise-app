@@ -182,9 +182,9 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <AppShell page-class="today-page" rail-note="今天只显示已经安排或开始的训练。">
+  <AppShell page-class="today-page" rail-note="今天看安排，也看实际记录。">
         <header class="view-header">
-          <div><p class="date-line">{{ displayDate(today) }} · 今天</p><h1>今天</h1><p>安排会放在这里；没选的方案不会算作今天没完成。</p></div>
+          <div><p class="date-line">{{ displayDate(today) }} · 今天</p><h1>今天</h1><p>查看训练安排和饮食剩余。</p></div>
           <button class="action-button" type="button" @click="openSection('training')">安排或开始训练</button>
         </header>
 
@@ -193,30 +193,29 @@ onMounted(() => void load());
 
         <div v-else class="view-stack">
           <section v-if="reminderStatus?.state === 'due'" class="work-panel reminder-card" aria-labelledby="training-reminder-title">
-            <div><p class="date-line">训练提醒</p><h2 id="training-reminder-title">今天有 {{ reminderStatus.scheduleCount }} 项训练安排还没开始</h2><p>现在不方便也没关系。提醒只负责提示，不会改变计划或记录。</p></div>
+            <div><p class="date-line">训练提醒</p><h2 id="training-reminder-title">还有 {{ reminderStatus.scheduleCount }} 项训练安排未开始</h2><p>可以现在开始，也可以稍后再提醒。</p></div>
             <div class="form-actions"><button class="action-button action-button--primary" type="button" @click="openSection('training')">查看训练</button><button class="text-action" type="button" :disabled="saving" @click="snoozeReminder">一小时后再提醒</button><button class="text-action" type="button" :disabled="saving" @click="dismissReminder">今天不再提醒</button></div>
           </section>
-          <section v-else-if="reminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的训练提醒"><p>训练提醒已暂缓到 {{ reminderStatus.nextAt === null ? '稍后' : new Date(reminderStatus.nextAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}。训练安排没有改变。</p></section>
+          <section v-else-if="reminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的训练提醒"><p>将在 {{ reminderStatus.nextAt === null ? '稍后' : new Date(reminderStatus.nextAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }} 再次提醒训练。</p></section>
           <section v-if="nutritionReminderStatus?.state === 'due'" class="work-panel reminder-card" aria-labelledby="nutrition-reminder-title">
-            <div><p class="date-line">饮食提醒</p><h2 id="nutrition-reminder-title">{{ nutritionReminderStatus.reason === 'no_meals' ? '今天还没有记餐' : nutritionReminderStatus.reason === 'incomplete' ? '今天的记录可能还不完整' : nutritionReminderStatus.reason === 'over_target' ? '当前已记录摄入高于部分参考' : '看看今天还可以吃多少' }}</h2><p>{{ nutritionReminderStatus.reason === 'incomplete' ? '未知和没记录的内容没有按 0 计算，因此这里只提醒你检查。' : '提醒只反映饮食记录，不会因今天练了多少而改写参考。' }}</p></div>
+            <div><p class="date-line">饮食提醒</p><h2 id="nutrition-reminder-title">{{ nutritionReminderStatus.reason === 'no_meals' ? '今天还没有记餐' : nutritionReminderStatus.reason === 'incomplete' ? '今天的记录可能还不完整' : nutritionReminderStatus.reason === 'over_target' ? '部分营养已经超出参考' : '看看今天还可以吃多少' }}</h2><p>{{ nutritionReminderStatus.reason === 'incomplete' ? '检查一下是否还有漏记或数值未知的食物。' : '根据今天的饮食记录计算。' }}</p></div>
             <div class="form-actions"><button class="action-button action-button--primary" type="button" @click="openSection('nutrition')">查看饮食</button><button class="text-action" type="button" :disabled="saving" @click="snoozeNutritionReminder">一小时后再提醒</button><button class="text-action" type="button" :disabled="saving" @click="dismissNutritionReminder">今天不再提醒</button></div>
           </section>
-          <section v-else-if="nutritionReminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的饮食提醒"><p>饮食提醒已经暂缓；当天参考和记录没有改变。</p></section>
+          <section v-else-if="nutritionReminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的饮食提醒"><p>饮食提醒已暂缓。</p></section>
           <section v-if="measurementReminderStatus?.state === 'due'" class="work-panel reminder-card" aria-labelledby="measurement-reminder-title">
-            <div><p class="date-line">身体测量提醒</p><h2 id="measurement-reminder-title">{{ measurementReminderStatus.latestMeasurementDate === null ? '还没有体重记录' : '可以更新一次体重' }}</h2><p>{{ measurementReminderStatus.latestMeasurementDate === null ? '没有记录时系统不会猜体重。' : `当前仍采用 ${measurementReminderStatus.latestMeasurementDate} 的有效记录；现在不更新也不影响使用。` }}</p></div>
+            <div><p class="date-line">身体测量提醒</p><h2 id="measurement-reminder-title">{{ measurementReminderStatus.latestMeasurementDate === null ? '还没有体重记录' : '可以更新一次体重' }}</h2><p>{{ measurementReminderStatus.latestMeasurementDate === null ? '记录后可生成更完整的营养参考。' : `上次记录于 ${measurementReminderStatus.latestMeasurementDate}。` }}</p></div>
             <div class="form-actions"><button class="action-button action-button--primary" type="button" @click="openSection('settings')">去记录</button><button class="text-action" type="button" :disabled="saving" @click="snoozeMeasurementReminder">明天再提醒</button><button class="text-action" type="button" :disabled="saving" @click="dismissMeasurementReminder">本次不再提醒</button></div>
           </section>
-          <section v-else-if="measurementReminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的身体测量提醒"><p>身体测量提醒已暂缓；系统继续采用最近一次有效记录。</p></section>
+          <section v-else-if="measurementReminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的身体测量提醒"><p>身体测量提醒已暂缓。</p></section>
           <section class="balance-panel" aria-labelledby="today-food-title">
-            <div class="panel-heading"><div><h2 id="today-food-title">今天还可以吃</h2><p>系统参考减去已经记录的摄入；没记录的内容不会算作 0。</p></div><button class="text-action" type="button" @click="openSection('nutrition')">去记一顿 →</button></div>
+            <div class="panel-heading"><div><h2 id="today-food-title">今天还可以吃</h2><p>按已记录的餐食计算。</p></div><button class="text-action" type="button" @click="openSection('nutrition')">去记一顿 →</button></div>
             <dl class="metric-list">
               <div><dt>能量</dt><dd>{{ remainingText(nutritionSummary?.energyKcal, 'kcal') }}</dd><span>{{ recordedText(nutritionSummary?.energyKcal, 'kcal') }}</span></div>
               <div><dt>蛋白质</dt><dd>{{ remainingText(nutritionSummary?.proteinGrams, 'g') }}</dd><span>{{ recordedText(nutritionSummary?.proteinGrams, 'g') }}</span></div>
               <div><dt>碳水化合物</dt><dd>{{ remainingText(nutritionSummary?.carbohydrateGrams, 'g') }}</dd><span>{{ recordedText(nutritionSummary?.carbohydrateGrams, 'g') }}</span></div>
               <div><dt>脂肪</dt><dd>{{ remainingText(nutritionSummary?.fatGrams, 'g') }}</dd><span>{{ recordedText(nutritionSummary?.fatGrams, 'g') }}</span></div>
             </dl>
-            <p class="data-note">{{ nutritionSummary?.coverageConfirmed ? '你已确认今天的餐食记录完整。' : '全天覆盖仍未知；数值只代表已经录入的部分。' }} {{ dailyReference?.result.measurementDate ? `采用 ${dailyReference.result.measurementDate} 的体重。` : '' }} 系统参考方法：{{ dailyReference?.methodVersion ?? '尚未生成' }}。</p>
-            <p class="data-note">这是群体方程形成的规划参考，不是个人代谢测量；已吃多少会在饮食记录接入后单独扣减。</p>
+            <p class="data-note">{{ nutritionSummary?.coverageConfirmed ? '今天的餐食已确认记录完整。' : '数值只统计已经记录的餐食。' }}<template v-if="dailyReference?.result.measurementDate"> 当前采用 {{ dailyReference.result.measurementDate }} 的体重。</template></p>
             <button v-if="dailyReference?.result.status !== 'ready'" class="text-action" type="button" @click="openSection('settings')">补充计算资料 →</button>
           </section>
 
@@ -230,7 +229,7 @@ onMounted(() => void load());
 
             <template v-if="activeSession">
               <ul v-if="remainingItems.length > 0" class="plain-list today-training-list"><li v-for="item in remainingItems" :key="item.id"><strong>{{ item.exerciseName }}</strong><span>待完成</span></li></ul>
-              <p v-else>这次训练没有待完成的计划动作；额外动作仍可在训练页补充。</p>
+              <p v-else>计划动作都已处理，还可以继续补记额外动作。</p>
               <button class="action-button action-button--primary" type="button" @click="openSection('training')">继续这次训练</button>
             </template>
 
@@ -245,9 +244,8 @@ onMounted(() => void load());
             </template>
 
             <template v-else>
-              <strong>今天还没有安排训练</strong>
-              <p>这不代表你必须休息，也不会把方案库里的内容算成未完成。</p>
-              <button class="text-action" type="button" @click="openSection('training')">选一个方案或直接开始 →</button>
+              <strong>今天还没有训练安排</strong>
+              <button class="text-action" type="button" @click="openSection('training')">安排或直接开始 →</button>
             </template>
           </section>
 

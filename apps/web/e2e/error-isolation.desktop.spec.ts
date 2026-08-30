@@ -116,7 +116,7 @@ test("an old coverage response cannot change the newly selected day", async ({ p
   });
 
   await page.goto(`/nutrition?date=${previousDate}`);
-  const coverageCheckbox = page.getByLabel("我确认这一天吃过的内容都已记录");
+  const coverageCheckbox = page.getByLabel("今天吃过的内容都已记录");
   await expect(coverageCheckbox).not.toBeChecked();
   await coverageCheckbox.check();
   await coverageStarted;
@@ -131,5 +131,5 @@ test("an old coverage response cannot change the newly selected day", async ({ p
 
   releaseCoverage?.();
   await expect(page.getByLabel("查看日期")).toBeEnabled();
-  await expect(page.getByLabel("我确认这一天吃过的内容都已记录")).not.toBeChecked();
+  await expect(page.getByLabel("今天吃过的内容都已记录")).not.toBeChecked();
 });

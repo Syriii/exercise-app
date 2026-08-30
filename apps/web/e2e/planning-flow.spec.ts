@@ -10,12 +10,14 @@ test("a person can create an evidence-backed daily nutrition reference", async (
 
   await page.goto("/settings");
   const profile = page.getByRole("region", { name: "个人档案" });
+  await profile.getByText("出生日期", { exact: true }).click();
+  await expect(profile.getByLabel("出生日期")).toBeFocused();
   await profile.getByLabel("出生日期").fill("2004-08-26");
-  await profile.getByLabel("能量公式分类").selectOption("female");
+  await profile.getByLabel("性别").selectOption("female");
   await profile.getByLabel("身高（cm）").fill("165");
-  await profile.getByLabel("平常活动档位").selectOption("low_active");
+  await profile.getByLabel("日常活动水平").selectOption("low_active");
   await profile.getByRole("button", { name: "保存个人档案" }).click();
-  await expect(page.getByText("个人档案已保存；新的资料只影响今天及以后生成的参考。")).toBeVisible();
+  await expect(page.getByText("个人档案已保存，今天的营养参考会按新资料更新。")).toBeVisible();
 
   const measurements = page.getByRole("region", { name: "身体测量" });
   await measurements.getByLabel("体重（kg）").fill("63");
@@ -27,12 +29,13 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await strategy.getByLabel("维持体重").check();
   await strategy.getByLabel("均衡分配").check();
   await strategy.getByRole("button", { name: "保存目标策略" }).click();
-  await expect(page.getByText("目标策略已保存；系统会重新生成今天的营养参考。")).toBeVisible();
+  await expect(page.getByText("目标策略已保存，今天的营养参考会随之更新。")).toBeVisible();
 
   await page.goto("/nutrition");
   const dailyReference = page.getByRole("region", { name: "系统参考" });
   await expect(dailyReference.getByRole("heading", { name: "系统参考" })).toBeVisible();
   await expect(dailyReference.getByRole("definition").filter({ hasText: /^2275 kcal$/ })).toBeVisible();
+  await dailyReference.getByText("计算依据", { exact: true }).click();
   await expect(page.getByText("方法 daily-reference-2026-08-26.1")).toBeVisible();
   await expect(page.getByText("这是群体方程形成的饮食规划参考，不是个人代谢测量。")).toBeVisible();
 

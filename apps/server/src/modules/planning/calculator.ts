@@ -116,7 +116,7 @@ export function calculateDailyReference(input: {
   const profile = input.profile;
   const strategy = input.strategy;
   if (profile.birthDate === null || profile.sexCategory === null || profile.heightCm === null) {
-    return { ...result, messages: ["请先补充出生日期、公式分类和身高。"] };
+    return { ...result, messages: ["请先补充出生日期、性别和身高。"] };
   }
   const ageYears = ageAtDate(profile.birthDate, input.localDate);
   const band = ageBand(ageYears);

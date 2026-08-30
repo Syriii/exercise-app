@@ -416,8 +416,8 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <AppShell page-class="history-page" rail-note="历史优先回答实际做了什么。">
-        <header class="view-header"><div><p class="date-line">最近 90 天</p><h1>按天回看</h1><p>训练和饮食按日期放在一起，也可以单独筛选。</p></div></header>
+  <AppShell page-class="history-page" rail-note="按日期查看实际记录。">
+        <header class="view-header"><div><p class="date-line">最近 90 天</p><h1>历史记录</h1><p>按日期查看训练和饮食，也可以单独筛选。</p></div></header>
         <div class="history-filters" aria-label="筛选按日记录"><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button><button type="button" :aria-pressed="filter === 'training'" @click="filter = 'training'">训练</button><button type="button" :aria-pressed="filter === 'nutrition'" @click="filter = 'nutrition'">饮食</button></div>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
@@ -447,7 +447,7 @@ onMounted(() => void load());
                   <form v-if="editingExpenditureSessionId === training.id && expenditureForms[training.id]" class="history-correction" @submit.prevent="saveExpenditure(training)">
                     <label class="wide-field"><span>与本次训练完全相符的官方活动模式</span><select v-model="expenditureForms[training.id]!.activityCode"><option value="">没有完全相符的模式</option><option v-for="activity in expenditureActivities" :key="activity.code" :value="activity.code">{{ activity.label }} · {{ activity.description }} · {{ activity.met }} MET</option></select></label>
                     <label v-if="expenditureForms[training.id]!.activityCode !== ''"><span>有效训练时长（分钟）</span><input v-model="expenditureForms[training.id]!.durationMinutes" type="number" min="1" max="720" required /></label>
-                    <p class="wide-field data-note">预填的是开始到结束的墙钟时长，请改成真正符合所选动作模式的有效时长。动作、RM、组数、次数或休息不同，就选择“没有完全相符”。</p>
+                    <p class="wide-field data-note">请填写实际活动时长。动作强度或休息方式不同，请选择“没有完全相符”。</p>
                     <div class="form-actions wide-field"><button class="action-button action-button--primary" type="submit" :disabled="saving">保存估算</button><button class="text-action" type="button" @click="editingExpenditureSessionId = null">取消</button></div>
                   </form>
                   <form v-if="editingSessionId === training.id && sessionForms[training.id]" class="history-correction" @submit.prevent="saveSessionCorrection(training)">
@@ -507,14 +507,14 @@ onMounted(() => void load());
               <section v-if="day.meals.length" class="history-session history-nutrition-summary">
                 <div class="history-session__heading"><div><strong>饮食 · {{ day.meals.length }} 顿</strong><small>{{ mealEnergy(day.meals) }}</small></div><button class="text-action" type="button" @click="openNutritionDate(day.date)">查看或修正</button></div>
                 <p>{{ day.meals.map((meal) => meal.name ?? '未命名餐次').join('、') }}</p>
-                <small>仅汇总已经填写的数值；未知营养不会按 0 计算。</small>
+                <small>只汇总已经填写的营养数值。</small>
               </section>
             </div>
             <span class="status-chip">{{ day.sessions.length }} 次训练 · {{ day.meals.length }} 顿</span>
           </article>
         </section>
         <section v-if="!loading && trendRows.length > 0" class="work-panel history-trends" aria-labelledby="history-trends-title">
-          <div class="panel-heading"><div><h2 id="history-trends-title">90 天概览</h2><p>只计算已经保存的记录，缺失值不会补成 0。</p></div></div>
+          <div class="panel-heading"><div><h2 id="history-trends-title">90 天概览</h2><p>基于已经保存的记录。</p></div></div>
           <dl class="history-trend-summary"><div><dt>实际训练</dt><dd>{{ trendSummary.sessions }} 次</dd><span>{{ trendSummary.completedActions }} 个完成动作</span></div><div><dt>饮食记录</dt><dd>{{ trendSummary.mealDays }} 天</dd><span>未知营养不参与求和</span></div><div><dt>体重变化</dt><dd>{{ trendSummary.weightChange === null ? '—' : `${trendSummary.weightChange > 0 ? '+' : ''}${trendSummary.weightChange} kg` }}</dd><span>{{ measurements.length < 2 ? '至少两次测量后显示' : '按首末有效测量' }}</span></div></dl>
           <p class="horizontal-scroll-hint">表格可以左右滑动查看完整数据。</p><div class="history-trend-table-wrap" tabindex="0" aria-label="最近 90 天趋势表，可左右滚动"><table class="history-trend-table"><thead><tr><th>日期</th><th>训练</th><th>能量</th><th>蛋白质</th><th>体重</th></tr></thead><tbody><tr v-for="row in trendRows" :key="row.date"><th scope="row">{{ row.date.slice(5) }}</th><td>{{ row.sessions === 0 ? '—' : `${row.sessions} 次 / ${row.completedActions} 动作` }}</td><td>{{ row.energyKcal === null ? '—' : `${row.energyKcal} kcal` }}</td><td>{{ row.proteinGrams === null ? '—' : `${row.proteinGrams} g` }}</td><td>{{ row.weightKg === null ? '—' : `${row.weightKg} kg` }}</td></tr></tbody></table></div>
         </section>

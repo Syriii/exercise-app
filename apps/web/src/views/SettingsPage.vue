@@ -83,9 +83,9 @@ const measurementRevision = ref(0);
 const measurementForm = reactive({ localDate: localDate(new Date()), weightKg: null as number | null, waistCm: null as number | null, note: null as string | null });
 const adminVisible = computed(() => sessionStore.account?.role === "admin");
 const macroOptions = computed(() => [
-  { value: "balanced" as const, label: "均衡分配", description: "采用适用官方范围内的常规分配。" },
-  { value: "high_protein" as const, label: "偏高蛋白", description: "仅在健康规律运动且范围适用时使用。" },
-  ...(strategyForm.weightStrategy === "lose" ? [{ value: "lower_fat" as const, label: "减脂期较低脂肪", description: "脂肪取官方范围下沿，其他宏量仍需同时成立。" }] : []),
+  { value: "balanced" as const, label: "均衡分配", description: "按常规比例分配三大营养素。" },
+  { value: "high_protein" as const, label: "偏高蛋白", description: "适合健康且有规律运动的人。" },
+  ...(strategyForm.weightStrategy === "lose" ? [{ value: "lower_fat" as const, label: "减脂期较低脂肪", description: "脂肪取建议范围的较低值。" }] : []),
 ]);
 
 function localDate(date: Date): string {
@@ -96,6 +96,18 @@ function localDate(date: Date): string {
 
 function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function openDatePicker(event: MouseEvent) {
+  const label = event.currentTarget as HTMLLabelElement;
+  const input = label.querySelector<HTMLInputElement>('input[type="date"]');
+  if (input === null || input.disabled || event.target === input) return;
+  input.focus({ preventScroll: true });
+  try {
+    input.showPicker?.();
+  } catch {
+    // Some browsers only allow the native picker from the input itself.
+  }
 }
 
 async function load() {
@@ -181,7 +193,7 @@ async function saveProfile() {
   try {
     const saved = await planningApi.updateProfile(profileRevision.value, profileForm);
     profileRevision.value = saved.revision;
-    notice.value = "个人档案已保存；新的资料只影响今天及以后生成的参考。";
+    notice.value = "个人档案已保存，今天的营养参考会按新资料更新。";
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了个人档案";
   } finally {
@@ -200,7 +212,7 @@ async function saveStrategy() {
   try {
     const saved = await planningApi.updateStrategy(strategyRevision.value, strategyForm);
     strategyRevision.value = saved.revision;
-    notice.value = "目标策略已保存；系统会重新生成今天的营养参考。";
+    notice.value = "目标策略已保存，今天的营养参考会随之更新。";
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了目标策略";
   } finally {
@@ -337,20 +349,20 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
 </script>
 
 <template>
-  <AppShell page-class="settings-page" rail-note="提醒可以关闭，忽略也不会改变记录。">
-        <header class="view-header"><div><p class="date-line">设置</p><h1>资料、提醒和数据</h1><p>每类提醒单独管理；训练提醒不会代替饮食提醒。</p></div></header>
+  <AppShell page-class="settings-page" rail-note="资料、提醒和数据都在这里。">
+        <header class="view-header"><div><p class="date-line">设置</p><h1>设置</h1><p>管理个人资料、提醒和数据。</p></div></header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取设置…</strong></section>
         <div v-else class="view-stack">
           <section class="work-panel" aria-labelledby="profile-settings-title">
-            <div class="panel-heading"><div><h2 id="profile-settings-title">个人档案</h2><p>只填写公式真正需要的资料；缺少内容只会停止对应计算。</p></div><span class="status-chip">修订 {{ profileRevision }}</span></div>
+            <div class="panel-heading"><div><h2 id="profile-settings-title">个人档案</h2><p>用于计算每日能量和营养参考。</p></div></div>
             <p v-if="!profileAvailable" class="field-help">个人档案尚未载入，当前不能保存，以免覆盖原有资料。</p><form class="planning-form" @submit.prevent="saveProfile">
               <div class="field-grid">
-                <label><span>出生日期</span><input v-model="profileForm.birthDate" type="date" /><small>当前个体公式覆盖 19–64 岁成人。</small></label>
-                <label><span>能量公式分类</span><select v-model="profileForm.sexCategory"><option :value="null">暂不填写</option><option value="male">男性方程</option><option value="female">女性方程</option></select><small>仅用于选择官方方程，不作为身份称谓。</small></label>
+                <label class="date-field--clickable" @click="openDatePicker"><span>出生日期</span><input v-model="profileForm.birthDate" type="date" /><small>当前计算方法适用于 19–64 岁成人。</small></label>
+                <label><span>性别</span><select v-model="profileForm.sexCategory"><option :value="null">请选择</option><option value="male">男</option><option value="female">女</option></select><small>系统会据此选择适用的能量计算公式。</small></label>
                 <label><span>身高（cm）</span><input v-model.number="profileForm.heightCm" type="number" min="80" max="250" step="0.1" placeholder="例如 175" /></label>
-                <label><span>平常活动档位</span><select v-model="profileForm.palCategory"><option :value="null">还不确定</option><option value="inactive">Inactive · 大部分时间坐着</option><option value="low_active">Low active · 有少量日常移动</option><option value="active">Active · 规律移动或训练</option><option value="very_active">Very active · 大量规律活动</option></select><small>要综合工作、通勤和规律训练确认，不能只看某一天。</small></label>
+                <label><span>日常活动水平</span><select v-model="profileForm.palCategory"><option :value="null">还不确定</option><option value="inactive">久坐为主</option><option value="low_active">有少量日常活动</option><option value="active">经常活动或训练</option><option value="very_active">活动量很大</option></select><small>综合工作、通勤和长期训练情况选择。</small></label>
               </div>
               <fieldset class="safety-fieldset"><legend>适用边界</legend>
                 <label class="switch-row"><input v-model="profileForm.pregnantOrBreastfeeding" type="checkbox" /><span>当前处于孕期或哺乳期</span></label>
@@ -362,7 +374,7 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
           </section>
 
           <section class="work-panel" aria-labelledby="measurement-settings-title">
-            <div class="panel-heading"><div><h2 id="measurement-settings-title">身体测量</h2><p>每次新增一条记录；修正误录不会制造一条假的身体变化。</p></div><span class="status-chip">{{ measurements.length }} 条</span></div>
+            <div class="panel-heading"><div><h2 id="measurement-settings-title">身体测量</h2><p>记录体重和腰围，误录可以直接修正。</p></div><span class="status-chip">{{ measurements.length }} 条</span></div>
             <p v-if="!measurementsAvailable" class="field-help">身体测量记录尚未载入，当前不能新增或修正。</p><form class="planning-form" @submit.prevent="saveMeasurement">
               <div class="field-grid">
                 <label><span>测量日期</span><input v-model="measurementForm.localDate" type="date" required /></label>
@@ -375,24 +387,24 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
             <ul v-if="measurements.length" class="measurement-list">
               <li v-for="measurement in measurements" :key="measurement.id"><div><strong>{{ measurement.weightKg }} kg</strong><span>{{ measurement.localDate }}<template v-if="measurement.waistCm !== null"> · 腰围 {{ measurement.waistCm }} cm</template></span><small v-if="measurement.note">{{ measurement.note }}</small></div><button class="text-action" type="button" @click="editMeasurement(measurement)">修正</button></li>
             </ul>
-            <p v-else class="data-note">还没有测量记录。未记录时不会猜测体重。</p>
+            <p v-else class="data-note">还没有测量记录。</p>
           </section>
 
           <section class="work-panel" aria-labelledby="strategy-settings-title">
-            <div class="panel-heading"><div><h2 id="strategy-settings-title">目标与营养策略</h2><p>你选择方向，系统按有依据的范围计算，不需要手填热量和宏量数字。</p></div><span class="status-chip">修订 {{ strategyRevision }}</span></div>
+            <div class="panel-heading"><div><h2 id="strategy-settings-title">目标与营养策略</h2><p>选择方向后，系统会计算相应的营养参考。</p></div></div>
             <p v-if="!strategyAvailable" class="field-help">目标策略尚未载入，当前不能保存，以免覆盖原有选择。</p><form class="planning-form" @submit.prevent="saveStrategy">
               <fieldset class="strategy-fieldset"><legend>体重策略</legend><div class="strategy-options">
-                <label v-for="option in [{ value: 'maintain', label: '维持体重', description: '以维持能量参考为基础。' }, { value: 'lose', label: '减脂', description: '只在国家卫健委适用边界内自动计算。' }, { value: 'gain', label: '增重', description: '暂不使用没有依据的固定热量盈余。' }]" :key="option.value" class="strategy-option" :class="{ 'is-selected': strategyForm.weightStrategy === option.value }"><input v-model="strategyForm.weightStrategy" type="radio" name="weight-strategy" :value="option.value" @change="normalizeMacroPreference" /><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span></label>
+                <label v-for="option in [{ value: 'maintain', label: '维持体重', description: '以当前体重的维持能量为参考。' }, { value: 'lose', label: '减脂', description: '在官方建议适用时计算能量缺口。' }, { value: 'gain', label: '增重', description: '先提供维持参考，再结合记录调整。' }]" :key="option.value" class="strategy-option" :class="{ 'is-selected': strategyForm.weightStrategy === option.value }"><input v-model="strategyForm.weightStrategy" type="radio" name="weight-strategy" :value="option.value" @change="normalizeMacroPreference" /><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span></label>
               </div></fieldset>
               <fieldset class="strategy-fieldset"><legend>宏量分配偏好</legend><div class="strategy-options"><label v-for="option in macroOptions" :key="option.value" class="strategy-option" :class="{ 'is-selected': strategyForm.macroPreference === option.value }"><input v-model="strategyForm.macroPreference" type="radio" name="macro-preference" :value="option.value" /><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span></label></div></fieldset>
-              <label class="switch-row"><input v-model="strategyForm.regularExercise" type="checkbox" /><span>当前有规律运动（用于判断运动蛋白质范围是否适用）</span></label>
+              <label class="switch-row"><input v-model="strategyForm.regularExercise" type="checkbox" /><span>目前有规律运动</span></label>
               <div class="field-grid"><label><span>训练或体成分意图（可选）</span><input v-model="strategyForm.trainingIntent" maxlength="500" placeholder="例如增肌、提高力量、改善体态" /></label><template v-if="strategyForm.weightStrategy === 'gain'"><label><span>目标体重（kg，可选）</span><input v-model.number="strategyForm.targetWeightKg" type="number" min="20" max="400" step="0.1" /></label><label><span>目标日期（可选）</span><input v-model="strategyForm.targetDate" type="date" /></label></template></div>
               <button class="action-button action-button--primary" type="submit" :disabled="strategySaving || !strategyAvailable">{{ strategySaving ? '保存中…' : '保存目标策略' }}</button>
             </form>
           </section>
 
           <section class="work-panel" aria-labelledby="training-reminder-settings-title">
-            <div class="panel-heading"><div><h2 id="training-reminder-settings-title">训练提醒</h2><p>只有当天还有未开始的训练安排时，达到设定时间才会提示。</p></div><span class="status-chip">独立提醒</span></div>
+            <div class="panel-heading"><div><h2 id="training-reminder-settings-title">训练提醒</h2><p>当天有未开始的训练安排时提醒。</p></div></div>
             <p v-if="!trainingReminderAvailable" class="field-help">训练提醒设置尚未载入，当前不能保存。</p><form class="reminder-form" @submit.prevent="save">
               <label class="switch-row"><input v-model="form.enabled" type="checkbox" /><span>{{ form.enabled ? '已开启' : '已关闭' }}</span></label>
               <label><span>提醒时间</span><input v-model="form.localTime" type="time" required /></label>
@@ -407,18 +419,18 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
           </section>
 
           <section class="work-panel" aria-labelledby="nutrition-reminder-settings-title">
-            <div class="panel-heading"><div><h2 id="nutrition-reminder-settings-title">饮食提醒</h2><p>只看当天饮食记录和剩余情况，不读取训练完成量。</p></div><span class="status-chip">独立提醒</span></div>
+            <div class="panel-heading"><div><h2 id="nutrition-reminder-settings-title">饮食提醒</h2><p>根据当天的饮食记录和剩余量提醒。</p></div></div>
             <p v-if="!nutritionReminderAvailable" class="field-help">饮食提醒设置尚未载入，当前不能保存。</p><form class="reminder-form" @submit.prevent="saveNutritionReminder">
               <label class="switch-row"><input v-model="nutritionReminderForm.enabled" type="checkbox" /><span>{{ nutritionReminderForm.enabled ? '已开启' : '已关闭' }}</span></label>
               <label><span>提醒时间</span><input v-model="nutritionReminderForm.localTime" type="time" required /></label>
               <label><span>时区</span><input v-model="nutritionReminderForm.timeZone" required maxlength="100" /></label>
               <button class="action-button action-button--primary" type="submit" :disabled="nutritionReminderSaving || !nutritionReminderAvailable">{{ nutritionReminderSaving ? '保存中…' : '保存饮食提醒' }}</button>
             </form>
-            <p class="data-note">记录不完整时只提示“可能还有未记录内容”，不会把估算说成确定超标。</p>
+            <p class="data-note">记录不完整时，提醒会注明还有内容未记录。</p>
           </section>
 
           <section class="work-panel" aria-labelledby="measurement-reminder-settings-title">
-            <div class="panel-heading"><div><h2 id="measurement-reminder-settings-title">身体测量提醒</h2><p>默认每周柔性提醒一次；可以改周期、暂缓或关闭。</p></div><span class="status-chip">独立提醒</span></div>
+            <div class="panel-heading"><div><h2 id="measurement-reminder-settings-title">身体测量提醒</h2><p>按设定周期提醒更新体重等资料。</p></div></div>
             <p v-if="!measurementReminderAvailable" class="field-help">身体测量提醒设置尚未载入，当前不能保存。</p><form class="reminder-form" @submit.prevent="saveMeasurementReminder">
               <label class="switch-row"><input v-model="measurementReminderForm.enabled" type="checkbox" /><span>{{ measurementReminderForm.enabled ? '已开启' : '已关闭' }}</span></label>
               <label><span>间隔天数</span><input v-model.number="measurementReminderForm.intervalDays" type="number" min="1" max="365" required /></label>
@@ -426,11 +438,11 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
               <label><span>时区</span><input v-model="measurementReminderForm.timeZone" required maxlength="100" /></label>
               <button class="action-button action-button--primary" type="submit" :disabled="measurementReminderSaving || !measurementReminderAvailable">{{ measurementReminderSaving ? '保存中…' : '保存测量提醒' }}</button>
             </form>
-            <p class="data-note">忽略提醒不会阻断计算；系统继续使用最近一次有效体重，并显示它的日期。</p>
+            <p class="data-note">没有新记录时，系统继续使用最近一次有效体重。</p>
           </section>
 
           <section class="work-panel problem-report-panel" aria-labelledby="problem-report-title">
-            <div class="panel-heading"><div><h2 id="problem-report-title">问题报告</h2><p>遇到问题时，把刚才的操作简单写下来，再生成一份可以直接发到问答里的报告。</p></div><span class="status-chip">只在本机生成</span></div>
+            <div class="panel-heading"><div><h2 id="problem-report-title">问题报告</h2><p>写下刚才的操作，生成一份便于排查的报告。</p></div><span class="status-chip">本机生成</span></div>
             <label class="problem-description"><span>发生了什么（可选）</span><textarea v-model="problemDescription" rows="4" maxlength="2000" placeholder="例如：我在饮食页上传照片，进度到 100% 后一直没有出现分析结果。预期是几秒后看到候选营养。不要在这里粘贴密码或 Key。" /></label>
             <div class="form-actions">
               <button class="action-button action-button--primary" type="button" :disabled="problemReportGenerating" @click="generateProblemReport">{{ problemReportGenerating ? '正在检查运行状态…' : '生成问题报告' }}</button>
@@ -440,7 +452,7 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
             </div>
             <p v-if="problemReportNotice" class="data-note" role="status">{{ problemReportNotice }}</p>
             <label v-if="problemReport" class="problem-report-preview"><span>报告预览</span><textarea :value="problemReport" rows="16" readonly spellcheck="false" @focus="($event.target as HTMLTextAreaElement).select()" /></label>
-            <p class="data-note">报告包含页面路径、浏览器环境、服务端健康状态、近期接口结果和未处理错误；自动收集部分不包含密码、Cookie、API Key、照片、请求内容或训练饮食明细，也不会自动上传。问题描述由你填写，分享前仍建议快速看一遍。</p>
+            <p class="data-note">报告包含页面、浏览器环境、服务状态和近期错误，不收集密码、Cookie、API Key、照片或训练饮食明细，也不会自动上传。分享前请先预览。</p>
           </section>
 
           <section class="work-panel" aria-labelledby="data-control-title">

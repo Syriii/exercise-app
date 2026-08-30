@@ -26,9 +26,9 @@ test("a person can record, correct, and review a meal without treating unknown n
   await page.goto("/settings");
   const profile = page.getByRole("region", { name: "个人档案" });
   await profile.getByLabel("出生日期").fill("2004-08-26");
-  await profile.getByLabel("能量公式分类").selectOption("female");
+  await profile.getByLabel("性别").selectOption("female");
   await profile.getByLabel("身高（cm）").fill("165");
-  await profile.getByLabel("平常活动档位").selectOption("low_active");
+  await profile.getByLabel("日常活动水平").selectOption("low_active");
   await profile.getByRole("button", { name: "保存个人档案" }).click();
   const measurements = page.getByRole("region", { name: "身体测量" });
   await measurements.getByLabel("体重（kg）").fill("63");
@@ -60,7 +60,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await meal.getByRole("button", { name: "计入这顿饭" }).click();
 
   await expect(page.getByText("已记录 232 kcal")).toBeVisible();
-  await expect(page.getByText("本项有未知值")).toBeVisible();
+  await expect(page.getByText("有未知值")).toBeVisible();
   await expect(meal.getByText("脂肪 未知")).toBeVisible();
   await expect(meal.getByRole("combobox", { name: /我的常用项/ })).toContainText("米饭");
 
@@ -89,7 +89,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await expect(trends.getByText("5.2 g")).toBeVisible();
   await expect(trends.getByText("63 kg")).toBeVisible();
   await expect(datedHistory.getByText("250 kcal", { exact: true })).toBeVisible();
-  await expect(page.getByText("仅汇总已经填写的数值；未知营养不会按 0 计算。")).toBeVisible();
+  await expect(page.getByText("只汇总已经填写的营养数值。")).toBeVisible();
   const datedHistoryBox = await datedHistory.boundingBox();
   const trendsBox = await trends.boundingBox();
   expect(datedHistoryBox).not.toBeNull();

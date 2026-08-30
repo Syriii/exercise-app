@@ -18,8 +18,8 @@
   --color-success: oklch(43% 0.12 145);
   --color-shadow: oklch(17% 0.014 50 / 0.12);
 
-  --font-display: "Arial Narrow", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-body: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-body: "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 
   --space-3xs: 0.125rem;
@@ -39,7 +39,7 @@
   --text-lg: 1.5625rem;
   --text-xl: 1.9531rem;
   --text-2xl: 2.4414rem;
-  --text-display: clamp(2.25rem, 5vw, 3.5rem);
+  --text-display: clamp(2rem, 4vw, 3rem);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -49,7 +49,7 @@
   --dur-long: 320ms;
 
   --rule-thin: 1px;
-  --radius-sm: 0.25rem;
+  --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
   --radius-pill: 999px;
 
