@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MemoryPlanningRepository } from "./memory-repository.js";
 import { PlanningService } from "./service.js";
@@ -24,6 +24,38 @@ async function completeProfile(service: PlanningService, userId: string) {
 }
 
 describe("PlanningService", () => {
+  it("does not pass transport revision fields into first profile or strategy inserts", async () => {
+    const repository = new MemoryPlanningRepository();
+    const profileWrite = vi.spyOn(repository, "saveProfile");
+    const strategyWrite = vi.spyOn(repository, "saveStrategy");
+    const service = new PlanningService(repository);
+    const profileInput = {
+      revision: 0,
+      birthDate: "2000-08-26",
+      sexCategory: "male" as const,
+      heightCm: 175,
+      pregnantOrBreastfeeding: false,
+      medicalNutritionCondition: false,
+      specialBodyComposition: false,
+      palCategory: "low_active" as const,
+    };
+    const strategyInput = {
+      revision: 0,
+      weightStrategy: "maintain" as const,
+      macroPreference: "balanced" as const,
+      regularExercise: false,
+      trainingIntent: null,
+      targetWeightKg: null,
+      targetDate: null,
+    };
+
+    await service.updateProfile("user-a", profileInput.revision, profileInput);
+    await service.updateStrategy("user-a", strategyInput.revision, strategyInput);
+
+    expect(profileWrite.mock.calls[0]?.[2]).not.toHaveProperty("revision");
+    expect(strategyWrite.mock.calls[0]?.[2]).not.toHaveProperty("revision");
+  });
+
   it("keeps measurements as a timeline and uses the latest record available on that date", async () => {
     const service = new PlanningService(new MemoryPlanningRepository());
     await completeProfile(service, "user-a");

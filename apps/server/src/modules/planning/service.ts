@@ -84,7 +84,15 @@ export class PlanningService {
     if (input.birthDate !== null && !validDate(input.birthDate)) throw new PlanningError("invalid_planning_input", "出生日期格式不正确", 400);
     if (input.birthDate !== null && input.birthDate > new Date().toISOString().slice(0, 10)) throw new PlanningError("invalid_planning_input", "出生日期不能晚于今天", 400);
     assertNumber(input.heightCm, "身高", 80, 250);
-    const saved = await this.repository.saveProfile(userId, expectedRevision, input);
+    const saved = await this.repository.saveProfile(userId, expectedRevision, {
+      birthDate: input.birthDate,
+      sexCategory: input.sexCategory,
+      heightCm: input.heightCm,
+      pregnantOrBreastfeeding: input.pregnantOrBreastfeeding,
+      medicalNutritionCondition: input.medicalNutritionCondition,
+      specialBodyComposition: input.specialBodyComposition,
+      palCategory: input.palCategory,
+    });
     if (saved === "revision_conflict") throw new PlanningError("planning_revision_conflict", "资料已经在其他页面更新，请刷新后重试", 409);
     return saved;
   }
@@ -107,8 +115,12 @@ export class PlanningService {
       throw new PlanningError("invalid_planning_input", "较低脂肪分配只用于适用的减脂策略", 400);
     }
     const saved = await this.repository.saveStrategy(userId, expectedRevision, {
-      ...input,
+      weightStrategy: input.weightStrategy,
+      macroPreference: input.macroPreference,
+      regularExercise: input.regularExercise,
       trainingIntent: cleanText(input.trainingIntent, 500),
+      targetWeightKg: input.targetWeightKg,
+      targetDate: input.targetDate,
     });
     if (saved === "revision_conflict") throw new PlanningError("planning_revision_conflict", "策略已经在其他页面更新，请刷新后重试", 409);
     return saved;

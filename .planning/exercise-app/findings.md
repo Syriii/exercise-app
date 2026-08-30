@@ -1523,3 +1523,4 @@
 - integration 临时容器的 `compose run` 也必须使用 `--no-deps`；否则 Compose 仍可能根据 `depends_on` 尝试启动 PostgreSQL。加上该参数后，构建期间若数据库停止，测试只能失败，不能自行改变生产容器生命周期。
 - 集成文件会创建超过 10 个账号，不能用产品默认账号上限验证互不相关的数据路径；测试构造的 `IdentityService` 使用测试专用上限 100，生产默认值不变。
 - pg-boss 强杀恢复测试原 `expire=30s`、总超时 40s，在低资源服务器上几乎没有调度余量。pg-boss 12.27.0 要求 `heartbeatSeconds >= 10`，且 heartbeat/timeout 扫描还受默认 60 秒 `monitorIntervalSeconds` 节流；只缩短 expire 会让普通过期冒充心跳恢复。修正后测试实例使用 monitor/supervise=1 秒、heartbeat=10 秒、expire=120 秒、总超时 60 秒，并断言子进程确由 SIGKILL 结束；因此测试窗口内只能通过 heartbeat 回收，不能靠普通 expire。
+- 2026-08-30 线上真实使用发现：用户认为在保存体重时收到统一 5xx。服务器脱敏日志确认实际失败请求是 `PUT /api/v1/planning/profile`，违反 `personal_profiles_revision_positive_ck`：路由把包含并发控制字段 `revision: 0` 的整个 request body 作为领域输入传下去，PostgreSQL 首次 insert 的对象展开又用该值覆盖了数据库默认 `revision: 1`。身体测量 POST 本身不是这条日志的失败路径。相同运行时字段泄漏也可能影响首次目标策略、饮食提醒和身体测量提醒保存；修复同时在路由剥离传输字段，并在服务层使用显式字段白名单。

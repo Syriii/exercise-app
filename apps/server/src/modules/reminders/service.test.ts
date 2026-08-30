@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MemoryTrainingRepository } from "../training/memory-repository.js";
 import { TrainingService } from "../training/service.js";
@@ -10,17 +10,36 @@ function createServices() {
   const trainingService = new TrainingService({ repository: new MemoryTrainingRepository(), now: () => now });
   const nutritionService = new NutritionService(new MemoryNutritionRepository());
   const planningService = new PlanningService(new MemoryPlanningRepository());
+  const reminderRepository = new MemoryReminderRepository();
   const reminderService = new ReminderService({
-    repository: new MemoryReminderRepository(),
+    repository: reminderRepository,
     trainingService,
     nutritionService,
     planningService,
     now: () => now,
   });
-  return { trainingService, nutritionService, planningService, reminderService };
+  return { trainingService, nutritionService, planningService, reminderRepository, reminderService };
 }
 
 describe("ReminderService", () => {
+  it("does not pass transport revision fields into first reminder inserts", async () => {
+    const { reminderRepository, reminderService } = createServices();
+    const trainingWrite = vi.spyOn(reminderRepository, "saveTrainingSettings");
+    const nutritionWrite = vi.spyOn(reminderRepository, "saveNutritionSettings");
+    const measurementWrite = vi.spyOn(reminderRepository, "saveMeasurementSettings");
+    const trainingInput = { revision: 0, enabled: true, localTime: "18:00", timeZone: "Asia/Shanghai" };
+    const nutritionInput = { revision: 0, enabled: true, localTime: "20:00", timeZone: "Asia/Shanghai" };
+    const measurementInput = { revision: 0, enabled: true, intervalDays: 7, localTime: "09:00", timeZone: "Asia/Shanghai" };
+
+    await reminderService.updateTrainingSettings("user-a", trainingInput.revision, trainingInput);
+    await reminderService.updateNutritionSettings("user-a", nutritionInput.revision, nutritionInput);
+    await reminderService.updateMeasurementSettings("user-a", measurementInput.revision, measurementInput);
+
+    expect(trainingWrite.mock.calls[0]?.[2]).not.toHaveProperty("revision");
+    expect(nutritionWrite.mock.calls[0]?.[2]).not.toHaveProperty("revision");
+    expect(measurementWrite.mock.calls[0]?.[2]).not.toHaveProperty("revision");
+  });
+
   it("only becomes due for a scheduled workout after the configured local time", async () => {
     const { trainingService, reminderService } = createServices();
     const initial = await reminderService.getTrainingSettings("user-a", "Asia/Shanghai");

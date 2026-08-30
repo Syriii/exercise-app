@@ -1048,3 +1048,8 @@
 - 320、375、414、768、960、1440 px 自动布局检查无横向溢出、面板重叠、过小文字或低于 44px 的主要控件。最终截图目视发现并修复提醒复选框被通用宽度规则拉满导致文字竖排；修复后提醒区域复核正常，并再次通过 33/33 E2E。
 - 产品所有者明确要求今后每批修改通过本地验收后自动提交、推送和部署，以便直接查看线上效果。该持续授权已写入 `AGENTS.md`，仅覆盖 Exercise App 代码 fast-forward、应用镜像和 API/Worker 切换；数据库、setup/migration、共享服务、volume 与其他项目继续需要单独授权。
 - 第二轮界面与文案修复以 `48c13cb` 推送 `origin/main`，远程 `gpt-5.6-sol` / `high` 任务完成受限构建与 API/Worker 切换且无 error。主任务从公网独立确认 live=`ok`、ready=`ready`，首页资源为 `index-CpmR3Tv2.js` / `index-Celm8J5G.css`，公开 JavaScript 内包含目标提交 `48c13cb`。跨任务记录仍省略远程命令正文，因此不在本记录中虚构容器 ID、restart 或 Worker 心跳细节；这些信息以后仍以远程可见记录或管理员运行摘要复核。
+- 产品所有者报告线上保存体重返回统一 5xx。主任务已确认线上设置页和身体测量列表读取正常、当前运行资源仍为 `48c13cb`，并发起只读服务器日志诊断；没有向真实账号写入测试体重，也没有读取用户健康数据或请求体。
+- 首次定向测试命令从 workspace 根错误地把 `apps/server/src/modules/planning/service.test.ts` 作为子 workspace 内路径传给 Vitest，结果为“未找到测试文件”；代码未运行也未修改。后续定向测试应使用 server workspace 内相对路径 `src/modules/planning/service.test.ts`，不重复原命令。
+- 服务器只读日志诊断通过远程任务标题脱敏回传根因：`PUT /api/v1/planning/profile` 把 `revision=0` 带入 `personal_profiles` 首次 insert，触发 `personal_profiles_revision_positive_ck`。跨任务正文仍不可见；尝试使用 Computer Use 只读查看 Codex 自身界面被安全策略明确拒绝，未操作界面，随后改用可逆的远程任务临时标题传回错误路径和约束。
+- 修复在 planning/reminder 路由先解构移除 `revision`，服务层再以白名单对象调用仓储；同步覆盖首次个人档案、目标策略、训练/饮食/身体测量提醒。新增单测证明即使服务收到带传输字段的运行时对象，仓储输入也不含 `revision`；PostgreSQL 集成用例以同样输入保护 CHECK 默认值。
+- 本轮本地验证通过：全仓类型检查、26 个文件 107 项服务端测试、生产构建、OpenAPI 合约和 `git diff --check`。首次 E2E 在沙箱内绑定 `127.0.0.1:4174` 被 `EPERM` 拒绝；按既有受控权限在沙箱外重跑后桌面/手机 33/33 通过。

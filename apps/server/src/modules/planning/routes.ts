@@ -89,7 +89,8 @@ export async function registerPlanningRoutes(app: FastifyInstance, options: { re
       response: { 200: profileResponse },
     },
     handler: async (request) => {
-      const value = await options.planningService.updateProfile(await userId(request), request.body.revision, request.body);
+      const { revision, ...input } = request.body;
+      const value = await options.planningService.updateProfile(await userId(request), revision, input);
       return { ...value, updatedAt: value.updatedAt?.toISOString() ?? null };
     },
   });
@@ -108,7 +109,8 @@ export async function registerPlanningRoutes(app: FastifyInstance, options: { re
       response: { 200: strategyResponse },
     },
     handler: async (request) => {
-      const value = await options.planningService.updateStrategy(await userId(request), request.body.revision, request.body);
+      const { revision, ...input } = request.body;
+      const value = await options.planningService.updateStrategy(await userId(request), revision, input);
       return { ...value, updatedAt: value.updatedAt?.toISOString() ?? null };
     },
   });

@@ -53,7 +53,8 @@ export async function registerReminderRoutes(app: FastifyInstance, options: {
       response: { 200: settingsResponse },
     },
     handler: async (request) => {
-      const settings = await options.reminderService.updateTrainingSettings(await userId(request), request.body.revision, request.body);
+      const { revision, ...input } = request.body;
+      const settings = await options.reminderService.updateTrainingSettings(await userId(request), revision, input);
       return { ...settings, updatedAt: settings.updatedAt?.toISOString() ?? null };
     },
   });
@@ -107,12 +108,12 @@ export async function registerReminderRoutes(app: FastifyInstance, options: {
 
   app.put<{ Body: { revision: number; enabled: boolean; localTime: string; timeZone: string } }>("/api/v1/reminders/nutrition/settings", {
     schema: { body: settingsBody, response: { 200: settingsResponse } },
-    handler: async (request) => { const settings = await options.reminderService.updateNutritionSettings(await userId(request), request.body.revision, request.body); return { ...settings, updatedAt: settings.updatedAt?.toISOString() ?? null }; },
+    handler: async (request) => { const { revision, ...input } = request.body; const settings = await options.reminderService.updateNutritionSettings(await userId(request), revision, input); return { ...settings, updatedAt: settings.updatedAt?.toISOString() ?? null }; },
   });
 
   app.put<{ Body: { revision: number; enabled: boolean; intervalDays: number; localTime: string; timeZone: string } }>("/api/v1/reminders/measurement/settings", {
     schema: { body: { ...settingsBody, required: [...settingsBody.required, "intervalDays"], properties: { ...settingsBody.properties, intervalDays: { type: "integer", minimum: 1, maximum: 365 } } }, response: { 200: measurementSettingsResponse } },
-    handler: async (request) => { const settings = await options.reminderService.updateMeasurementSettings(await userId(request), request.body.revision, request.body); return { ...settings, updatedAt: settings.updatedAt?.toISOString() ?? null }; },
+    handler: async (request) => { const { revision, ...input } = request.body; const settings = await options.reminderService.updateMeasurementSettings(await userId(request), revision, input); return { ...settings, updatedAt: settings.updatedAt?.toISOString() ?? null }; },
   });
 
   app.get<{ Querystring: { localDate: string; timeZone: string } }>("/api/v1/reminders/nutrition/status", {

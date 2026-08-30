@@ -561,7 +561,8 @@ describe("PostgreSQL integration", () => {
     const username = `planning_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a planning integration secure password")).account;
     const planning = new PlanningService(new PostgresPlanningRepository(database.database));
-    await planning.updateProfile(account.id, 0, {
+    const profileInput = {
+      revision: 0,
       birthDate: "2004-08-26",
       sexCategory: "female",
       heightCm: 165,
@@ -569,15 +570,18 @@ describe("PostgreSQL integration", () => {
       medicalNutritionCondition: false,
       specialBodyComposition: false,
       palCategory: "low_active",
-    });
-    await planning.updateStrategy(account.id, 0, {
+    } as const;
+    const strategyInput = {
+      revision: 0,
       weightStrategy: "maintain",
       macroPreference: "balanced",
       regularExercise: false,
       trainingIntent: null,
       targetWeightKg: null,
       targetDate: null,
-    });
+    } as const;
+    await planning.updateProfile(account.id, profileInput.revision, profileInput);
+    await planning.updateStrategy(account.id, strategyInput.revision, strategyInput);
     const measurement = await planning.createMeasurement(account.id, {
       measuredAt: "2026-08-26T00:00:00.000Z",
       localDate: "2026-08-26",

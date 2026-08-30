@@ -140,7 +140,11 @@ export class ReminderService {
 
   public async updateNutritionSettings(userId: string, expectedRevision: number, input: { enabled: boolean; localTime: string; timeZone: string }) {
     this.#validateSettings(input.localTime, input.timeZone);
-    const result = await this.#repository.saveNutritionSettings(userId, expectedRevision, input);
+    const result = await this.#repository.saveNutritionSettings(userId, expectedRevision, {
+      enabled: input.enabled,
+      localTime: input.localTime,
+      timeZone: input.timeZone,
+    });
     if (result === "revision_conflict") this.#revisionConflict();
     return result;
   }
@@ -170,7 +174,12 @@ export class ReminderService {
   public async updateMeasurementSettings(userId: string, expectedRevision: number, input: { enabled: boolean; intervalDays: number; localTime: string; timeZone: string }) {
     this.#validateSettings(input.localTime, input.timeZone);
     if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1 || input.intervalDays > 365) throw new ReminderError("invalid_reminder_input", "身体测量提醒周期需为 1–365 天", 400);
-    const result = await this.#repository.saveMeasurementSettings(userId, expectedRevision, input);
+    const result = await this.#repository.saveMeasurementSettings(userId, expectedRevision, {
+      enabled: input.enabled,
+      intervalDays: input.intervalDays,
+      localTime: input.localTime,
+      timeZone: input.timeZone,
+    });
     if (result === "revision_conflict") this.#revisionConflict();
     return result;
   }
