@@ -97,6 +97,28 @@ const trendSummary = computed(() => {
   };
 });
 
+const emptyState = computed(() => {
+  if (filter.value === "training") {
+    return {
+      title: "最近 90 天没有训练记录",
+      description: "饮食记录没有被隐藏，切回全部可以一起查看。",
+      action: "查看全部记录",
+    };
+  }
+  if (filter.value === "nutrition") {
+    return {
+      title: "最近 90 天没有饮食记录",
+      description: "训练记录没有被隐藏，切回全部可以一起查看。",
+      action: "查看全部记录",
+    };
+  }
+  return {
+    title: "最近 90 天还没有记录",
+    description: "完成的训练和保存的饮食会按日期出现在这里。",
+    action: "回到今天",
+  };
+});
+
 function mealNutrient(dayMeals: readonly Meal[], key: "energyKcal" | "proteinGrams"): number | null {
   const known = dayMeals.flatMap((meal) => meal.contributions.map((value) => value[key])).filter((value): value is number => value !== null);
   return known.length === 0 ? null : Math.round(known.reduce((sum, value) => sum + value, 0) * 10) / 10;
@@ -112,6 +134,14 @@ function mealEnergy(dayMeals: readonly Meal[]): string {
 
 function openNutritionDate(date: string) {
   void router.push({ name: "nutrition", query: { date } });
+}
+
+function useEmptyStateAction() {
+  if (filter.value === "all") {
+    void router.push({ name: "today" });
+    return;
+  }
+  filter.value = "all";
 }
 
 function localDate(date: Date): string {
@@ -388,17 +418,11 @@ onMounted(() => void load());
 <template>
   <AppShell page-class="history-page" rail-note="历史优先回答实际做了什么。">
         <header class="view-header"><div><p class="date-line">最近 90 天</p><h1>按天回看</h1><p>训练和饮食按日期放在一起，也可以单独筛选。</p></div></header>
-        <div class="history-filters" aria-label="筛选历史内容"><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button><button type="button" :aria-pressed="filter === 'training'" @click="filter = 'training'">训练</button><button type="button" :aria-pressed="filter === 'nutrition'" @click="filter = 'nutrition'">饮食</button></div>
-        <section v-if="!loading" class="work-panel history-trends" aria-labelledby="history-trends-title">
-          <div class="panel-heading"><div><h2 id="history-trends-title">最近 90 天的记录趋势</h2><p>只汇总实际保存的数据；没有记录的日期不会补成 0。</p></div></div>
-          <dl class="history-trend-summary"><div><dt>实际训练</dt><dd>{{ trendSummary.sessions }} 次</dd><span>{{ trendSummary.completedActions }} 个完成动作</span></div><div><dt>有饮食记录</dt><dd>{{ trendSummary.mealDays }} 天</dd><span>未知营养不参与求和</span></div><div><dt>记录体重变化</dt><dd>{{ trendSummary.weightChange === null ? '—' : `${trendSummary.weightChange > 0 ? '+' : ''}${trendSummary.weightChange} kg` }}</dd><span>{{ measurements.length < 2 ? '至少两次测量后显示' : '按首末有效测量' }}</span></div></dl>
-          <p v-if="trendRows.length" class="horizontal-scroll-hint">表格可以左右滑动查看完整数据。</p><div v-if="trendRows.length" class="history-trend-table-wrap" tabindex="0" aria-label="最近 90 天趋势表，可左右滚动"><table class="history-trend-table"><thead><tr><th>日期</th><th>训练</th><th>能量</th><th>蛋白质</th><th>体重</th></tr></thead><tbody><tr v-for="row in trendRows" :key="row.date"><th scope="row">{{ row.date.slice(5) }}</th><td>{{ row.sessions === 0 ? '—' : `${row.sessions} 次 / ${row.completedActions} 动作` }}</td><td>{{ row.energyKcal === null ? '—' : `${row.energyKcal} kcal` }}</td><td>{{ row.proteinGrams === null ? '—' : `${row.proteinGrams} g` }}</td><td>{{ row.weightKg === null ? '—' : `${row.weightKg} kg` }}</td></tr></tbody></table></div>
-          <p v-else class="empty-copy">还没有足够记录形成趋势。</p>
-        </section>
+        <div class="history-filters" aria-label="筛选按日记录"><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button><button type="button" :aria-pressed="filter === 'training'" @click="filter = 'training'">训练</button><button type="button" :aria-pressed="filter === 'nutrition'" @click="filter = 'nutrition'">饮食</button></div>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取历史记录…</strong></section>
-        <section v-else-if="historyDays.length === 0" class="work-panel training-empty"><strong>最近 90 天没有对应记录</strong><p>没有记录不代表没有训练或进食。</p></section>
+        <section v-else-if="historyDays.length === 0" class="work-panel training-empty history-empty"><strong>{{ emptyState.title }}</strong><p>{{ emptyState.description }}</p><button class="text-action" type="button" @click="useEmptyStateAction">{{ emptyState.action }}</button></section>
         <section v-else class="history-list" aria-label="按日期排列的训练与饮食历史">
           <article v-for="day in historyDays" :key="day.date" class="history-day history-day--real">
             <time :datetime="day.date">{{ displayDate(day.date) }}</time>
@@ -488,6 +512,11 @@ onMounted(() => void load());
             </div>
             <span class="status-chip">{{ day.sessions.length }} 次训练 · {{ day.meals.length }} 顿</span>
           </article>
+        </section>
+        <section v-if="!loading && trendRows.length > 0" class="work-panel history-trends" aria-labelledby="history-trends-title">
+          <div class="panel-heading"><div><h2 id="history-trends-title">90 天概览</h2><p>只计算已经保存的记录，缺失值不会补成 0。</p></div></div>
+          <dl class="history-trend-summary"><div><dt>实际训练</dt><dd>{{ trendSummary.sessions }} 次</dd><span>{{ trendSummary.completedActions }} 个完成动作</span></div><div><dt>饮食记录</dt><dd>{{ trendSummary.mealDays }} 天</dd><span>未知营养不参与求和</span></div><div><dt>体重变化</dt><dd>{{ trendSummary.weightChange === null ? '—' : `${trendSummary.weightChange > 0 ? '+' : ''}${trendSummary.weightChange} kg` }}</dd><span>{{ measurements.length < 2 ? '至少两次测量后显示' : '按首末有效测量' }}</span></div></dl>
+          <p class="horizontal-scroll-hint">表格可以左右滑动查看完整数据。</p><div class="history-trend-table-wrap" tabindex="0" aria-label="最近 90 天趋势表，可左右滚动"><table class="history-trend-table"><thead><tr><th>日期</th><th>训练</th><th>能量</th><th>蛋白质</th><th>体重</th></tr></thead><tbody><tr v-for="row in trendRows" :key="row.date"><th scope="row">{{ row.date.slice(5) }}</th><td>{{ row.sessions === 0 ? '—' : `${row.sessions} 次 / ${row.completedActions} 动作` }}</td><td>{{ row.energyKcal === null ? '—' : `${row.energyKcal} kcal` }}</td><td>{{ row.proteinGrams === null ? '—' : `${row.proteinGrams} g` }}</td><td>{{ row.weightKg === null ? '—' : `${row.weightKg} kg` }}</td></tr></tbody></table></div>
         </section>
   </AppShell>
 </template>

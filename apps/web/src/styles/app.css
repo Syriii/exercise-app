@@ -1899,6 +1899,18 @@ ol {
   gap: var(--space-xs);
 }
 
+/* Hallmark · page: history · macrostructure: Long Document · designed-as-app · hierarchy: dated records before trends */
+/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
+.history-page .app-main {
+  display: grid;
+  align-content: start;
+  gap: var(--space-xl);
+}
+
+.history-empty {
+  max-width: 42rem;
+}
+
 .history-trends {
   display: grid;
   gap: var(--space-md);
@@ -1907,14 +1919,18 @@ ol {
 .history-trend-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-sm);
+  border-block: var(--rule-thin) solid var(--color-rule);
 }
 
 .history-trend-summary > div {
   display: grid;
   gap: var(--space-3xs);
-  padding-block: var(--space-md);
-  border-top: var(--rule-thin) solid var(--color-rule);
+  align-content: start;
+  padding: var(--space-md);
+}
+
+.history-trend-summary > div + div {
+  border-inline-start: var(--rule-thin) solid var(--color-rule);
 }
 
 .history-trend-summary dt,
@@ -1927,6 +1943,7 @@ ol {
   margin: 0;
   font-size: var(--text-xl);
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .history-trend-table-wrap {
@@ -2507,7 +2524,20 @@ ol {
   }
 
   .history-trend-summary {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .history-trend-summary > div {
+    padding-inline: var(--space-xs);
+  }
+
+  .history-trend-summary dd {
+    font-size: var(--text-md);
+  }
+
+  .history-trend-summary dt,
+  .history-trend-summary span {
+    font-size: var(--text-xs);
   }
 
   .history-session__heading,

@@ -1,5 +1,20 @@
 import { expect, test } from "@playwright/test";
 
+test("an empty history page shows one useful state instead of an empty trend report", async ({ page }, testInfo) => {
+  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`history_empty_${projectKey}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+
+  await page.goto("/history");
+  await expect(page.getByText("最近 90 天还没有记录")).toBeVisible();
+  await expect(page.getByText("完成的训练和保存的饮食会按日期出现在这里。")).toBeVisible();
+  await expect(page.getByRole("region", { name: "90 天概览" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "回到今天" })).toBeVisible();
+});
+
 test("a person can record, correct, and review a meal without treating unknown nutrients as zero", async ({ page }, testInfo) => {
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await page.goto("/register");
@@ -65,14 +80,21 @@ test("a person can record, correct, and review a meal without treating unknown n
 
   await page.goto("/history");
   await page.locator(".history-filters").getByRole("button", { name: "饮食", exact: true }).click();
-  const trends = page.getByRole("region", { name: "最近 90 天的记录趋势" });
+  const datedHistory = page.getByLabel("按日期排列的训练与饮食历史");
+  const trends = page.getByRole("region", { name: "90 天概览" });
+  await expect(datedHistory).toBeVisible();
+  await expect(datedHistory.getByText("饮食 · 1 顿")).toBeVisible();
   await expect(trends.getByText("1 天")).toBeVisible();
   await expect(trends.getByText("250 kcal")).toBeVisible();
   await expect(trends.getByText("5.2 g")).toBeVisible();
   await expect(trends.getByText("63 kg")).toBeVisible();
-  await expect(page.getByText("饮食 · 1 顿")).toBeVisible();
-  await expect(page.getByLabel("按日期排列的训练与饮食历史").getByText("250 kcal", { exact: true })).toBeVisible();
+  await expect(datedHistory.getByText("250 kcal", { exact: true })).toBeVisible();
   await expect(page.getByText("仅汇总已经填写的数值；未知营养不会按 0 计算。")).toBeVisible();
+  const datedHistoryBox = await datedHistory.boundingBox();
+  const trendsBox = await trends.boundingBox();
+  expect(datedHistoryBox).not.toBeNull();
+  expect(trendsBox).not.toBeNull();
+  expect(trendsBox!.y).toBeGreaterThan(datedHistoryBox!.y + datedHistoryBox!.height - 1);
   await page.getByRole("button", { name: "查看或修正" }).click();
   await expect(page).toHaveURL(/\/nutrition\?date=/);
   await expect(page.locator("article.meal-card").filter({ hasText: "米饭" })).toBeVisible();
