@@ -31,6 +31,11 @@ describe("loadConfig", () => {
     expect(config.exerciseMediaRoot).toMatch(/private-exercise-media$/);
   });
 
+  it("uses the ignored runtime source directory for development media", () => {
+    const config = loadConfig({ ...validEnvironment, NODE_ENV: "development" });
+    expect(config.exerciseMediaRoot).toMatch(/\.runtime\/exercise-catalog\/source$/);
+  });
+
   it("loads optional DeepSeek configuration from a file without making it required", () => {
     const config = loadConfig(
       {

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "../../..");
-const sourcePath = resolve(repositoryRoot, "docs/exercises-dataset-main/data/exercises.json");
+const sourcePath = resolve(repositoryRoot, ".runtime/exercise-catalog/source/data/exercises.json");
 const outputPath = resolve(repositoryRoot, "apps/server/data/exercises.zh.json");
 const sourceUrl = "https://github.com/hasaneyldrm/exercises-dataset";
 

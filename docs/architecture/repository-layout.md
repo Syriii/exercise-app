@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 |---|---|
 | 状态 | 当前有效 |
-| 最后更新 | 2026-08-25 |
+| 最后更新 | 2026-08-30 |
 | 适用范围 | 源码仓库的应用边界、目录职责、构建入口和未来扩展位置 |
 | 不在本文重复 | 服务端、数据库、Android、部署拓扑和版本顺序由已确认的 `technical-architecture.md` 与 `delivery-plan.md` 集中说明 |
 
@@ -27,6 +27,8 @@ exercise-app/
 ├── apps/
 │   ├── web/                     # 当前 Vue 3 + TypeScript + Vite 客户端
 │   ├── server/                  # 当前 Fastify API、Worker、数据库与服务端模块
+│   │   ├── data/                # 服务端随版本发布的可审阅生成数据
+│   │   └── scripts/             # 服务端专属生成与校验工具
 │   └── android/                 # 未来 Android 工程，实际开发时创建
 ├── packages/                    # 出现真实跨应用复用时创建
 ├── deployment/                  # 当前容器构建、Compose 与配置示例
@@ -39,8 +41,10 @@ exercise-app/
 │   │   └── calculation-evidence.md # 训练与营养规划官方证据登记
 │   ├── experience/              # 体验结构、流程、原型范围与交互状态
 │   ├── deployment/              # 自托管、持久化、备份恢复与部署验收
+│   ├── licenses/                # 第三方数据与素材许可边界
 │   ├── product.md               # 当前产品事实源
 │   └── product-decisions.md     # 重要产品决定
+├── .runtime/                    # 本地运行状态与私有源资料，始终忽略
 ├── .planning/exercise-app/      # Codex 计划、研究和进度记录
 ├── AGENTS.md                    # 全仓库协作与放置规则
 ├── README.md                    # 项目入口
@@ -87,6 +91,8 @@ APK 和 AAB 是构建产物，不是源码。它们应被 Git 忽略，并在需
 ## 5. 服务端、部署与运行数据
 
 - `apps/server/` 保存账号、权限、业务数据、照片访问和分析任务交接等服务端代码。
+- `apps/server/data/` 只保存经过生成、校验、许可审阅且需要随应用版本发布的数据；原始第三方资料不放在这里。
+- `.runtime/` 保存本地可重建的运行状态、临时文件和私有源资料。当前动作图片/GIF 位于 `.runtime/exercise-catalog/source/`，不会进入 Git 或 Docker 构建上下文。
 - `deployment/` 保存 Docker、进程、反向代理或其他部署定义，不保存真实运行数据。
 - 餐食照片在服务器的临时持久化位置中保存到分析、重试和用户复核完成，不进入 Git 仓库；数据库、备份、访问凭证和用户记录同样位于仓库外。
 - 代码重新部署不得覆盖运行数据；当前 Phase 4 草案采用 PostgreSQL 与独立临时媒体卷。数据库进入长期备份和恢复演练，临时照片不进入长期备份。
@@ -126,4 +132,5 @@ npm run test:e2e
 3. 是否是部署定义？放入 `deployment/`。
 4. 是否是长期有效的产品或工程说明？放入 `docs/` 的对应分类。
 5. 是否是 Codex 工作状态？放入 `.planning/exercise-app/`。
-6. 是否是私有运行数据、凭证、缓存或构建产物？不得进入版本控制。
+6. 是否是本地运行状态、私有源资料或可重建缓存？放入 `.runtime/`，不得进入版本控制或容器构建上下文。
+7. 是否是凭证、数据库、备份、用户记录或构建产物？放在各自受控的仓库外位置，不得进入版本控制。

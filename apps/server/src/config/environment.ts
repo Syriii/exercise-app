@@ -189,7 +189,7 @@ export function loadConfig(
     temporaryMediaRoot: resolve(environment.TEMP_MEDIA_ROOT ?? ".runtime/media"),
     exerciseMediaRoot: optionalDirectory(
       environment.EXERCISE_MEDIA_ROOT
-        ?? (mode === "development" ? "docs/exercises-dataset-main" : undefined),
+        ?? (mode === "development" ? ".runtime/exercise-catalog/source" : undefined),
     ),
     webDistDirectory: resolve(environment.WEB_DIST_DIR ?? "apps/web/dist"),
     deepseekApiKey: readOptionalSecretValue("DEEPSEEK_API_KEY", environment, secretReader),

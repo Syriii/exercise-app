@@ -10,15 +10,27 @@ Exercise App 的公共动作目录派生自 [hasaneyldrm/exercises-dataset](http
 
 ## 可选本地媒体目录
 
-开发环境会在存在时读取仓库根目录下的 `docs/exercises-dataset-main/`，也可通过 `EXERCISE_MEDIA_ROOT` 指向其他目录。目录只接受以下固定结构和文件名：
+仓库把可提交的目录数据、导入工具与不可提交的第三方媒体分开：
 
 ```text
-exercise-media/
+exercise-app/
+├── .runtime/exercise-catalog/source/       # 本地私有原始资料，Git/Docker 忽略
+│   ├── data/exercises.json                 # 仅在重新生成目录时需要
+│   ├── images/
+│   └── videos/
+├── apps/server/data/exercises.zh.json      # 可审阅、可分发的 MIT-only 生成目录
+└── apps/server/scripts/generate-exercise-catalog.mjs
+```
+
+开发环境默认读取 `.runtime/exercise-catalog/source/`，也可通过 `EXERCISE_MEDIA_ROOT` 指向其他目录。媒体目录只接受以下固定结构和文件名：
+
+```text
+source/
 ├── images/0001-<media-id>.jpg
 └── videos/0001-<media-id>.gif
 ```
 
-媒体接口要求登录，并按动作 ID 与 `image` / `animation` 两种固定类型读取；缺少目录或单个文件时，动作搜索和指导会自动回退到无媒体状态。部署者需要自行确认其许可覆盖具体使用和部署方式，并保留界面中的 `© Gym visual — https://gymvisual.com/` 署名。
+`.runtime/` 是可删除、可重建的本地状态，不作为产品文档、源码或部署产物。媒体接口要求登录，并按动作 ID 与 `image` / `animation` 两种固定类型读取；缺少目录或单个文件时，动作搜索和指导会自动回退到无媒体状态。部署者需要自行确认其许可覆盖具体使用和部署方式，并保留界面中的 `© Gym visual — https://gymvisual.com/` 署名。
 
 ## MIT License
 
