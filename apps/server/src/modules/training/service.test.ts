@@ -28,7 +28,7 @@ describe("TrainingService", () => {
     const { service } = createService();
     expect(service.getExerciseGuidance("罗马尼亚硬拉")).toMatchObject({
       exerciseName: "硬拉",
-      sourceName: "Exercise App contributors",
+      sourceName: "Exercise App 项目贡献者",
       license: "MIT",
       reviewStatus: "draft",
       videoUrl: null,

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
+import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
 import {
   trainingApi,
@@ -134,6 +135,10 @@ function sourceTemplateName(unit: TrainingProgramUnit): string | null {
   return templates.value.find((template) => template.id === unit.sourceTemplateId)?.name ?? "已归档的单次方案";
 }
 
+function guidanceKey(scope: string, parentId: string, itemId: string): string {
+  return `${scope}:${parentId}:${itemId}`;
+}
+
 function openScheduleEditor(options: {
   title: string;
   templateId?: string;
@@ -260,15 +265,15 @@ function reportError(error: unknown) {
   errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了，请稍后再试";
 }
 
-async function toggleGuidance(item: TrainingSessionItem) {
-  if (guidanceOpenItemId.value === item.id) {
+async function toggleGuidance(key: string, exerciseName: string) {
+  if (guidanceOpenItemId.value === key) {
     guidanceOpenItemId.value = null;
     return;
   }
-  guidanceOpenItemId.value = item.id;
-  if (guidanceByItem[item.id] !== undefined) return;
+  guidanceOpenItemId.value = key;
+  if (guidanceByItem[key] !== undefined) return;
   try {
-    guidanceByItem[item.id] = await trainingApi.getGuidance(item.exerciseName);
+    guidanceByItem[key] = await trainingApi.getGuidance(exerciseName);
   } catch (error) {
     reportError(error);
     guidanceOpenItemId.value = null;
@@ -303,21 +308,21 @@ async function load() {
 
 async function generateSuggestion() {
   saving.value = true; errorMessage.value = "";
-  try { suggestions.value = [await trainingSuggestionApi.generate(suggestionForm), ...suggestions.value]; suggestionFormOpen.value = false; notice.value = "系统建议已经生成；采用前先看适用范围和动作示例"; }
+  try { suggestions.value = [await trainingSuggestionApi.generate(suggestionForm), ...suggestions.value]; suggestionFormOpen.value = false; notice.value = "草案已生成，先看动作是否合适。"; }
   catch (error) { reportError(error); }
   finally { saving.value = false; }
 }
 
 async function adoptSuggestion(value: TrainingSuggestion) {
   saving.value = true; errorMessage.value = "";
-  try { const result = await trainingSuggestionApi.adopt(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result.suggestion : item); templates.value = await trainingApi.listTemplates(); planTab.value = "templates"; notice.value = "建议已保存为你的单次方案；现在可以继续编辑、安排或直接开始"; }
+  try { const result = await trainingSuggestionApi.adopt(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result.suggestion : item); templates.value = await trainingApi.listTemplates(); planTab.value = "templates"; notice.value = "已经存到单次方案。"; }
   catch (error) { reportError(error); }
   finally { saving.value = false; }
 }
 
 async function dismissSuggestion(value: TrainingSuggestion) {
   saving.value = true; errorMessage.value = "";
-  try { const result = await trainingSuggestionApi.dismiss(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result : item); notice.value = "已放弃这份建议，没有生成训练方案"; }
+  try { const result = await trainingSuggestionApi.dismiss(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result : item); notice.value = "这份草案已移除。"; }
   catch (error) { reportError(error); }
   finally { saving.value = false; }
 }
@@ -681,12 +686,12 @@ onMounted(() => void load());
 </script>
 
 <template>
-  <AppShell page-class="training-page" rail-note="计划可编辑，实际训练单独保存。" show-footer>
+  <AppShell page-class="training-page" rail-note="选方案，开始练，记下实际完成。" show-footer>
         <header class="view-header training-view-header">
           <div>
             <p class="date-line">训练</p>
-            <h1>{{ activeSession === null ? "安排训练" : "这次练了什么" }}</h1>
-            <p v-if="activeSession === null">选一份方案开始，或直接记录。</p>
+            <h1>{{ activeSession === null ? "训练" : "这次训练" }}</h1>
+            <p v-if="activeSession === null">选一份方案，也可以直接开始。</p>
             <p v-else>{{ activeSessionLabel }} · {{ activeSession.localDate }}</p>
           </div>
           <button
@@ -710,8 +715,8 @@ onMounted(() => void load());
         <div v-else-if="activeSession === null" class="view-stack">
           <section class="work-panel training-suggestion-panel" aria-labelledby="training-suggestion-title">
             <div class="panel-heading">
-              <div><h2 id="training-suggestion-title">系统建议</h2><p>根据目标、经验和器械生成一份可编辑方案。</p></div>
-              <button class="action-button" type="button" @click="suggestionFormOpen = !suggestionFormOpen">{{ suggestionFormOpen ? '收起' : '生成系统建议' }}</button>
+              <div><h2 id="training-suggestion-title">帮我排一份</h2><p>填写可用时间和器械，先生成一份草案。</p></div>
+              <button class="action-button" type="button" @click="suggestionFormOpen = !suggestionFormOpen">{{ suggestionFormOpen ? '收起' : '填写条件' }}</button>
             </div>
             <form v-if="suggestionFormOpen" class="suggestion-form" @submit.prevent="generateSuggestion">
               <label><span>主要目标</span><select v-model="suggestionForm.goal"><option value="general">一般力量与健康</option><option value="strength">力量</option><option value="hypertrophy">肌肥大</option><option value="power">功率</option></select></label>
@@ -723,15 +728,15 @@ onMounted(() => void load());
               <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? '生成中…' : '按这些条件生成' }}</button>
             </form>
             <article v-for="suggestion in suggestions.filter((item) => item.status === 'active')" :key="suggestion.id" class="suggestion-card">
-              <header><div><strong>{{ suggestion.candidate.title }}</strong><span>{{ suggestion.stale ? '档案或策略已有变化' : `方法 ${suggestion.methodVersion}` }}</span></div><span class="status-chip" :data-tone="suggestion.candidate.status === 'stopped' ? 'danger' : 'accent'">{{ suggestion.candidate.status === 'ready' ? '等待选择' : '已停止自动生成' }}</span></header>
+              <header><div><strong>{{ suggestion.candidate.title }}</strong><span>{{ suggestion.stale ? '资料变化后生成的旧草案' : `生成于 ${suggestion.inputSnapshot.generatedOn}` }}</span></div><span class="status-chip" :data-tone="suggestion.candidate.status === 'stopped' ? 'danger' : 'accent'">{{ suggestion.candidate.status === 'ready' ? '草案' : '需要自己安排' }}</span></header>
               <p v-for="message in suggestion.candidate.messages" :key="message">{{ message }}</p>
               <template v-if="suggestion.candidate.template !== null">
                 <p><strong>建议频率：</strong>每周 {{ suggestion.candidate.weeklyResistanceDays }} 次抗阻训练；具体日期由你安排。</p>
-                <ul class="suggestion-exercises"><li v-for="item in suggestion.candidate.template.items" :key="item.exerciseName"><strong>{{ item.exerciseName }}</strong><span>{{ item.targetSets ?? '—' }} 组<span v-if="item.targetRepsMin !== null"> · {{ item.targetRepsMin }}–{{ item.targetRepsMax }} 次</span></span></li></ul>
+                <ul class="suggestion-exercises"><li v-for="item in suggestion.candidate.template.items" :key="item.exerciseName"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span>{{ item.targetSets ?? '—' }} 组<span v-if="item.targetRepsMin !== null"> · {{ item.targetRepsMin }}–{{ item.targetRepsMax }} 次</span></span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('suggestion', suggestion.id, item.exerciseName), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('suggestion', suggestion.id, item.exerciseName)]" /></li></ul>
                 <ul class="suggestion-baseline"><li v-for="item in suggestion.candidate.publicHealthBaseline" :key="item">{{ item }}</li></ul>
               </template>
               <details><summary>适用范围和依据</summary><p>依据 {{ suggestion.evidenceIds.join('、') }}；生成于 {{ suggestion.inputSnapshot.generatedOn }}。</p><ul><li v-for="item in suggestion.candidate.limitations" :key="item">{{ item }}</li></ul></details>
-              <div class="recommendation-actions"><button v-if="suggestion.candidate.template !== null" class="action-button action-button--primary" type="button" :disabled="saving" @click="adoptSuggestion(suggestion)">保存为我的方案</button><button class="text-action" type="button" :disabled="saving" @click="dismissSuggestion(suggestion)">不采用</button></div>
+              <div class="recommendation-actions"><button v-if="suggestion.candidate.template !== null" class="action-button action-button--primary" type="button" :disabled="saving" @click="adoptSuggestion(suggestion)">存成单次方案</button><button class="text-action" type="button" :disabled="saving" @click="dismissSuggestion(suggestion)">移除草案</button></div>
             </article>
           </section>
 
@@ -799,7 +804,7 @@ onMounted(() => void load());
 
           <section class="split-heading" aria-labelledby="templates-title">
             <div><h2 id="templates-title">我的单次训练方案</h2></div>
-            <p>保存常用动作组合，训练时任选一份。</p>
+            <p>把常练的动作放在一起，下次直接选。</p>
           </section>
 
           <section v-if="templates.length === 0" class="work-panel training-empty">
@@ -819,8 +824,8 @@ onMounted(() => void load());
               </div>
               <ol class="plain-list template-preview">
                 <li v-for="item in template.items" :key="item.id">
-                  <strong>{{ item.exerciseName }}</strong>
-                  <span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span>
+                  <div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('template', template.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('template', template.id, item.id) ? '收起预览' : '动作预览' }}</button></div>
+                  <ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('template', template.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('template', template.id, item.id)]" />
                 </li>
               </ol>
               <div class="form-actions">
@@ -942,7 +947,7 @@ onMounted(() => void load());
                         <p>{{ unit.items.length }} 个动作<span v-if="sourceTemplateName(unit)"> · 复制自 {{ sourceTemplateName(unit) }}</span></p>
                       </div>
                       <ol class="plain-list template-preview">
-                        <li v-for="item in unit.items" :key="item.id"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span></li>
+                        <li v-for="item in unit.items" :key="item.id"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('unit', unit.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('unit', unit.id, item.id) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('unit', unit.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('unit', unit.id, item.id)]" /></li>
                       </ol>
                       <p v-if="sourceUpdated(unit) && !unit.started" class="source-update-note">来源方案有更新。当前内容不会自动改变。</p>
                       <div class="form-actions">
@@ -977,7 +982,7 @@ onMounted(() => void load());
                     <p>{{ describeTarget(item) }}</p>
                   </div>
                   <div class="item-status-actions">
-                    <button class="text-action" type="button" @click="toggleGuidance(item)">{{ guidanceOpenItemId === item.id ? "收起要点" : "动作要点" }}</button>
+                    <button class="text-action" type="button" @click="toggleGuidance(item.id, item.exerciseName)">{{ guidanceOpenItemId === item.id ? "收起预览" : "动作预览" }}</button>
                     <button class="action-button" type="button" :disabled="saving" @click="saveItem(item, item.status === 'completed' ? 'pending' : 'completed')">
                       {{ item.status === "completed" ? "取消完成" : "完成" }}
                     </button>
@@ -985,25 +990,7 @@ onMounted(() => void load());
                   </div>
                 </div>
 
-                <section v-if="guidanceOpenItemId === item.id" class="exercise-guidance" :aria-label="`${item.exerciseName}动作指导`">
-                  <p v-if="guidanceByItem[item.id] === undefined">正在读取动作要点…</p>
-                  <template v-else-if="guidanceByItem[item.id] === null">
-                    <strong>暂时没有许可和来源状态清楚的指导内容</strong>
-                    <p>你仍然可以正常记录本次训练。</p>
-                  </template>
-                  <template v-else>
-                    <div class="panel-heading"><div><strong>{{ guidanceByItem[item.id]!.exerciseName }}要点</strong><p>{{ guidanceByItem[item.id]!.overview }}</p></div><span class="status-chip">{{ guidanceByItem[item.id]!.reviewStatus === 'reviewed' ? '已审阅' : '原创草案' }}</span></div>
-                    <div class="guidance-columns">
-                      <div><strong>怎么做</strong><ol><li v-for="step in guidanceByItem[item.id]!.steps" :key="step">{{ step }}</li></ol></div>
-                      <div><strong>常见问题</strong><ul><li v-for="mistake in guidanceByItem[item.id]!.commonMistakes" :key="mistake">{{ mistake }}</li></ul></div>
-                    </div>
-                    <p><strong>可选替代：</strong>{{ guidanceByItem[item.id]!.alternatives.join('、') }}</p>
-                    <a v-if="guidanceByItem[item.id]!.videoUrl" class="text-action" :href="guidanceByItem[item.id]!.videoUrl!" target="_blank" rel="noopener noreferrer">查看外部示范视频</a>
-                    <p v-else class="data-note">目前没有可以随项目提供的许可明确视频。</p>
-                    <p class="safety-copy">{{ guidanceByItem[item.id]!.limitations }}</p>
-                    <small>来源：{{ guidanceByItem[item.id]!.sourceName }} · {{ guidanceByItem[item.id]!.license }} · {{ guidanceByItem[item.id]!.version }}</small>
-                  </template>
-                </section>
+                <ExerciseGuidanceCard v-if="guidanceOpenItemId === item.id" :exercise-name="item.exerciseName" :guidance="guidanceByItem[item.id]" />
 
                 <div v-if="actualForms[item.id]" class="actual-data-form">
                   <label class="wide-field"><span>实际动作</span><input v-model="actualForms[item.id]!.performedExerciseName" required maxlength="100" :placeholder="item.exerciseName" /></label>

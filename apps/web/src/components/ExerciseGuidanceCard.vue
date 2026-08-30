@@ -1,0 +1,32 @@
+<script setup lang="ts">
+import type { ExerciseGuidance } from "../api/training";
+
+defineProps<{
+  exerciseName: string;
+  guidance: ExerciseGuidance | null | undefined;
+}>();
+</script>
+
+<template>
+  <section class="exercise-guidance" :aria-label="`${exerciseName}动作预览`">
+    <p v-if="guidance === undefined">正在读取动作要点…</p>
+    <template v-else-if="guidance === null">
+      <strong>这个动作还没有指导内容</strong>
+      <p>可以继续安排或记录，不会影响训练数据。</p>
+    </template>
+    <template v-else>
+      <div class="panel-heading">
+        <div><strong>{{ guidance.exerciseName }}</strong><p>{{ guidance.overview }}</p></div>
+        <span class="status-chip">{{ guidance.reviewStatus === 'reviewed' ? '已审阅' : '内容草案' }}</span>
+      </div>
+      <div class="guidance-columns">
+        <div><strong>动作顺序</strong><ol><li v-for="step in guidance.steps" :key="step">{{ step }}</li></ol></div>
+        <div><strong>注意</strong><ul><li v-for="mistake in guidance.commonMistakes" :key="mistake">{{ mistake }}</li></ul></div>
+      </div>
+      <p><strong>可以替换为：</strong>{{ guidance.alternatives.join('、') }}</p>
+      <a v-if="guidance.videoUrl" class="text-action" :href="guidance.videoUrl" target="_blank" rel="noopener noreferrer">观看示范视频</a>
+      <p v-else class="data-note">暂无视频示范，可以先查看上面的动作要点。</p>
+      <details class="guidance-source"><summary>来源与适用范围</summary><p class="safety-copy">{{ guidance.limitations }}</p><small>{{ guidance.sourceName }} · {{ guidance.license }} · {{ guidance.version }}</small></details>
+    </template>
+  </section>
+</template>

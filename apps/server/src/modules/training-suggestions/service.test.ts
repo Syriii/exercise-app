@@ -28,7 +28,7 @@ describe("TrainingSuggestionService", () => {
 
     const adopted = await service.adopt("user-a", suggestion.id, suggestion.revision);
     expect(adopted.suggestion.status).toBe("adopted");
-    expect(adopted.template.name).toBe("系统建议起点 · 全身训练");
+    expect(adopted.template.name).toBe("全身训练草案");
     expect(await trainingService.listTemplates("user-a")).toHaveLength(1);
     expect(await service.list("user-b")).toEqual([]);
   });

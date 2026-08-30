@@ -53,6 +53,7 @@ function remainingText(value: NutritionValueSummary | undefined, unit: string): 
 }
 
 function recordedText(value: NutritionValueSummary | undefined, unit: string): string {
+  if (nutritionSummary.value?.mealCount === 0) return "尚未记餐";
   if (value?.recorded === null || value?.recorded === undefined) return "尚无已知摄入";
   return `已记录 ${value.recorded} ${unit}${value.complete ? "" : "，仍有未知值"}`;
 }

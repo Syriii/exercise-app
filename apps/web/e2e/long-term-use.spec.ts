@@ -13,7 +13,7 @@ async function register(page: import("@playwright/test").Page, username: string,
 test("a person can manage independent reminders and download a private JSON export", async ({ page }, testInfo) => {
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await register(page, `long_${projectKey}_${Date.now()}`, "long-term browser password");
-  await page.goto("/settings");
+  await page.goto("/settings/reminders");
 
   const nutritionReminder = page.getByRole("region", { name: "饮食提醒" });
   await nutritionReminder.getByRole("checkbox").check();
@@ -31,6 +31,7 @@ test("a person can manage independent reminders and download a private JSON expo
   await expect(nutritionReminder.getByLabel("提醒时间")).toHaveValue("19:30");
   await expect(measurementReminder.getByLabel("间隔天数")).toHaveValue("14");
 
+  await page.goto("/settings/data");
   const dataSection = page.getByRole("region", { name: "我的数据" });
   await dataSection.getByRole("button", { name: "准备 JSON 导出" }).click();
   await expect(dataSection.getByText("导出已完成")).toBeVisible({ timeout: 10_000 });
@@ -57,10 +58,10 @@ test("a person can copy and download a privacy-limited problem report", async ({
   const testOrigin = new URL(String(testInfo.project.use.baseURL)).origin;
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: testOrigin });
   await register(page, username, "problem report browser password");
-  await page.goto("/settings");
+  await page.goto("/feedback");
 
-  const reportSection = page.getByRole("region", { name: "问题报告" });
-  await reportSection.getByLabel("发生了什么（可选）").fill("上传一张午餐照片后，页面没有显示新的候选结果。");
+  const reportSection = page.getByRole("region", { name: "发生了什么" });
+  await reportSection.getByLabel("问题描述（可选）").fill("上传一张午餐照片后，页面没有显示新的候选结果。");
   await reportSection.getByRole("button", { name: "生成问题报告" }).click();
   await expect(reportSection.getByRole("status")).toContainText("报告已生成");
 
@@ -90,7 +91,7 @@ test("account deletion requires explicit confirmation and immediately ends the s
   const username = `delete_${projectKey}_${Date.now()}`;
   const password = "account deletion browser password";
   await register(page, username, password);
-  await page.goto("/settings");
+  await page.goto("/settings/data");
 
   const dataSection = page.getByRole("region", { name: "我的数据" });
   await dataSection.getByLabel("输入当前用户名").fill(username);

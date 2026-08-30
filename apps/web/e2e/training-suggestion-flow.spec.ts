@@ -8,27 +8,29 @@ test("a person can turn an evidence-backed system suggestion into their own plan
   await page.getByRole("button", { name: "注册" }).click();
   await expect(page).toHaveURL(/\/today$/);
 
-  await page.goto("/settings");
-  const profile = page.getByRole("region", { name: "个人档案" });
+  await page.goto("/settings/profile");
+  const profile = page.getByRole("region", { name: "基础资料" });
   await profile.getByLabel("出生日期").fill("1995-05-01");
   await profile.getByLabel("性别").selectOption("male");
   await profile.getByLabel("身高（cm）").fill("175");
   await profile.getByLabel("日常活动水平").selectOption("low_active");
-  await profile.getByRole("button", { name: "保存个人档案" }).click();
+  await profile.getByRole("button", { name: "保存基础资料" }).click();
 
   await page.goto("/training");
-  const suggestionPanel = page.getByRole("region", { name: "系统建议" });
-  await suggestionPanel.getByRole("button", { name: "生成系统建议" }).click();
+  const suggestionPanel = page.getByRole("region", { name: "帮我排一份" });
+  await suggestionPanel.getByRole("button", { name: "填写条件" }).click();
   await suggestionPanel.getByLabel("主要目标").selectOption("hypertrophy");
   await suggestionPanel.getByLabel("每周可练几天").fill("3");
   await suggestionPanel.getByRole("button", { name: "按这些条件生成" }).click();
 
-  await expect(suggestionPanel.getByText("全身训练起点", { exact: true })).toBeVisible();
+  await expect(suggestionPanel.getByText("全身训练草案", { exact: true })).toBeVisible();
+  await suggestionPanel.getByRole("button", { name: "动作预览" }).first().click();
+  await expect(suggestionPanel.getByRole("region", { name: /动作预览/ }).first()).toBeVisible();
   await suggestionPanel.getByText("适用范围和依据").click();
   await expect(suggestionPanel.getByText("E-013、E-014")).toBeVisible();
-  await suggestionPanel.getByRole("button", { name: "保存为我的方案" }).click();
+  await suggestionPanel.getByRole("button", { name: "存成单次方案" }).click();
 
-  await expect(page.getByRole("status")).toContainText("建议已保存为你的单次方案");
-  await expect(page.getByText("系统建议起点 · 全身训练", { exact: true })).toBeVisible();
-  await expect(suggestionPanel.getByText("全身训练起点", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("已经存到单次方案");
+  await expect(page.getByRole("heading", { name: "全身训练草案" })).toBeVisible();
+  await expect(suggestionPanel.getByText("先看一遍动作和训练量，不合适就改。保存后才会成为你的方案。")).toHaveCount(0);
 });

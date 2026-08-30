@@ -23,13 +23,14 @@ test("a person can record, correct, and review a meal without treating unknown n
   await page.getByRole("button", { name: "注册" }).click();
   await expect(page).toHaveURL(/\/today$/);
 
-  await page.goto("/settings");
-  const profile = page.getByRole("region", { name: "个人档案" });
+  await page.goto("/settings/profile");
+  const profile = page.getByRole("region", { name: "基础资料" });
   await profile.getByLabel("出生日期").fill("2004-08-26");
   await profile.getByLabel("性别").selectOption("female");
   await profile.getByLabel("身高（cm）").fill("165");
   await profile.getByLabel("日常活动水平").selectOption("low_active");
-  await profile.getByRole("button", { name: "保存个人档案" }).click();
+  await profile.getByRole("button", { name: "保存基础资料" }).click();
+  await page.goto("/settings/measurement");
   const measurements = page.getByRole("region", { name: "身体测量" });
   await measurements.getByLabel("体重（kg）").fill("63");
   await measurements.getByRole("button", { name: "记录这次测量" }).click();

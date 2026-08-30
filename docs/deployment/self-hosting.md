@@ -324,7 +324,7 @@ curl --fail http://127.0.0.1:${APP_PORT:-3000}/api/v1/health/ready
 
 报告默认写入 `deployment/diagnostics/exercise-app-diagnostics-<UTC 时间>.log`，权限为 `600`，包含宿主机与 Compose 版本、磁盘概况、容器状态、公开健康检查以及 `setup`、`api`、`worker`、`postgres` 最近 200 行日志。可用 `DIAGNOSTIC_LOG_LINES=500` 调整日志行数。脚本不会读取 `.env`、secret、数据库表内容、照片、导出或 volume 文件；容器日志仍可能包含 IP、请求路径、ID 和错误上下文，因此分享前必须人工检查。
 
-页面仍可访问时，也可以在“设置 → 问题报告”生成浏览器侧报告。它更适合定位具体页面、接口请求或浏览器错误；部署脚本更适合启动、数据库和 worker 问题。
+页面仍可访问时，也可以在“设置 → Bug 反馈”生成浏览器侧报告。它更适合定位具体页面、接口请求或浏览器错误；部署脚本更适合启动、数据库和 worker 问题。
 
 ```bash
 docker compose ps

@@ -4,6 +4,7 @@ import { useSessionStore } from "../stores/session";
 import AdminPage from "../views/AdminPage.vue";
 import AuthPage from "../views/AuthPage.vue";
 import ChangePasswordPage from "../views/ChangePasswordPage.vue";
+import FeedbackPage from "../views/FeedbackPage.vue";
 import HistoryPage from "../views/HistoryPage.vue";
 import NutritionPage from "../views/NutritionPage.vue";
 import SettingsPage from "../views/SettingsPage.vue";
@@ -15,7 +16,7 @@ const sectionRoutes: RouteRecordRaw[] = [
   { path: "/training", name: "training", component: TrainingPage, meta: { section: "training" } },
   { path: "/nutrition", name: "nutrition", component: NutritionPage, meta: { section: "nutrition" } },
   { path: "/history", name: "history", component: HistoryPage, meta: { section: "history" } },
-  { path: "/settings", name: "settings", component: SettingsPage, meta: { section: "settings" } },
+  { path: "/settings/:section?", name: "settings", component: SettingsPage, meta: { section: "settings" } },
 ];
 
 export const router = createRouter({
@@ -25,6 +26,7 @@ export const router = createRouter({
     { path: "/login", name: "login", component: AuthPage, meta: { public: true } },
     { path: "/register", name: "register", component: AuthPage, meta: { public: true } },
     { path: "/account/password", name: "change-password", component: ChangePasswordPage },
+    { path: "/feedback", name: "feedback", component: FeedbackPage, meta: { section: "settings" } },
     { path: "/admin", name: "admin", component: AdminPage, meta: { admin: true } },
     ...sectionRoutes,
     { path: "/:pathMatch(.*)*", redirect: "/today" },

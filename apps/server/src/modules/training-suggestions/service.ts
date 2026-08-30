@@ -58,17 +58,17 @@ function readyCandidate(preferences: TrainingSuggestionPreferences): TrainingSug
   }));
   return {
     status: "ready",
-    title: "全身训练起点",
+    title: "全身训练草案",
     weeklyResistanceDays: resistanceDays,
     publicHealthBaseline: ["一般健康成人每周累计 150–300 分钟中等强度或 75–150 分钟高强度有氧活动。", "抗阻训练覆盖主要肌群，每周至少 2 天。"],
-    template: { name: "系统建议起点 · 全身训练", note: `建议每周安排 ${resistanceDays} 次；单次可用时间约 ${preferences.sessionMinutes} 分钟。动作名称是可编辑示例，保存后由你决定具体日程和实际负荷。`, items },
-    messages: ["这是一个可修改的起点，不会自动排进日程，也不是必须完成的周任务。"],
-    limitations: ["具体动作、器械和负荷需结合技能、偏好和现场安全条件调整。", "建议不用于伤病康复、疾病管理、孕哺期或竞技专项。"],
+    template: { name: "全身训练草案", note: `每周可安排 ${resistanceDays} 次，每次约 ${preferences.sessionMinutes} 分钟。动作可以替换，重量按实际情况填写。`, items },
+    messages: ["先看一遍动作和训练量，不合适就改。保存后才会成为你的方案。"],
+    limitations: ["动作、器械和负荷要结合经验与现场条件调整。", "伤病康复、疾病管理、孕哺期和竞技专项需要个别评估。"],
   };
 }
 
 function stoppedCandidate(reason: string): TrainingSuggestionCandidate {
-  return { status: "stopped", title: "暂不自动生成训练建议", weeklyResistanceDays: null, publicHealthBaseline: [], template: null, messages: [reason, "你仍然可以自行建立训练方案并记录实际训练。"], limitations: ["当前自动建议只适用于 18–64 岁一般健康成人。"] };
+  return { status: "stopped", title: "这次不能自动生成", weeklyResistanceDays: null, publicHealthBaseline: [], template: null, messages: [reason, "你仍然可以自己建立方案并记录训练。"], limitations: ["当前自动建议只适用于 18–64 岁一般健康成人。"] };
 }
 
 export class TrainingSuggestionService {

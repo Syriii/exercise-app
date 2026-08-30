@@ -18,13 +18,17 @@ test("a person can turn a reusable plan into an actual workout", async ({ page }
   await page.getByRole("button", { name: "保存方案" }).click();
 
   await expect(page.getByRole("heading", { name: "全身简易" })).toBeVisible();
+  const templateCard = page.getByRole("article").filter({ hasText: "全身简易" }).first();
+  await templateCard.getByRole("button", { name: "动作预览" }).click();
+  await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
+  await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("当前先提供文字预览");
+  await templateCard.getByRole("button", { name: "收起预览" }).click();
   await page.getByRole("button", { name: "用这份开始" }).click();
-  await expect(page.getByRole("heading", { name: "这次练了什么" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "这次训练" })).toBeVisible();
 
-  await page.getByRole("button", { name: "动作要点" }).click();
-  await expect(page.getByRole("region", { name: "深蹲动作指导" })).toContainText("原创草案");
-  await expect(page.getByRole("region", { name: "深蹲动作指导" })).toContainText("目前没有可以随项目提供的许可明确视频");
-  await page.getByRole("button", { name: "收起要点" }).click();
+  await page.getByRole("button", { name: "动作预览" }).click();
+  await expect(page.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
+  await page.getByRole("button", { name: "收起预览" }).click();
 
   await page.getByLabel("次数").first().fill("10");
   await page.getByLabel("重量 kg").first().fill("60");
@@ -38,7 +42,7 @@ test("a person can turn a reusable plan into an actual workout", async ({ page }
   await expect(page.getByText("平板支撑")).toBeVisible();
 
   await page.getByRole("button", { name: "保存并结束" }).click();
-  await expect(page.getByRole("heading", { name: "安排训练" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "训练", exact: true })).toBeVisible();
   await expect(page.getByText("这次训练已保存")).toBeVisible();
 });
 
@@ -105,7 +109,7 @@ test("a person can schedule today's workout and find the actual record in histor
   await page.getByRole("button", { name: "保存安排" }).click();
   await expect(page.getByText(/已安排到/)).toBeVisible();
 
-  await page.goto("/settings");
+  await page.goto("/settings/reminders");
   const reminderSettings = page.getByRole("region", { name: "训练提醒" });
   await reminderSettings.getByRole("checkbox").check();
   await reminderSettings.getByLabel("提醒时间").fill("00:00");

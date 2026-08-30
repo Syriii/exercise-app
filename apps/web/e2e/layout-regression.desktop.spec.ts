@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const applicationRoutes = ["/today", "/training", "/nutrition", "/history", "/settings", "/admin"] as const;
+const applicationRoutes = ["/today", "/training", "/nutrition", "/history", "/settings", "/settings/profile", "/settings/measurement", "/settings/strategy", "/settings/reminders", "/settings/data", "/feedback", "/admin"] as const;
 const viewportWidths = [320, 375, 414, 768, 960, 1440] as const;
 
 async function login(page: Page) {

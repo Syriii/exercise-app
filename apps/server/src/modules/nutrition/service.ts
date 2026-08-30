@@ -166,7 +166,11 @@ export class NutritionService {
     const summarize = (key: keyof NutrientValues, target: number | null) => {
       const values = contributions.map((value) => value[key]);
       const known = values.filter((value): value is number => value !== null);
-      const recorded = known.length === 0 ? null : round(known.reduce((total, value) => total + value, 0));
+      const recorded = meals.length === 0
+        ? 0
+        : known.length === 0
+          ? null
+          : round(known.reduce((total, value) => total + value, 0));
       const complete = meals.length > 0 && contributions.length > 0 && values.length > 0 && values.every((value) => value !== null) && meals.every((meal) => meal.contributions.length > 0);
       return { recorded, target, remaining: recorded === null || target === null ? null : round(target - recorded), complete };
     };

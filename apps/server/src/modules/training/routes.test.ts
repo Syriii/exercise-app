@@ -80,6 +80,13 @@ describe("training routes", () => {
       reviewStatus: "draft",
       videoUrl: null,
     });
+    const movementPattern = await app.inject({
+      method: "GET",
+      url: "/api/v1/training/guidance?exerciseName=%E6%B0%B4%E5%B9%B3%E6%8B%89%EF%BC%88%E5%88%92%E8%88%B9%E7%B1%BB%EF%BC%89",
+      headers: { cookie: firstCookie },
+    });
+    expect(movementPattern.statusCode).toBe(200);
+    expect(movementPattern.json()).toMatchObject({ exerciseName: "划船", reviewStatus: "draft" });
   });
 
   it("serves the official expenditure catalog and stores an explicit unavailable assessment", async () => {

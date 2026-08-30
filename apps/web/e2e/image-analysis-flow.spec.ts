@@ -8,13 +8,14 @@ test("a person can turn a meal photo candidate into a corrected nutrition record
   await page.getByRole("button", { name: "注册" }).click();
   await expect(page).toHaveURL(/\/today$/);
 
-  await page.goto("/settings");
-  const profile = page.getByRole("region", { name: "个人档案" });
+  await page.goto("/settings/profile");
+  const profile = page.getByRole("region", { name: "基础资料" });
   await profile.getByLabel("出生日期").fill("2000-08-26");
   await profile.getByLabel("性别").selectOption("male");
   await profile.getByLabel("身高（cm）").fill("175");
   await profile.getByLabel("日常活动水平").selectOption("low_active");
-  await profile.getByRole("button", { name: "保存个人档案" }).click();
+  await profile.getByRole("button", { name: "保存基础资料" }).click();
+  await page.goto("/settings/measurement");
   const measurements = page.getByRole("region", { name: "身体测量" });
   await measurements.getByLabel("体重（kg）").fill("70");
   await measurements.getByRole("button", { name: "记录这次测量" }).click();

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
@@ -15,13 +15,7 @@ import {
 import { portabilityApi, type PortabilityTask } from "../api/portability";
 import { reminderApi } from "../api/reminders";
 import { useSessionStore } from "../stores/session";
-import {
-  buildProblemReport,
-  clearDiagnosticEvents,
-  copyText,
-  downloadProblemReport,
-} from "../support/diagnostics";
-
+const route = useRoute();
 const router = useRouter();
 const sessionStore = useSessionStore();
 const loading = ref(true);
@@ -66,22 +60,43 @@ const strategyForm = reactive({
   weightStrategy: "maintain" as WeightStrategy,
   macroPreference: "balanced" as MacroPreference,
   regularExercise: false,
-  trainingIntent: null as string | null,
   targetWeightKg: null as number | null,
   targetDate: null as string | null,
 });
 const measurements = ref<BodyMeasurement[]>([]);
 const portabilityTasks = ref<PortabilityTask[]>([]);
 const deletionForm = reactive({ confirmationUsername: "", password: "", understood: false });
-const problemDescription = ref("");
-const problemReport = ref("");
-const problemReportGenerating = ref(false);
-const problemReportNotice = ref("");
 let portabilityTimer: number | undefined;
 const editingMeasurementId = ref<string | null>(null);
 const measurementRevision = ref(0);
 const measurementForm = reactive({ localDate: localDate(new Date()), weightKg: null as number | null, waistCm: null as number | null, note: null as string | null });
 const adminVisible = computed(() => sessionStore.account?.role === "admin");
+type SettingsSection = "profile" | "measurement" | "strategy" | "reminders" | "data";
+const settingsSections: readonly SettingsSection[] = ["profile", "measurement", "strategy", "reminders", "data"];
+const selectedSection = computed<SettingsSection | null>(() => {
+  const value = route.params.section;
+  return typeof value === "string" && settingsSections.includes(value as SettingsSection) ? value as SettingsSection : null;
+});
+const setupRequested = computed(() => route.params.section === "setup");
+const setupActive = ref(false);
+const setupStep = ref(0);
+const setupSteps = [
+  { id: "profile", label: "基础资料" },
+  { id: "measurement", label: "身体数据" },
+  { id: "strategy", label: "目标方向" },
+  { id: "reminders", label: "提醒" },
+] as const;
+const setupSaving = computed(() => profileSaving.value || measurementSaving.value || strategySaving.value || saving.value || nutritionReminderSaving.value || measurementReminderSaving.value);
+const enabledReminderCount = computed(() => [form.enabled, nutritionReminderForm.enabled, measurementReminderForm.enabled].filter(Boolean).length);
+const latestMeasurement = computed(() => measurements.value[0] ?? null);
+const sectionTitle = computed(() => ({
+  profile: "基础资料",
+  measurement: "身体测量",
+  strategy: "目标与营养",
+  reminders: "提醒",
+  data: "数据与账号",
+}[selectedSection.value ?? "profile"]));
+const weightStrategyLabel = computed(() => ({ maintain: "维持体重", lose: "减脂", gain: "增重" }[strategyForm.weightStrategy]));
 const macroOptions = computed(() => [
   { value: "balanced" as const, label: "均衡分配", description: "按常规比例分配三大营养素。" },
   { value: "high_protein" as const, label: "偏高蛋白", description: "适合健康且有规律运动的人。" },
@@ -163,7 +178,6 @@ async function load() {
       weightStrategy: strategy.weightStrategy,
       macroPreference: strategy.macroPreference,
       regularExercise: strategy.regularExercise,
-      trainingIntent: strategy.trainingIntent,
       targetWeightKg: strategy.targetWeightKg,
       targetDate: strategy.targetDate,
     });
@@ -184,18 +198,22 @@ async function load() {
     const detail = failed.reason instanceof ApiError ? failed.reason.message : "部分设置暂时读取不了";
     errorMessage.value = `${detail}；未载入的表单已禁止保存，其他设置仍可使用。`;
   }
+  const pristine = profileRevision.value === 0 && strategyRevision.value === 0 && measurements.value.length === 0;
+  setupActive.value = setupRequested.value || (selectedSection.value === null && pristine);
   loading.value = false;
 }
 
-async function saveProfile() {
+async function saveProfile(): Promise<boolean> {
   profileSaving.value = true;
   errorMessage.value = "";
   try {
     const saved = await planningApi.updateProfile(profileRevision.value, profileForm);
     profileRevision.value = saved.revision;
-    notice.value = "个人档案已保存，今天的营养参考会按新资料更新。";
+    notice.value = "基础资料已保存。";
+    return true;
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了个人档案";
+    return false;
   } finally {
     profileSaving.value = false;
   }
@@ -205,16 +223,18 @@ function normalizeMacroPreference() {
   if (strategyForm.weightStrategy !== "lose" && strategyForm.macroPreference === "lower_fat") strategyForm.macroPreference = "balanced";
 }
 
-async function saveStrategy() {
+async function saveStrategy(): Promise<boolean> {
   normalizeMacroPreference();
   strategySaving.value = true;
   errorMessage.value = "";
   try {
-    const saved = await planningApi.updateStrategy(strategyRevision.value, strategyForm);
+    const saved = await planningApi.updateStrategy(strategyRevision.value, { ...strategyForm, trainingIntent: null });
     strategyRevision.value = saved.revision;
-    notice.value = "目标策略已保存，今天的营养参考会随之更新。";
+    notice.value = "目标方向已保存。";
+    return true;
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了目标策略";
+    return false;
   } finally {
     strategySaving.value = false;
   }
@@ -235,8 +255,8 @@ function resetMeasurementForm() {
   Object.assign(measurementForm, { localDate: localDate(new Date()), weightKg: null, waistCm: null, note: null });
 }
 
-async function saveMeasurement() {
-  if (measurementForm.weightKg === null) return;
+async function saveMeasurement(): Promise<boolean> {
+  if (measurementForm.weightKg === null) return true;
   measurementSaving.value = true;
   errorMessage.value = "";
   const input = {
@@ -253,14 +273,16 @@ async function saveMeasurement() {
     measurements.value = await planningApi.listMeasurements();
     notice.value = editingMeasurementId.value === null ? "身体测量已记录。" : "误录的身体测量已修正，旧值仍可追溯。";
     resetMeasurementForm();
+    return true;
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了身体测量";
+    return false;
   } finally {
     measurementSaving.value = false;
   }
 }
 
-async function save() {
+async function save(): Promise<boolean> {
   saving.value = true;
   errorMessage.value = "";
   notice.value = "";
@@ -268,24 +290,26 @@ async function save() {
     const settings = await reminderApi.updateTrainingSettings(revision.value, form);
     revision.value = settings.revision;
     notice.value = settings.enabled ? `训练提醒已开启，将在有当日安排时于 ${settings.localTime} 提示` : "训练提醒已关闭";
+    return true;
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了设置";
+    return false;
   } finally {
     saving.value = false;
   }
 }
 
-async function saveNutritionReminder() {
+async function saveNutritionReminder(): Promise<boolean> {
   nutritionReminderSaving.value = true; errorMessage.value = "";
-  try { const saved = await reminderApi.updateNutritionSettings(nutritionReminderRevision.value, nutritionReminderForm); nutritionReminderRevision.value = saved.revision; notice.value = saved.enabled ? `饮食提醒已开启，将在 ${saved.localTime} 根据当天记录提示` : "饮食提醒已关闭"; }
-  catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了饮食提醒"; }
+  try { const saved = await reminderApi.updateNutritionSettings(nutritionReminderRevision.value, nutritionReminderForm); nutritionReminderRevision.value = saved.revision; notice.value = saved.enabled ? `饮食提醒已开启，将在 ${saved.localTime} 根据当天记录提示` : "饮食提醒已关闭"; return true; }
+  catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了饮食提醒"; return false; }
   finally { nutritionReminderSaving.value = false; }
 }
 
-async function saveMeasurementReminder() {
+async function saveMeasurementReminder(): Promise<boolean> {
   measurementReminderSaving.value = true; errorMessage.value = "";
-  try { const saved = await reminderApi.updateMeasurementSettings(measurementReminderRevision.value, measurementReminderForm); measurementReminderRevision.value = saved.revision; notice.value = saved.enabled ? `身体测量提醒已开启，默认每 ${saved.intervalDays} 天检查一次` : "身体测量提醒已关闭"; }
-  catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了身体测量提醒"; }
+  try { const saved = await reminderApi.updateMeasurementSettings(measurementReminderRevision.value, measurementReminderForm); measurementReminderRevision.value = saved.revision; notice.value = saved.enabled ? `身体测量提醒已开启，每 ${saved.intervalDays} 天检查一次` : "身体测量提醒已关闭"; return true; }
+  catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了身体测量提醒"; return false; }
   finally { measurementReminderSaving.value = false; }
 }
 
@@ -314,34 +338,46 @@ async function requestBrowserNotification() {
   browserNotification.value = await Notification.requestPermission();
 }
 
-async function generateProblemReport() {
-  problemReportGenerating.value = true;
-  problemReportNotice.value = "";
-  try {
-    problemReport.value = await buildProblemReport(problemDescription.value);
-    problemReportNotice.value = "报告已生成。你可以先检查内容，再复制到问答中或下载为文件。";
-  } finally {
-    problemReportGenerating.value = false;
+function openSettingsSection(section: SettingsSection | "setup") {
+  if (section === "setup") {
+    setupActive.value = true;
+    setupStep.value = 0;
   }
+  void router.push({ name: "settings", params: { section } });
 }
 
-async function copyProblemReport() {
-  if (problemReport.value.length === 0) return;
-  problemReportNotice.value = await copyText(problemReport.value)
-    ? "问题报告已复制，可以直接粘贴到问答中。"
-    : "浏览器没有允许自动复制，请在下方报告框中全选并复制。";
+function returnToSettings() {
+  setupActive.value = false;
+  void router.push({ name: "settings" });
 }
 
-function downloadCurrentProblemReport() {
-  if (problemReport.value.length === 0) return;
-  downloadProblemReport(problemReport.value);
-  problemReportNotice.value = "问题报告已下载为文本文件。";
+async function advanceSetup(): Promise<void> {
+  let saved = true;
+  if (setupStep.value === 0) saved = await saveProfile();
+  if (setupStep.value === 1) saved = await saveMeasurement();
+  if (setupStep.value === 2) saved = await saveStrategy();
+  if (setupStep.value === 3) {
+    const results = await Promise.all([save(), saveNutritionReminder(), saveMeasurementReminder()]);
+    saved = results.every(Boolean);
+  }
+  if (!saved) return;
+  if (setupStep.value < setupSteps.length - 1) {
+    setupStep.value += 1;
+    notice.value = "";
+    return;
+  }
+  setupActive.value = false;
+  setupStep.value = 0;
+  notice.value = "设置完成，以后可以按项目单独修改。";
+  await router.replace({ name: "settings" });
 }
 
-function clearProblemDiagnostics() {
-  clearDiagnosticEvents();
-  problemReport.value = "";
-  problemReportNotice.value = "近期前端日志已清空。";
+function previousSetupStep() {
+  if (setupStep.value > 0) setupStep.value -= 1;
+}
+
+function skipSetup() {
+  void router.push({ name: "today" });
 }
 
 onMounted(() => { void load(); portabilityTimer = window.setInterval(() => void refreshPortabilityTasks(), 2_000); });
@@ -350,13 +386,34 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
 
 <template>
   <AppShell page-class="settings-page" rail-note="资料、提醒和数据都在这里。">
-        <header class="view-header"><div><p class="date-line">设置</p><h1>设置</h1><p>管理个人资料、提醒和数据。</p></div></header>
+        <header class="view-header settings-header">
+          <div v-if="setupActive"><p class="date-line">首次设置 · {{ setupStep + 1 }}/{{ setupSteps.length }}</p><h1>{{ setupSteps[setupStep]!.label }}</h1><p>按顺序检查一遍，以后可以只改其中一项。</p></div>
+          <div v-else-if="selectedSection !== null"><p class="date-line">设置</p><h1>{{ sectionTitle }}</h1><p>只修改这部分，其他设置不会改变。</p></div>
+          <div v-else><p class="date-line">设置</p><h1>设置</h1><p>选择要修改的内容。</p></div>
+          <button v-if="!setupActive && selectedSection !== null" class="action-button" type="button" @click="returnToSettings">返回设置</button>
+          <button v-else-if="!setupActive" class="action-button" type="button" @click="openSettingsSection('setup')">按步骤检查</button>
+          <button v-else class="text-action" type="button" @click="skipSetup">以后再设置</button>
+        </header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取设置…</strong></section>
         <div v-else class="view-stack">
-          <section class="work-panel" aria-labelledby="profile-settings-title">
-            <div class="panel-heading"><div><h2 id="profile-settings-title">个人档案</h2><p>用于计算每日能量和营养参考。</p></div></div>
+          <ol v-if="setupActive" class="setup-progress" aria-label="设置进度">
+            <li v-for="(step, index) in setupSteps" :key="step.id" :class="{ 'is-current': index === setupStep, 'is-done': index < setupStep }"><span>{{ index + 1 }}</span><strong>{{ step.label }}</strong></li>
+          </ol>
+
+          <section v-if="!setupActive && selectedSection === null" class="settings-overview" aria-label="设置项目">
+            <button type="button" @click="openSettingsSection('profile')"><span><strong>基础资料</strong><small>{{ profileRevision > 0 ? '已填写' : '待补充' }} · 出生日期、性别、身高和活动水平</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('measurement')"><span><strong>身体测量</strong><small>{{ latestMeasurement ? `${latestMeasurement.weightKg} kg · ${latestMeasurement.localDate}` : '还没有体重记录' }}</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('strategy')"><span><strong>目标与营养</strong><small>{{ weightStrategyLabel }} · 系统据此计算每日参考</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('reminders')"><span><strong>提醒</strong><small>已开启 {{ enabledReminderCount }} 项</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('data')"><span><strong>数据与账号</strong><small>导出记录或管理账号</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="router.push({ name: 'feedback' })"><span><strong>Bug 反馈</strong><small>生成可以复制或下载的问题报告</small></span><b aria-hidden="true">›</b></button>
+            <button v-if="adminVisible" type="button" @click="router.push({ name: 'admin' })"><span><strong>系统管理</strong><small>查看账号和运行状态</small></span><b aria-hidden="true">›</b></button>
+          </section>
+
+          <section v-if="setupActive ? setupStep === 0 : selectedSection === 'profile'" class="work-panel" aria-labelledby="profile-settings-title">
+            <div class="panel-heading"><div><h2 id="profile-settings-title">基础资料</h2><p>这些资料用于选择合适的能量计算方法。</p></div></div>
             <p v-if="!profileAvailable" class="field-help">个人档案尚未载入，当前不能保存，以免覆盖原有资料。</p><form class="planning-form" @submit.prevent="saveProfile">
               <div class="field-grid">
                 <label class="date-field--clickable" @click="openDatePicker"><span>出生日期</span><input v-model="profileForm.birthDate" type="date" /><small>当前计算方法适用于 19–64 岁成人。</small></label>
@@ -369,11 +426,11 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
                 <label class="switch-row"><input v-model="profileForm.medicalNutritionCondition" type="checkbox" /><span>有需要专业营养处理的疾病或健康状态</span></label>
                 <label class="switch-row"><input v-model="profileForm.specialBodyComposition" type="checkbox" /><span>体成分明显特殊，不适合直接按体重计算运动蛋白质</span></label>
               </fieldset>
-              <button class="action-button action-button--primary" type="submit" :disabled="profileSaving || !profileAvailable">{{ profileSaving ? '保存中…' : '保存个人档案' }}</button>
+              <button v-if="!setupActive" class="action-button action-button--primary" type="submit" :disabled="profileSaving || !profileAvailable">{{ profileSaving ? '保存中…' : '保存基础资料' }}</button>
             </form>
           </section>
 
-          <section class="work-panel" aria-labelledby="measurement-settings-title">
+          <section v-if="setupActive ? setupStep === 1 : selectedSection === 'measurement'" class="work-panel" aria-labelledby="measurement-settings-title">
             <div class="panel-heading"><div><h2 id="measurement-settings-title">身体测量</h2><p>记录体重和腰围，误录可以直接修正。</p></div><span class="status-chip">{{ measurements.length }} 条</span></div>
             <p v-if="!measurementsAvailable" class="field-help">身体测量记录尚未载入，当前不能新增或修正。</p><form class="planning-form" @submit.prevent="saveMeasurement">
               <div class="field-grid">
@@ -382,34 +439,34 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
                 <label><span>腰围（cm，可选）</span><input v-model.number="measurementForm.waistCm" type="number" min="30" max="300" step="0.1" /></label>
                 <label><span>备注（可选）</span><input v-model="measurementForm.note" maxlength="500" placeholder="例如晨起空腹" /></label>
               </div>
-              <div class="form-actions"><button class="action-button action-button--primary" type="submit" :disabled="measurementSaving || !measurementsAvailable">{{ measurementSaving ? '保存中…' : editingMeasurementId ? '保存修正' : '记录这次测量' }}</button><button v-if="editingMeasurementId" class="text-action" type="button" @click="resetMeasurementForm">取消修正</button></div>
+              <div v-if="!setupActive" class="form-actions"><button class="action-button action-button--primary" type="submit" :disabled="measurementSaving || !measurementsAvailable">{{ measurementSaving ? '保存中…' : editingMeasurementId ? '保存修正' : '记录这次测量' }}</button><button v-if="editingMeasurementId" class="text-action" type="button" @click="resetMeasurementForm">取消修正</button></div>
             </form>
-            <ul v-if="measurements.length" class="measurement-list">
+            <ul v-if="!setupActive && measurements.length" class="measurement-list">
               <li v-for="measurement in measurements" :key="measurement.id"><div><strong>{{ measurement.weightKg }} kg</strong><span>{{ measurement.localDate }}<template v-if="measurement.waistCm !== null"> · 腰围 {{ measurement.waistCm }} cm</template></span><small v-if="measurement.note">{{ measurement.note }}</small></div><button class="text-action" type="button" @click="editMeasurement(measurement)">修正</button></li>
             </ul>
-            <p v-else class="data-note">还没有测量记录。</p>
+            <p v-else-if="!setupActive" class="data-note">还没有测量记录。</p>
           </section>
 
-          <section class="work-panel" aria-labelledby="strategy-settings-title">
-            <div class="panel-heading"><div><h2 id="strategy-settings-title">目标与营养策略</h2><p>选择方向后，系统会计算相应的营养参考。</p></div></div>
+          <section v-if="setupActive ? setupStep === 2 : selectedSection === 'strategy'" class="work-panel" aria-labelledby="strategy-settings-title">
+            <div class="panel-heading"><div><h2 id="strategy-settings-title">目标与营养</h2><p>选择当前方向，系统按已核验的方法计算每日参考。</p></div></div>
             <p v-if="!strategyAvailable" class="field-help">目标策略尚未载入，当前不能保存，以免覆盖原有选择。</p><form class="planning-form" @submit.prevent="saveStrategy">
               <fieldset class="strategy-fieldset"><legend>体重策略</legend><div class="strategy-options">
                 <label v-for="option in [{ value: 'maintain', label: '维持体重', description: '以当前体重的维持能量为参考。' }, { value: 'lose', label: '减脂', description: '在官方建议适用时计算能量缺口。' }, { value: 'gain', label: '增重', description: '先提供维持参考，再结合记录调整。' }]" :key="option.value" class="strategy-option" :class="{ 'is-selected': strategyForm.weightStrategy === option.value }"><input v-model="strategyForm.weightStrategy" type="radio" name="weight-strategy" :value="option.value" @change="normalizeMacroPreference" /><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span></label>
               </div></fieldset>
               <fieldset class="strategy-fieldset"><legend>宏量分配偏好</legend><div class="strategy-options"><label v-for="option in macroOptions" :key="option.value" class="strategy-option" :class="{ 'is-selected': strategyForm.macroPreference === option.value }"><input v-model="strategyForm.macroPreference" type="radio" name="macro-preference" :value="option.value" /><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span></label></div></fieldset>
               <label class="switch-row"><input v-model="strategyForm.regularExercise" type="checkbox" /><span>目前有规律运动</span></label>
-              <div class="field-grid"><label><span>训练或体成分意图（可选）</span><input v-model="strategyForm.trainingIntent" maxlength="500" placeholder="例如增肌、提高力量、改善体态" /></label><template v-if="strategyForm.weightStrategy === 'gain'"><label><span>目标体重（kg，可选）</span><input v-model.number="strategyForm.targetWeightKg" type="number" min="20" max="400" step="0.1" /></label><label><span>目标日期（可选）</span><input v-model="strategyForm.targetDate" type="date" /></label></template></div>
-              <button class="action-button action-button--primary" type="submit" :disabled="strategySaving || !strategyAvailable">{{ strategySaving ? '保存中…' : '保存目标策略' }}</button>
+              <div v-if="strategyForm.weightStrategy === 'gain'" class="field-grid"><label><span>目标体重（kg，可选）</span><input v-model.number="strategyForm.targetWeightKg" type="number" min="20" max="400" step="0.1" /></label><label><span>目标日期（可选）</span><input v-model="strategyForm.targetDate" type="date" /></label></div>
+              <button v-if="!setupActive" class="action-button action-button--primary" type="submit" :disabled="strategySaving || !strategyAvailable">{{ strategySaving ? '保存中…' : '保存目标与营养' }}</button>
             </form>
           </section>
 
-          <section class="work-panel" aria-labelledby="training-reminder-settings-title">
+          <section v-if="setupActive ? setupStep === 3 : selectedSection === 'reminders'" class="work-panel" aria-labelledby="training-reminder-settings-title">
             <div class="panel-heading"><div><h2 id="training-reminder-settings-title">训练提醒</h2><p>当天有未开始的训练安排时提醒。</p></div></div>
             <p v-if="!trainingReminderAvailable" class="field-help">训练提醒设置尚未载入，当前不能保存。</p><form class="reminder-form" @submit.prevent="save">
               <label class="switch-row"><input v-model="form.enabled" type="checkbox" /><span>{{ form.enabled ? '已开启' : '已关闭' }}</span></label>
               <label><span>提醒时间</span><input v-model="form.localTime" type="time" required /></label>
               <label><span>时区</span><input v-model="form.timeZone" required maxlength="100" /></label>
-              <button class="action-button action-button--primary" type="submit" :disabled="saving || !trainingReminderAvailable">{{ saving ? '保存中…' : '保存训练提醒' }}</button>
+              <button v-if="!setupActive" class="action-button action-button--primary" type="submit" :disabled="saving || !trainingReminderAvailable">{{ saving ? '保存中…' : '保存训练提醒' }}</button>
             </form>
             <div class="browser-notification-row">
               <div><strong>浏览器通知</strong><p>即使不授权，打开应用时仍会显示应用内提醒。</p></div>
@@ -418,44 +475,30 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
             </div>
           </section>
 
-          <section class="work-panel" aria-labelledby="nutrition-reminder-settings-title">
+          <section v-if="setupActive ? setupStep === 3 : selectedSection === 'reminders'" class="work-panel" aria-labelledby="nutrition-reminder-settings-title">
             <div class="panel-heading"><div><h2 id="nutrition-reminder-settings-title">饮食提醒</h2><p>根据当天的饮食记录和剩余量提醒。</p></div></div>
             <p v-if="!nutritionReminderAvailable" class="field-help">饮食提醒设置尚未载入，当前不能保存。</p><form class="reminder-form" @submit.prevent="saveNutritionReminder">
               <label class="switch-row"><input v-model="nutritionReminderForm.enabled" type="checkbox" /><span>{{ nutritionReminderForm.enabled ? '已开启' : '已关闭' }}</span></label>
               <label><span>提醒时间</span><input v-model="nutritionReminderForm.localTime" type="time" required /></label>
               <label><span>时区</span><input v-model="nutritionReminderForm.timeZone" required maxlength="100" /></label>
-              <button class="action-button action-button--primary" type="submit" :disabled="nutritionReminderSaving || !nutritionReminderAvailable">{{ nutritionReminderSaving ? '保存中…' : '保存饮食提醒' }}</button>
+              <button v-if="!setupActive" class="action-button action-button--primary" type="submit" :disabled="nutritionReminderSaving || !nutritionReminderAvailable">{{ nutritionReminderSaving ? '保存中…' : '保存饮食提醒' }}</button>
             </form>
             <p class="data-note">记录不完整时，提醒会注明还有内容未记录。</p>
           </section>
 
-          <section class="work-panel" aria-labelledby="measurement-reminder-settings-title">
+          <section v-if="setupActive ? setupStep === 3 : selectedSection === 'reminders'" class="work-panel" aria-labelledby="measurement-reminder-settings-title">
             <div class="panel-heading"><div><h2 id="measurement-reminder-settings-title">身体测量提醒</h2><p>按设定周期提醒更新体重等资料。</p></div></div>
             <p v-if="!measurementReminderAvailable" class="field-help">身体测量提醒设置尚未载入，当前不能保存。</p><form class="reminder-form" @submit.prevent="saveMeasurementReminder">
               <label class="switch-row"><input v-model="measurementReminderForm.enabled" type="checkbox" /><span>{{ measurementReminderForm.enabled ? '已开启' : '已关闭' }}</span></label>
               <label><span>间隔天数</span><input v-model.number="measurementReminderForm.intervalDays" type="number" min="1" max="365" required /></label>
               <label><span>提醒时间</span><input v-model="measurementReminderForm.localTime" type="time" required /></label>
               <label><span>时区</span><input v-model="measurementReminderForm.timeZone" required maxlength="100" /></label>
-              <button class="action-button action-button--primary" type="submit" :disabled="measurementReminderSaving || !measurementReminderAvailable">{{ measurementReminderSaving ? '保存中…' : '保存测量提醒' }}</button>
+              <button v-if="!setupActive" class="action-button action-button--primary" type="submit" :disabled="measurementReminderSaving || !measurementReminderAvailable">{{ measurementReminderSaving ? '保存中…' : '保存测量提醒' }}</button>
             </form>
             <p class="data-note">没有新记录时，系统继续使用最近一次有效体重。</p>
           </section>
 
-          <section class="work-panel problem-report-panel" aria-labelledby="problem-report-title">
-            <div class="panel-heading"><div><h2 id="problem-report-title">问题报告</h2><p>写下刚才的操作，生成一份便于排查的报告。</p></div><span class="status-chip">本机生成</span></div>
-            <label class="problem-description"><span>发生了什么（可选）</span><textarea v-model="problemDescription" rows="4" maxlength="2000" placeholder="例如：我在饮食页上传照片，进度到 100% 后一直没有出现分析结果。预期是几秒后看到候选营养。不要在这里粘贴密码或 Key。" /></label>
-            <div class="form-actions">
-              <button class="action-button action-button--primary" type="button" :disabled="problemReportGenerating" @click="generateProblemReport">{{ problemReportGenerating ? '正在检查运行状态…' : '生成问题报告' }}</button>
-              <button v-if="problemReport" class="action-button" type="button" @click="copyProblemReport">复制报告</button>
-              <button v-if="problemReport" class="action-button" type="button" @click="downloadCurrentProblemReport">下载 .txt</button>
-              <button class="text-action" type="button" @click="clearProblemDiagnostics">清空近期日志</button>
-            </div>
-            <p v-if="problemReportNotice" class="data-note" role="status">{{ problemReportNotice }}</p>
-            <label v-if="problemReport" class="problem-report-preview"><span>报告预览</span><textarea :value="problemReport" rows="16" readonly spellcheck="false" @focus="($event.target as HTMLTextAreaElement).select()" /></label>
-            <p class="data-note">报告包含页面、浏览器环境、服务状态和近期错误，不收集密码、Cookie、API Key、照片或训练饮食明细，也不会自动上传。分享前请先预览。</p>
-          </section>
-
-          <section class="work-panel" aria-labelledby="data-control-title">
+          <section v-if="!setupActive && selectedSection === 'data'" class="work-panel" aria-labelledby="data-control-title">
             <div class="panel-heading"><div><h2 id="data-control-title">我的数据</h2><p>导出只包含结构化记录和照片生命周期，不包含密码、会话令牌或原图。</p></div><button class="action-button" type="button" :disabled="exportSaving || !portabilityAvailable" @click="requestExport">{{ exportSaving ? '正在提交…' : '准备 JSON 导出' }}</button></div>
             <ul v-if="portabilityTasks.filter((task) => task.type === 'data_export').length" class="measurement-list export-task-list">
               <li v-for="task in portabilityTasks.filter((value) => value.type === 'data_export')" :key="task.id"><div><strong>{{ task.status === 'succeeded' ? (task.downloadAvailable ? '导出已完成' : '导出已过期') : task.status === 'failed' ? '导出失败' : task.status === 'running' ? '正在生成导出' : '等待后台处理' }}</strong><span>{{ new Date(task.createdAt).toLocaleString('zh-CN') }}<template v-if="task.expiresAt"> · 保留至 {{ new Date(task.expiresAt).toLocaleString('zh-CN') }}</template></span><small v-if="task.lastErrorCode">错误：{{ task.lastErrorCode }}</small></div><a v-if="task.downloadAvailable" class="text-action" :href="portabilityApi.downloadUrl(task.id)" download>下载 JSON</a></li>
@@ -469,8 +512,10 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
             </form>
             <p v-else class="data-note">预置管理员账号不能在应用内删除，避免服务器失去唯一管理入口。</p>
           </section>
-          <section class="settings-list" aria-label="后续设置">
-            <article v-if="adminVisible"><div><strong>系统管理</strong><p>查看账号和运行状态，不读取其他用户的健康数据。</p></div><button class="text-action" type="button" @click="router.push({ name: 'admin' })">进入系统管理 →</button></article>
+          <section v-if="setupActive" class="setup-navigation" aria-label="设置步骤操作">
+            <button v-if="setupStep > 0" class="action-button" type="button" :disabled="setupSaving" @click="previousSetupStep">上一步</button>
+            <span v-else aria-hidden="true"></span>
+            <button class="action-button action-button--primary" type="button" :disabled="setupSaving" @click="advanceSetup">{{ setupSaving ? '正在保存…' : setupStep === setupSteps.length - 1 ? '完成设置' : '下一步' }}</button>
           </section>
         </div>
   </AppShell>

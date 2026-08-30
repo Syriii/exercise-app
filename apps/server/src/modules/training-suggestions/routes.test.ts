@@ -31,7 +31,7 @@ describe("training suggestion routes", () => {
     const suggestion = generated.json<{ id: string; revision: number }>();
     const adopted = await app.inject({ method: "POST", url: `/api/v1/training-suggestions/${suggestion.id}/adopt`, headers: { cookie }, payload: { revision: suggestion.revision } });
     expect(adopted.statusCode, adopted.body).toBe(200);
-    expect(adopted.json()).toMatchObject({ suggestion: { status: "adopted" }, template: { name: "系统建议起点 · 全身训练" } });
+    expect(adopted.json()).toMatchObject({ suggestion: { status: "adopted" }, template: { name: "全身训练草案" } });
 
     const second = await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { username: "other-suggestion-user", password: "correct horse battery staple" } });
     const otherCookie = String(second.headers["set-cookie"]).split(";", 1)[0];
