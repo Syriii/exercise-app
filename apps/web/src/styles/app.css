@@ -2398,6 +2398,7 @@ ol {
 
 .meal-log,
 .meal-card,
+.meal-quick-add,
 .meal-food-search,
 .contribution-form,
 .meal-items,
@@ -2426,6 +2427,104 @@ ol {
 .quick-meal-photo small {
   color: var(--color-muted);
   font-size: var(--text-xs);
+}
+
+.food-template-manager,
+.meal-quick-add {
+  padding: var(--space-md);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-2);
+}
+
+.food-template-manager .panel-heading p,
+.meal-quick-add span,
+.meal-quick-add small,
+.template-manager-list span {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.template-manager-list,
+.quick-food-list,
+.recent-meal-card ul {
+  display: grid;
+  gap: var(--space-xs);
+  list-style: none;
+}
+
+.template-manager-list > li,
+.quick-food-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+}
+
+.template-manager-list > li > div,
+.quick-food-list > li > div,
+.quick-food-group,
+.recent-meal-group,
+.recent-meal-group > div,
+.meal-quick-add__heading > div {
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.template-edit-form,
+.quick-food-group,
+.recent-meal-group {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.template-edit-form {
+  width: 100%;
+}
+
+.recent-meal-card {
+  padding: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+}
+
+.recent-meal-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.recent-meal-card[open] summary {
+  margin-bottom: var(--space-sm);
+}
+
+.recent-meal-card li label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-block: var(--space-xs);
+  cursor: pointer;
+}
+
+.recent-meal-card li label > span {
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.recent-meal-card input[type="checkbox"] {
+  width: 1rem;
+  min-height: 1rem;
+}
+
+.recent-meal-card .action-button {
+  margin-top: var(--space-sm);
 }
 
 .meal-food-search {
@@ -2474,6 +2573,7 @@ ol {
 .reminder-form select,
 .contribution-form input,
 .contribution-form select,
+.template-edit-form input,
 .diet-plan-form input,
 .diet-plan-form select,
 .diet-plan-form textarea,
@@ -2555,6 +2655,7 @@ ol {
 }
 
 .meal-card .meal-image-panel,
+.meal-card .meal-quick-add,
 .meal-card .meal-food-search,
 .meal-card .contribution-form {
   padding-inline: 0;
@@ -2862,6 +2963,9 @@ ol {
 
   .meal-card > header,
   .meal-items li,
+  .template-manager-list > li,
+  .quick-food-list > li,
+  .recent-meal-card summary,
   .form-options,
   .meal-image-panel__heading,
   .image-upload-row,

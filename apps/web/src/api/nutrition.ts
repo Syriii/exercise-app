@@ -34,6 +34,7 @@ export const nutritionApi = {
   setCoverage: (localDate: string, coverageConfirmed: boolean) => apiRequest<{ coverageConfirmed: boolean }>("/api/v1/nutrition/day-coverage", { method: "PUT", body: JSON.stringify({ localDate, coverageConfirmed }) }),
   listFoodTemplates: () => apiRequest<PersonalFoodTemplate[]>("/api/v1/nutrition/food-templates"),
   createFoodTemplate: (input: ContributionInput) => apiRequest<PersonalFoodTemplate>("/api/v1/nutrition/food-templates", { method: "POST", body: JSON.stringify(input) }),
+  updateFoodTemplate: (id: string, revision: number, input: ContributionInput) => apiRequest<PersonalFoodTemplate>(`/api/v1/nutrition/food-templates/${id}`, { method: "PUT", body: JSON.stringify({ revision, ...input }) }),
   deleteFoodTemplate: (id: string, revision: number) => apiRequest<void>(`/api/v1/nutrition/food-templates/${id}?${new URLSearchParams({ revision: revision.toString() })}`, { method: "DELETE" }),
   uploadMealImage: (mealId: string, file: File, onProgress: (percent: number) => void) => uploadBinary<MealImageAnalysis>(`/api/v1/image-analyses?${new URLSearchParams({ mealId })}`, file, onProgress),
   listImageAnalyses: (mealId: string) => apiRequest<MealImageAnalysis[]>(`/api/v1/image-analyses?${new URLSearchParams({ mealId })}`),

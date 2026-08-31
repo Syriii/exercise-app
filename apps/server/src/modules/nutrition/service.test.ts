@@ -59,8 +59,11 @@ describe("NutritionService", () => {
 
   it("supports reusable personal food templates without making them a public database", async () => {
     const service = new NutritionService(new MemoryNutritionRepository());
-    const saved = await service.createFoodTemplate("user-a", rice);
+    let saved = await service.createFoodTemplate("user-a", rice);
     expect((await service.listFoodTemplates("user-a"))[0]?.label).toBe("米饭");
+    expect(await service.listFoodTemplates("user-b")).toEqual([]);
+    saved = await service.updateFoodTemplate("user-a", saved.id, saved.revision, { ...rice, label: "熟米饭", energyKcal: 250 });
+    expect(saved).toMatchObject({ label: "熟米饭", energyKcal: 250, revision: 2 });
     expect(await service.listFoodTemplates("user-b")).toEqual([]);
     await service.deleteFoodTemplate("user-a", saved.id, saved.revision);
     expect(await service.listFoodTemplates("user-a")).toEqual([]);
