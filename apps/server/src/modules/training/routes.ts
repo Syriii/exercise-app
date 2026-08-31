@@ -1,5 +1,3 @@
-import { createReadStream } from "node:fs";
-
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import type { IdentityService } from "../identity/service.js";
@@ -49,12 +47,6 @@ interface StartProgramUnitBody {
 }
 interface ScheduleBody extends TrainingScheduleInput {}
 interface ScheduleUpdateBody extends TrainingScheduleInput, RevisionBody {}
-interface ExerciseCatalogQuery {
-  readonly q?: string;
-  readonly bodyPart?: string;
-  readonly equipment?: string;
-  readonly limit?: number;
-}
 
 // Put null first: Fastify's Ajv type coercion would otherwise turn JSON null into
 // an empty string or zero while evaluating the first union branch.
@@ -315,7 +307,7 @@ const sessionRevisionResponseSchema = {
 const exerciseGuidanceResponseSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "exerciseName", "aliases", "overview", "steps", "commonMistakes", "alternatives", "videoUrl", "imageUrl", "animationUrl", "sourceName", "sourceUrl", "license", "version", "reviewStatus", "limitations"],
+  required: ["id", "exerciseName", "aliases", "overview", "steps", "commonMistakes", "alternatives", "sourceName", "sourceUrl", "license", "version", "reviewStatus", "limitations"],
   properties: {
     id: { type: "string" },
     exerciseName: { type: "string" },
@@ -324,32 +316,12 @@ const exerciseGuidanceResponseSchema = {
     steps: { type: "array", items: { type: "string" } },
     commonMistakes: { type: "array", items: { type: "string" } },
     alternatives: { type: "array", items: { type: "string" } },
-    videoUrl: nullableString,
-    imageUrl: nullableString,
-    animationUrl: nullableString,
     sourceName: { type: "string" },
     sourceUrl: nullableString,
     license: { type: "string" },
     version: { type: "string" },
     reviewStatus: { type: "string", enum: ["draft", "reviewed"] },
     limitations: { type: "string" },
-  },
-} as const;
-
-const exerciseCatalogItemResponseSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "name", "bodyPart", "bodyPartLabel", "equipment", "equipmentLabel", "target", "imageUrl", "animationUrl"],
-  properties: {
-    id: { type: "string" },
-    name: { type: "string" },
-    bodyPart: { type: "string" },
-    bodyPartLabel: { type: "string" },
-    equipment: { type: "string" },
-    equipmentLabel: { type: "string" },
-    target: { type: "string" },
-    imageUrl: nullableString,
-    animationUrl: nullableString,
   },
 } as const;
 
@@ -478,56 +450,6 @@ export async function registerTrainingRoutes(app: FastifyInstance, options: Trai
     handler: async (request) => {
       await userId(request);
       return trainingService.getExerciseGuidance(request.query.exerciseName);
-    },
-  });
-
-  app.get<{ Querystring: ExerciseCatalogQuery }>("/api/v1/training/exercises", {
-    schema: {
-      querystring: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          q: { type: "string", maxLength: 100 },
-          bodyPart: { type: "string", maxLength: 40 },
-          equipment: { type: "string", maxLength: 60 },
-          limit: { type: "integer", minimum: 1, maximum: 50, default: 12 },
-        },
-      },
-      response: { 200: { type: "array", items: exerciseCatalogItemResponseSchema } },
-    },
-    handler: async (request) => {
-      await userId(request);
-      return trainingService.listExerciseCatalog({
-        ...(request.query.q === undefined ? {} : { query: request.query.q }),
-        ...(request.query.bodyPart === undefined ? {} : { bodyPart: request.query.bodyPart }),
-        ...(request.query.equipment === undefined ? {} : { equipment: request.query.equipment }),
-        ...(request.query.limit === undefined ? {} : { limit: request.query.limit }),
-      });
-    },
-  });
-
-  app.get<{ Params: { exerciseId: string; kind: "image" | "animation" } }>("/api/v1/training/exercises/:exerciseId/media/:kind", {
-    schema: {
-      params: {
-        type: "object",
-        additionalProperties: false,
-        required: ["exerciseId", "kind"],
-        properties: {
-          exerciseId: { type: "string", pattern: "^[0-9]{4}$" },
-          kind: { type: "string", enum: ["image", "animation"] },
-        },
-      },
-    },
-    handler: async (request, reply) => {
-      await userId(request);
-      const media = trainingService.getExerciseMedia(request.params.exerciseId, request.params.kind);
-      if (media === null) {
-        throw new TrainingError("exercise_media_not_found", "没有找到这个动作媒体", 404);
-      }
-      return reply
-        .type(media.contentType)
-        .header("Cache-Control", "private, max-age=86400")
-        .send(createReadStream(media.absolutePath));
     },
   });
 

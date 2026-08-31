@@ -124,7 +124,6 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 - `AUTH_RATE_LIMIT_*`、`WRITE_RATE_LIMIT_*`、`IMAGE_RATE_LIMIT_*`：单个 API 进程按来源 IP 限制登录注册、写操作与图片提交频率。默认值面向不超过 10 人的单机部署；多个 API 副本需要改用共享限流存储。
 - `MAX_ACTIVE_IMAGE_ANALYSES_PER_ACCOUNT`：单个账号同时等待或处理中的图片分析上限，默认 3。
 - `TEMP_MEDIA_MAX_BYTES_PER_ACCOUNT`：单个账号可占用的临时照片与导出空间上限，默认 256 MiB；采用结果或到期清理后释放。
-- `EXERCISE_MEDIA_HOST_PATH`：可选的宿主机动作图片/GIF 绝对路径。保持为空时生产部署不读取媒体；启用时必须配合 `compose.exercise-media.yaml`，宿主机目录会只读挂载为容器内固定绝对路径 `/app/private/exercise-media`。媒体不会进入 Git 或镜像，部署者仍需自行确认其使用权。
 - `BACKUP_DIRECTORY` 与 `BACKUP_RETENTION_DAYS`：宿主机数据库备份目录与本机保留天数；默认 `deployment/backups/`、14 天。
 - `BACKUP_MIRROR_DIRECTORY`：可选的已存在目录。设置后，每次成功备份会把备份和 SHA-256 清单再复制一份；它应位于异地挂载或受保护的备份存储，而不是同一块磁盘的另一个目录。
 
@@ -171,45 +170,6 @@ docker compose -f compose.yaml -f compose.deepseek.yaml logs --tail=100 api work
 ```
 
 后续更新、停止、查看日志也要使用相同的两个 `-f` 参数，否则重建后的容器不会挂载 Key。模型请求由 worker 直接把私有照片编码为 `data:image/...;base64` 发送给 DeepSeek；照片不需要公开 URL，也不使用远端 Files API。没有现有营养值时，结构化候选会先作为“暂定值”计入当天剩余量，用户随后核对或修正；已有手工或确认值时只保留候选，不自动覆盖。确认采用后默认删除本机临时原图。
-
-#### 使用仓库外的私有动作图片与 GIF
-
-服务器媒体保存在仓库、Compose volume 和镜像之外。宿主机目录必须已经存在、不是符号链接，并且当前部署用户与容器内 UID 1000 能读取以下固定结构：
-
-```text
-/绝对路径/exercise-media/
-├── images/0001-<media-id>.jpg
-└── videos/0001-<media-id>.gif
-```
-
-在 `deployment/.env` 中配置宿主机绝对路径：
-
-```dotenv
-EXERCISE_MEDIA_HOST_PATH=/绝对路径/exercise-media
-```
-
-然后执行预检并显式加入媒体覆盖文件：
-
-```bash
-./scripts/preflight.sh
-docker compose -f compose.yaml -f compose.exercise-media.yaml up -d --build
-```
-
-覆盖文件只修改 API：宿主机目录以只读 bind mount 挂载到 `/app/private/exercise-media`，并把生产 `EXERCISE_MEDIA_ROOT` 固定为这个容器内绝对路径。`create_host_path: false` 会在宿主机路径写错或不存在时直接失败，不会让 Docker 静默创建 root 所有的空目录。
-
-应用不会直接公开这个文件夹。登录后的动作目录先返回受控媒体 URL，媒体路由再校验四位动作 ID 和 `image` / `animation` 类型，只读取启动时索引到的固定 JPG/GIF 文件；匿名请求返回 401，缺失文件返回 404。响应使用私有浏览器缓存，不提供目录列表。
-
-后续所有会重建 API 的 Compose 命令必须继续包含该覆盖文件。若同时启用 DeepSeek，命令为：
-
-```bash
-docker compose \
-  -f compose.yaml \
-  -f compose.deepseek.yaml \
-  -f compose.exercise-media.yaml \
-  up -d --build
-```
-
-关闭该能力时，先用不包含 `compose.exercise-media.yaml` 的配置重建 API，再从 `.env` 删除 `EXERCISE_MEDIA_HOST_PATH`。这一操作不会删除宿主机媒体目录；目录的移动或删除仍需人工单独确认。
 
 `setup` 应以状态码 0 退出，日志应说明数据库、队列 migration 完成并且 `admin` 已就绪。随后检查：
 

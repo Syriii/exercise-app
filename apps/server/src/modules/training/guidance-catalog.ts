@@ -1,10 +1,6 @@
 import type { ExerciseGuidance } from "./types.js";
-import { findCatalogExerciseGuidance } from "./exercise-catalog.js";
 
 const sharedMetadata = {
-  videoUrl: null,
-  imageUrl: null,
-  animationUrl: null,
   sourceName: "Exercise App 项目贡献者",
   sourceUrl: null,
   license: "MIT",
@@ -120,12 +116,12 @@ function normalizeExerciseName(value: string): string {
   return value.trim().toLocaleLowerCase("zh-CN").replaceAll(/\s+/g, "");
 }
 
-export function findExerciseGuidance(exerciseName: string, mediaRoot: string | null = null): ExerciseGuidance | null {
+export function findExerciseGuidance(exerciseName: string): ExerciseGuidance | null {
   const normalized = normalizeExerciseName(exerciseName);
   return guidanceCatalog.find((guidance) =>
     [guidance.exerciseName, ...guidance.aliases].some((name) => {
       const candidate = normalizeExerciseName(name);
       return candidate === normalized || (candidate.length >= 2 && normalized.includes(candidate));
     }),
-  ) ?? findCatalogExerciseGuidance(exerciseName, mediaRoot);
+  ) ?? null;
 }

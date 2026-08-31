@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 
 export type RuntimeMode = "development" | "test" | "production";
 
@@ -15,7 +15,6 @@ export interface AppConfig {
   readonly workerHeartbeatIntervalSeconds: number;
   readonly workerHeartbeatStaleSeconds: number;
   readonly temporaryMediaRoot: string;
-  readonly exerciseMediaRoot: string | null;
   readonly webDistDirectory: string;
   readonly deepseekApiKey: string | null;
   readonly deepseekBaseUrl: string;
@@ -146,19 +145,6 @@ function readOptionalSecretValue(
   return rejectPublicExamplePlaceholder(name, value);
 }
 
-function optionalDirectory(
-  name: string,
-  value: string | undefined,
-  requireAbsolute: boolean,
-): string | null {
-  const cleaned = value?.trim();
-  if (cleaned === undefined || cleaned.length === 0) return null;
-  if (requireAbsolute && !isAbsolute(cleaned)) {
-    throw new Error(`${name} must be an absolute path in production`);
-  }
-  return resolve(cleaned);
-}
-
 export function loadConfig(
   environment: Environment = process.env,
   secretReader: SecretReader = (path) => readFileSync(path, "utf8"),
@@ -195,12 +181,6 @@ export function loadConfig(
     workerHeartbeatIntervalSeconds,
     workerHeartbeatStaleSeconds,
     temporaryMediaRoot: resolve(environment.TEMP_MEDIA_ROOT ?? ".runtime/media"),
-    exerciseMediaRoot: optionalDirectory(
-      "EXERCISE_MEDIA_ROOT",
-      environment.EXERCISE_MEDIA_ROOT
-        ?? (mode === "development" ? ".runtime/exercise-catalog/source" : undefined),
-      mode === "production",
-    ),
     webDistDirectory: resolve(environment.WEB_DIST_DIR ?? "apps/web/dist"),
     deepseekApiKey: readOptionalSecretValue("DEEPSEEK_API_KEY", environment, secretReader),
     deepseekBaseUrl: environment.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",

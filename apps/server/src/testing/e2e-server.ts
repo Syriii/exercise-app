@@ -31,9 +31,6 @@ const port = Number.parseInt(process.env.E2E_PORT ?? "4174", 10);
 const config = createTestConfig({
   port,
   webDistDirectory: resolve(import.meta.dirname, "../../../web/dist"),
-  exerciseMediaRoot: process.env.EXERCISE_MEDIA_ROOT === undefined
-    ? null
-    : resolve(process.env.EXERCISE_MEDIA_ROOT),
 });
 const identityRepository = new MemoryIdentityRepository();
 const identityService = new IdentityService({
@@ -43,7 +40,7 @@ const identityService = new IdentityService({
   maxAccounts: config.maxAccounts,
 });
 const planningService = new PlanningService(new MemoryPlanningRepository());
-const trainingService = new TrainingService({ repository: new MemoryTrainingRepository(), planningService, exerciseMediaRoot: config.exerciseMediaRoot });
+const trainingService = new TrainingService({ repository: new MemoryTrainingRepository(), planningService });
 const trainingSuggestionService = new TrainingSuggestionService({ repository: new MemoryTrainingSuggestionRepository(), planningService, trainingService });
 const nutritionService = new NutritionService(new MemoryNutritionRepository());
 const queue = new MemoryTaskQueue();

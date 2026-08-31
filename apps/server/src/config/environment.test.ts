@@ -18,40 +18,11 @@ describe("loadConfig", () => {
     expect(config.sessionTtlHours).toBe(168);
     expect(config.workerHeartbeatIntervalSeconds).toBe(15);
     expect(config.workerHeartbeatStaleSeconds).toBe(45);
-    expect(config.exerciseMediaRoot).toBeNull();
     expect(config.deepseekApiKey).toBeNull();
     expect(config.deepseekBaseUrl).toBe("https://api.deepseek.com");
     expect(config.deepseekVisionModel).toBe("deepseek-v4-flash-vision-exp");
     expect(config.imageUploadMaxBytes).toBe(8 * 1024 * 1024);
     expect(config.exportRetentionHours).toBe(168);
-  });
-
-  it("keeps exercise media optional and resolves an explicitly supplied directory", () => {
-    const config = loadConfig({ ...validEnvironment, EXERCISE_MEDIA_ROOT: "./private-exercise-media" });
-    expect(config.exerciseMediaRoot).toMatch(/private-exercise-media$/);
-  });
-
-  it("requires an absolute exercise media path in production", () => {
-    const productionEnvironment = {
-      ...validEnvironment,
-      NODE_ENV: "production",
-      COOKIE_SECURE: "false",
-    } as const;
-
-    expect(() => loadConfig({
-      ...productionEnvironment,
-      EXERCISE_MEDIA_ROOT: "./private-exercise-media",
-    })).toThrow(/EXERCISE_MEDIA_ROOT must be an absolute path/);
-
-    expect(loadConfig({
-      ...productionEnvironment,
-      EXERCISE_MEDIA_ROOT: "/app/private/exercise-media",
-    }).exerciseMediaRoot).toBe("/app/private/exercise-media");
-  });
-
-  it("uses the ignored runtime source directory for development media", () => {
-    const config = loadConfig({ ...validEnvironment, NODE_ENV: "development" });
-    expect(config.exerciseMediaRoot).toMatch(/\.runtime\/exercise-catalog\/source$/);
   });
 
   it("loads optional DeepSeek configuration from a file without making it required", () => {

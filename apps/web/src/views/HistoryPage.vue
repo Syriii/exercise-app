@@ -4,7 +4,7 @@ import { useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
-import ExerciseCatalogField from "../components/ExerciseCatalogField.vue";
+import ExerciseNameField from "../components/ExerciseNameField.vue";
 import { nutritionApi, type Meal } from "../api/nutrition";
 import { planningApi, type BodyMeasurement } from "../api/planning";
 import {
@@ -473,7 +473,7 @@ onMounted(() => void load());
                     </details>
                     <form v-if="editingItemId === item.id && correctionForms[item.id]" class="history-correction" @submit.prevent="saveCorrection(training, item)">
                       <label><span>结果</span><select v-model="correctionForms[item.id]!.status"><option value="completed">已完成</option><option value="skipped">已跳过</option></select></label>
-                      <ExerciseCatalogField v-if="correctionForms[item.id]!.status === 'completed'" v-model="correctionForms[item.id]!.performedExerciseName" class="wide-field" label="实际动作" required />
+                      <ExerciseNameField v-if="correctionForms[item.id]!.status === 'completed'" v-model="correctionForms[item.id]!.performedExerciseName" class="wide-field" label="实际动作" required />
                       <div v-if="correctionForms[item.id]!.status === 'completed'" class="history-correction__sets wide-field">
                         <div v-for="(set, index) in correctionForms[item.id]!.sets" :key="index" class="set-row">
                           <strong>第 {{ index + 1 }} 组</strong>
@@ -489,7 +489,7 @@ onMounted(() => void load());
                     </form>
                   </article>
                   <form v-if="addingExtraSessionId === training.id && extraForms[training.id]" class="history-correction history-extra-correction" @submit.prevent="saveHistoricalExtra(training)">
-                    <ExerciseCatalogField v-model="extraForms[training.id]!.exerciseName" class="wide-field" label="遗漏的实际动作" required />
+                    <ExerciseNameField v-model="extraForms[training.id]!.exerciseName" class="wide-field" label="遗漏的实际动作" required />
                     <div class="history-correction__sets wide-field">
                       <div v-for="(set, index) in extraForms[training.id]!.sets" :key="index" class="set-row">
                         <strong>第 {{ index + 1 }} 组</strong>

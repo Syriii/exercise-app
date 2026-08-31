@@ -3,18 +3,6 @@ export type TrainingSessionItemOrigin = "planned" | "extra";
 export type TrainingSessionItemStatus = "pending" | "completed" | "skipped";
 export type TrainingScheduleStatus = "scheduled" | "cancelled" | "started";
 
-export interface ExerciseCatalogItem {
-  readonly id: string;
-  readonly name: string;
-  readonly bodyPart: string;
-  readonly bodyPartLabel: string;
-  readonly equipment: string;
-  readonly equipmentLabel: string;
-  readonly target: string;
-  readonly imageUrl: string | null;
-  readonly animationUrl: string | null;
-}
-
 export interface ExerciseGuidance {
   readonly id: string;
   readonly exerciseName: string;
@@ -23,9 +11,6 @@ export interface ExerciseGuidance {
   readonly steps: readonly string[];
   readonly commonMistakes: readonly string[];
   readonly alternatives: readonly string[];
-  readonly videoUrl: string | null;
-  readonly imageUrl: string | null;
-  readonly animationUrl: string | null;
   readonly sourceName: string;
   readonly sourceUrl: string | null;
   readonly license: string;

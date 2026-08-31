@@ -19,7 +19,6 @@ const config: AppConfig = {
   workerHeartbeatIntervalSeconds: 15,
   workerHeartbeatStaleSeconds: 45,
   temporaryMediaRoot: "/tmp/exercise-app-test-media",
-  exerciseMediaRoot: null,
   webDistDirectory: "/directory-that-does-not-exist",
   deepseekApiKey: null,
   deepseekBaseUrl: "https://api.deepseek.com",

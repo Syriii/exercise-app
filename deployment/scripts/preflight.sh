@@ -123,35 +123,10 @@ log "checking Compose configuration"
 docker compose --project-directory "$DEPLOYMENT_DIRECTORY" \
   -f "$DEPLOYMENT_DIRECTORY/compose.yaml" config --quiet
 
-exercise_media_host_path=$(awk -F= '$1 == "EXERCISE_MEDIA_HOST_PATH" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")
-if [ -n "$exercise_media_host_path" ]; then
-  case "$exercise_media_host_path" in
-    /*) ;;
-    *) fail "EXERCISE_MEDIA_HOST_PATH must be an absolute path" ;;
-  esac
-  [ -d "$exercise_media_host_path" ] || fail "exercise media directory does not exist: $exercise_media_host_path"
-  [ ! -L "$exercise_media_host_path" ] || fail "exercise media directory cannot be a symbolic link"
-  [ -d "$exercise_media_host_path/images" ] || fail "exercise media images directory is missing"
-  [ -d "$exercise_media_host_path/videos" ] || fail "exercise media videos directory is missing"
-  find "$exercise_media_host_path/images" -maxdepth 1 -type f -name '*.jpg' -print -quit | grep -q . ||
-    fail "exercise media images directory contains no JPG files"
-  find "$exercise_media_host_path/videos" -maxdepth 1 -type f -name '*.gif' -print -quit | grep -q . ||
-    fail "exercise media videos directory contains no GIF files"
-  docker compose --project-directory "$DEPLOYMENT_DIRECTORY" \
-    -f "$DEPLOYMENT_DIRECTORY/compose.yaml" \
-    -f "$DEPLOYMENT_DIRECTORY/compose.exercise-media.yaml" config --quiet
-fi
-
 if [ -e "$deepseek_secret" ]; then
   docker compose --project-directory "$DEPLOYMENT_DIRECTORY" \
     -f "$DEPLOYMENT_DIRECTORY/compose.yaml" \
     -f "$DEPLOYMENT_DIRECTORY/compose.deepseek.yaml" config --quiet
-  if [ -n "$exercise_media_host_path" ]; then
-    docker compose --project-directory "$DEPLOYMENT_DIRECTORY" \
-      -f "$DEPLOYMENT_DIRECTORY/compose.yaml" \
-      -f "$DEPLOYMENT_DIRECTORY/compose.deepseek.yaml" \
-      -f "$DEPLOYMENT_DIRECTORY/compose.exercise-media.yaml" config --quiet
-  fi
 fi
 
 log "preflight passed; no containers or data were changed"

@@ -31,7 +31,6 @@ describe("TrainingService", () => {
       sourceName: "Exercise App 项目贡献者",
       license: "MIT",
       reviewStatus: "draft",
-      videoUrl: null,
     });
     expect(service.getExerciseGuidance("不存在的自定义动作")).toBeNull();
   });
