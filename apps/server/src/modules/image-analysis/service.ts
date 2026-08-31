@@ -1,6 +1,6 @@
 import type { Readable } from "node:stream";
 import type { ImageAnalyzer } from "./analyzer.js";
-import { imageAnalysisPromptVersion } from "./deepseek-analyzer.js";
+import { DeepSeekImageAnalyzerError, imageAnalysisPromptVersion } from "./deepseek-analyzer.js";
 import { ImageAnalysisError } from "./errors.js";
 import type { ImageAnalysisRepository } from "./repository.js";
 import type { ImageNutritionCandidate } from "./types.js";
@@ -52,7 +52,11 @@ export class ImageAnalysisService {
         );
       }
     } catch (error) {
-      const code = error instanceof Error && error.message.startsWith("deepseek_") ? error.message.slice(0, 100) : "analysis_failed";
+      const code = error instanceof DeepSeekImageAnalyzerError
+        ? error.code
+        : error instanceof Error && error.message.startsWith("deepseek_")
+          ? error.message.slice(0, 100)
+          : "analysis_failed";
       await this.options.repository.fail(analysisId, started.attemptId, code);
       throw error;
     }

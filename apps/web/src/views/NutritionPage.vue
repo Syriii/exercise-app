@@ -80,6 +80,14 @@ function analysisStatus(value: MealImageAnalysis, meal: Meal): string {
   return value.status === "pending" ? "排队中" : value.status === "running" ? "分析中" : value.status === "succeeded" ? "候选待处理" : value.status === "failed" ? "分析失败" : "已取消";
 }
 function confidenceLabel(value: "low" | "medium" | "high"): string { return value === "high" ? "较高" : value === "medium" ? "一般" : "较低"; }
+function imageAnalysisFailureText(code: string | null): string {
+  if (code === "deepseek_timeout") return "识别等待超时，原图仍在，可以重新分析。";
+  if (code === "deepseek_rate_limited" || code === "deepseek_overloaded" || code === "deepseek_server_error" || code === "deepseek_server_unavailable" || code === "deepseek_network_error") return "识别服务暂时繁忙，系统已自动尝试恢复；原图仍在，可以稍后重新分析。";
+  if (code === "deepseek_authentication_failed" || code === "deepseek_insufficient_balance") return "识别服务配置当前不可用，原图仍在；你可以先手工记录，管理员处理后再试。";
+  if (code === "deepseek_invalid_request" || code === "deepseek_invalid_parameters") return "当前识别模型与请求配置不匹配，原图仍在；你可以先手工记录。";
+  if (code === "deepseek_empty_content" || code === "deepseek_invalid_json" || code === "deepseek_invalid_response" || code === "deepseek_invalid_candidate" || code === "deepseek_output_truncated") return "模型这次没有返回可安全采用的完整结果，原图仍在，可以重新分析。";
+  return "这次没有分析成功，原图仍在，可以重新分析。";
+}
 function imageFormFor(analysis: MealImageAnalysis, meal: Meal): ImageAdoptionForm {
   const existing = imageForms[analysis.id];
   if (existing !== undefined) return existing;
@@ -616,7 +624,7 @@ onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTi
                     </header>
                     <p v-if="analysis.status === 'pending' || analysis.status === 'running'" class="field-help">正在分析，可以稍后回来查看。</p>
                     <div v-else-if="analysis.status === 'failed'" class="analysis-failure">
-                      <p>这次没有分析成功（{{ analysis.lastErrorCode ?? '未知错误' }}）。原图仍在，可以手动重试。</p>
+                      <p>{{ imageAnalysisFailureText(analysis.lastErrorCode) }}</p>
                       <button class="action-button" type="button" :disabled="actingAnalysisId === analysis.id" @click="retryImageAnalysis(meal.id, analysis)">重新分析</button>
                     </div>
                     <div v-else-if="analysis.candidate !== null" class="analysis-result">
