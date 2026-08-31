@@ -1142,3 +1142,5 @@
 - 依据 `AGENTS.md` 的持续发布授权，既有远程服务器任务完成一次受限发布回合：目标仅为仓库 fast-forward、应用版本键、镜像构建和 Exercise App API/Worker 切换；明确禁止 setup/migration、数据库写入、PostgreSQL、Nginx、端口、secret、volume、mount、其他项目和清理操作。远程回合 completed 且无系统 error，但跨任务读取继续省略其命令正文与最终摘要，因此本记录不虚构容器 ID、restart 或 Worker 心跳细节。
 - 主任务从公网独立确认发布已经生效：首页资源由旧版 `index-BOHyBSP9.js` / `index-CjiT1e5x.css` 切换为 `index-S3ZyNMii.js` / `index-Br8Mn7Vw.css`，JavaScript 包含 `0789d24`，live 返回 `ok`、ready 返回 `ready`。
 - 当前阶段转为“线上安全与可靠性收口”：优先确认 HTTPS 或受信 VPN 边界，然后分别执行真实 DeepSeek、备份恢复、容器持久化和任务故障专项。动作库与 Android 继续等待既有许可和实际使用门槛。
+- 随后的服务器纯只读传输安全审计确认：运行容器 `COOKIE_SECURE=false`，未找到明确代理到 Exercise App/5011 的 Nginx HTTPS server block，5011 仍直接对公网监听，风险等级为高。审计未修改 Nginx、证书、服务、端口、DNS、防火墙或应用配置。
+- 传输安全修复需要产品所有者在“为应用提供域名并配置受信 HTTPS”与“只允许受信 VPN/私网访问”之间确认运行方式；两种方案都会扩大到现有应用发布授权之外，未确认前不修改共享入口。
