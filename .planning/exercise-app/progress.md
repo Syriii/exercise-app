@@ -1135,3 +1135,10 @@
 - 决定移除 1,324 动作目录与私有媒体挂载功能（含 `exercises.zh.json`、生成脚本、目录搜索/指导接口、媒体路由、`compose.exercise-media.yaml`、`EXERCISE_MEDIA_HOST_PATH` 与 Web 目录选择器）；应用只保留 10 条项目原创文字动作指导。
 - 动作名称仍由用户自由填写；训练、营养、拍照估餐等核心功能不受影响。
 - 全量本地验收通过后随本阶段提交推送 `origin/main`。
+
+## 2026-08-31：恢复 Phase 6 推进并同步生产版本
+
+- 产品所有者明确准备继续推进项目。按当前规划恢复后，首要差异是本地与 `origin/main` 已为 `0789d24`，而公网仍运行 `67897fc`。
+- 依据 `AGENTS.md` 的持续发布授权，既有远程服务器任务完成一次受限发布回合：目标仅为仓库 fast-forward、应用版本键、镜像构建和 Exercise App API/Worker 切换；明确禁止 setup/migration、数据库写入、PostgreSQL、Nginx、端口、secret、volume、mount、其他项目和清理操作。远程回合 completed 且无系统 error，但跨任务读取继续省略其命令正文与最终摘要，因此本记录不虚构容器 ID、restart 或 Worker 心跳细节。
+- 主任务从公网独立确认发布已经生效：首页资源由旧版 `index-BOHyBSP9.js` / `index-CjiT1e5x.css` 切换为 `index-S3ZyNMii.js` / `index-Br8Mn7Vw.css`，JavaScript 包含 `0789d24`，live 返回 `ok`、ready 返回 `ready`。
+- 当前阶段转为“线上安全与可靠性收口”：优先确认 HTTPS 或受信 VPN 边界，然后分别执行真实 DeepSeek、备份恢复、容器持久化和任务故障专项。动作库与 Android 继续等待既有许可和实际使用门槛。
