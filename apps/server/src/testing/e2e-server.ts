@@ -13,6 +13,7 @@ import { hashPassword } from "../modules/identity/passwords.js";
 import { IdentityService } from "../modules/identity/service.js";
 import { MemoryTemporaryMediaStore } from "../modules/media/memory-temporary-media-store.js";
 import { MemoryNutritionRepository } from "../modules/nutrition/memory-repository.js";
+import { FixedPublicFoodProvider } from "../modules/nutrition/public-food-provider.js";
 import { NutritionService } from "../modules/nutrition/service.js";
 import { MemoryReminderRepository } from "../modules/reminders/memory-repository.js";
 import { ReminderService } from "../modules/reminders/service.js";
@@ -42,7 +43,20 @@ const identityService = new IdentityService({
 const planningService = new PlanningService(new MemoryPlanningRepository());
 const trainingService = new TrainingService({ repository: new MemoryTrainingRepository(), planningService });
 const trainingSuggestionService = new TrainingSuggestionService({ repository: new MemoryTrainingSuggestionRepository(), planningService, trainingService });
-const nutritionService = new NutritionService(new MemoryNutritionRepository());
+const nutritionService = new NutritionService(new MemoryNutritionRepository(), new FixedPublicFoodProvider([{
+  id: "open_food_facts:6907992515960",
+  provider: "open_food_facts",
+  label: "原浆豆奶",
+  brand: "示例品牌",
+  barcode: "6907992515960",
+  basisAmount: 100,
+  basisUnit: "g",
+  energyKcal: 62,
+  proteinGrams: 6,
+  carbohydrateGrams: 1.5,
+  fatGrams: 3.6,
+  sourceUrl: "https://world.openfoodfacts.org/product/6907992515960",
+}]));
 const queue = new MemoryTaskQueue();
 const mediaStore = new MemoryTemporaryMediaStore();
 const imageAnalysisService = new ImageAnalysisService({

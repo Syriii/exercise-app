@@ -21,6 +21,10 @@ describe("loadConfig", () => {
     expect(config.deepseekApiKey).toBeNull();
     expect(config.deepseekBaseUrl).toBe("https://api.deepseek.com");
     expect(config.deepseekVisionModel).toBe("deepseek-v4-flash-vision-exp");
+    expect(config.publicFoodSearchEnabled).toBe(true);
+    expect(config.openFoodFactsSearchUrl).toBe("https://search.openfoodfacts.org/search");
+    expect(config.publicFoodSearchTimeoutMs).toBe(5_000);
+    expect(config.publicFoodSearchCacheSeconds).toBe(600);
     expect(config.imageUploadMaxBytes).toBe(8 * 1024 * 1024);
     expect(config.exportRetentionHours).toBe(168);
   });
@@ -33,6 +37,10 @@ describe("loadConfig", () => {
         DEEPSEEK_VISION_MODEL: "configured-vision-model",
         DEEPSEEK_TIMEOUT_MS: "90000",
         IMAGE_UPLOAD_MAX_BYTES: "4194304",
+        PUBLIC_FOOD_SEARCH_ENABLED: "false",
+        OPEN_FOOD_FACTS_SEARCH_URL: "https://food-search.example.test/search",
+        PUBLIC_FOOD_SEARCH_TIMEOUT_MS: "3000",
+        PUBLIC_FOOD_SEARCH_CACHE_SECONDS: "120",
       },
       () => "deepseek-test-key\n",
     );
@@ -41,6 +49,10 @@ describe("loadConfig", () => {
     expect(config.deepseekVisionModel).toBe("configured-vision-model");
     expect(config.deepseekTimeoutMs).toBe(90_000);
     expect(config.imageUploadMaxBytes).toBe(4 * 1024 * 1024);
+    expect(config.publicFoodSearchEnabled).toBe(false);
+    expect(config.openFoodFactsSearchUrl).toBe("https://food-search.example.test/search");
+    expect(config.publicFoodSearchTimeoutMs).toBe(3_000);
+    expect(config.publicFoodSearchCacheSeconds).toBe(120);
   });
 
   it("supports file-backed secrets", () => {

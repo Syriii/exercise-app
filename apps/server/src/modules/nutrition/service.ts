@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { NutritionError } from "./errors.js";
+import { PublicFoodProviderError, type PublicFoodProvider } from "./public-food-provider.js";
 import type { ContributionInput, FoodTemplateInput, MealMetadataInput, NutritionRepository } from "./repository.js";
 import type { DietPlanInput, FoodSearchResult, Meal, MealContributionMode, NutrientValues, NutritionDaySummary } from "./types.js";
 
@@ -33,7 +34,7 @@ function nonnegative(value: number | null, name: string, maximum: number): numbe
 function round(value: number): number { return Math.round(value * 10) / 10; }
 
 export class NutritionService {
-  public constructor(private readonly repository: NutritionRepository) {}
+  public constructor(private readonly repository: NutritionRepository, private readonly publicFoodProvider: PublicFoodProvider | null = null) {}
 
   public async listMeals(userId: string, from: string, to: string): Promise<readonly Meal[]> {
     this.assertDate(from); this.assertDate(to);
@@ -241,6 +242,21 @@ export class NutritionService {
       seen.add(key);
       return true;
     }).slice(0, 50);
+  }
+
+  public async searchPublicFoods(query: string) {
+    const normalized = query.trim();
+    if (normalized.length < 2) throw new NutritionError("invalid_nutrition_input", "至少输入 2 个字符再搜索公开食品", 400);
+    if (normalized.length > 100) throw new NutritionError("invalid_nutrition_input", "搜索内容不能超过 100 个字符", 400);
+    if (this.publicFoodProvider === null) throw new NutritionError("public_food_search_unavailable", "公开食品搜索当前未启用", 503);
+    try {
+      return await this.publicFoodProvider.search(normalized);
+    } catch (error) {
+      if (error instanceof PublicFoodProviderError && error.code === "rate_limited") {
+        throw new NutritionError("public_food_search_rate_limited", "公开食品搜索较繁忙，请稍后再试；个人记录仍可使用", 429);
+      }
+      throw new NutritionError("public_food_search_unavailable", "公开食品搜索暂时不可用；个人记录和手工录入仍可使用", 503);
+    }
   }
 
   public async createFoodTemplate(userId: string, input: ContributionRequest) { return this.repository.createFoodTemplate(userId, this.foodTemplateInput(input)); }

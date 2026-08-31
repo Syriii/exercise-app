@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
-import { nutritionApi, type ContributionInput, type DietPlan, type DietPlanInput, type FoodSearchResult, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary, type PersonalFoodTemplate } from "../api/nutrition";
+import { nutritionApi, type ContributionInput, type DietPlan, type DietPlanInput, type FoodSearchResult, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary, type PersonalFoodTemplate, type PublicFoodSearchResult } from "../api/nutrition";
 import { planningApi, type DailyPlanningReference } from "../api/planning";
 import AppShell from "../app/AppShell.vue";
 import { type AppSection } from "../app/modules";
@@ -38,6 +38,9 @@ const mealForm = reactive({ name: "", time: currentTime(), note: "" });
 const contributionForms = reactive<Record<string, ContributionForm>>({});
 const foodSearchQueries = reactive<Record<string, string>>({});
 const foodSearchResults = reactive<Record<string, FoodSearchResult[]>>({});
+const publicFoodSearchResults = reactive<Record<string, PublicFoodSearchResult[]>>({});
+const publicFoodSearchErrors = reactive<Record<string, string>>({});
+const publicFoodPortions = reactive<Record<string, string>>({});
 const recentSelections = reactive<Record<string, string[]>>({});
 const searchingMealId = ref<string | null>(null);
 const quickAddingMealId = ref<string | null>(null);
@@ -108,6 +111,9 @@ function resetDateScopedState() {
   clearRecord(contributionForms);
   clearRecord(foodSearchQueries);
   clearRecord(foodSearchResults);
+  clearRecord(publicFoodSearchResults);
+  clearRecord(publicFoodSearchErrors);
+  clearRecord(publicFoodPortions);
   clearRecord(recentSelections);
   clearRecord(analysesByMeal);
   clearRecord(uploadProgress);
@@ -433,7 +439,50 @@ async function removeFoodTemplate(value: PersonalFoodTemplate) {
   } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时删除不了这个常用食物"; }
   finally { saving.value = false; }
 }
-async function searchFoods(mealId: string) { searchingMealId.value = mealId; errorMessage.value = ""; try { foodSearchResults[mealId] = await nutritionApi.searchFoods(foodSearchQueries[mealId] ?? "", selectedDate.value); } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时搜索不了食物"; } finally { searchingMealId.value = null; } }
+function publicFoodKey(mealId: string, resultId: string): string { return `${mealId}:${resultId}`; }
+function scaledNutrient(value: number | null, factor: number): string { return value === null ? "" : (Math.round(value * factor * 10) / 10).toString(); }
+function usePublicFoodResult(mealId: string, value: PublicFoodSearchResult) {
+  const grams = Number(publicFoodPortions[publicFoodKey(mealId, value.id)] ?? "100");
+  if (!Number.isFinite(grams) || grams <= 0 || grams > 10_000) { errorMessage.value = "实际重量需要填写 0–10000 g 之间的数字"; return; }
+  const factor = grams / value.basisAmount;
+  const displayLabel = (value.brand === null ? value.label : `${value.label}（${value.brand}）`).slice(0, 100);
+  contributionForms[mealId] = {
+    mode: "item",
+    label: displayLabel,
+    portionAmount: grams.toString(),
+    portionUnit: "g",
+    basisDescription: `Open Food Facts · 每 100 g · 条码 ${value.barcode} · 按 ${grams} g 换算；社区数据，请核对包装标签`,
+    energyKcal: scaledNutrient(value.energyKcal, factor),
+    proteinGrams: scaledNutrient(value.proteinGrams, factor),
+    carbohydrateGrams: scaledNutrient(value.carbohydrateGrams, factor),
+    fatGrams: scaledNutrient(value.fatGrams, factor),
+    replaceExisting: false,
+    saveAsTemplate: false,
+  };
+  editingContributionId.value = null;
+  errorMessage.value = "";
+  notice.value = `已按 ${grams} g 换算“${value.label}”，请核对包装标签后再计入`;
+}
+async function searchFoods(mealId: string) {
+  if (searchingMealId.value !== null) return;
+  const query = (foodSearchQueries[mealId] ?? "").trim();
+  searchingMealId.value = mealId; errorMessage.value = ""; publicFoodSearchErrors[mealId] = "";
+  const [personalResult, publicResult] = await Promise.allSettled([
+    nutritionApi.searchFoods(query, selectedDate.value),
+    query.length >= 2 ? nutritionApi.searchPublicFoods(query) : Promise.resolve([] as PublicFoodSearchResult[]),
+  ]);
+  if (personalResult.status === "fulfilled") foodSearchResults[mealId] = personalResult.value;
+  else { foodSearchResults[mealId] = []; errorMessage.value = personalResult.reason instanceof ApiError ? personalResult.reason.message : "暂时搜索不了个人记录"; }
+  if (publicResult.status === "fulfilled") {
+    publicFoodSearchResults[mealId] = publicResult.value;
+    for (const result of publicResult.value) publicFoodPortions[publicFoodKey(mealId, result.id)] ??= "100";
+  } else {
+    publicFoodSearchResults[mealId] = [];
+    publicFoodSearchErrors[mealId] = publicResult.reason instanceof ApiError ? publicResult.reason.message : "公开包装食品暂时搜索不了；个人记录和手工录入仍可使用。";
+  }
+  if (query.length > 0 && query.length < 2) publicFoodSearchErrors[mealId] = "至少输入 2 个字符，才会同时搜索公开包装食品。";
+  searchingMealId.value = null;
+}
 function useFoodSearchResult(mealId: string, value: FoodSearchResult) { contributionForms[mealId] = { mode: "item", label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false }; editingContributionId.value = null; notice.value = `已带入“${value.label}”，确认份量和营养后再计入`; }
 async function deleteContribution(meal: Meal, value: MealContribution) { if (!window.confirm(`从当前汇总中移除“${value.label}”？旧值仍保留在修订记录中。`)) return; saving.value = true; try { const saved = await nutritionApi.deleteContribution(meal.id, value.id, meal.revision, value.revision); meals.value = meals.value.map((item) => item.id === saved.id ? saved : item); await refreshSummary(); notice.value = "这项内容已从当前汇总移除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时移除不了这项内容"; } finally { saving.value = false; } }
 async function deleteMeal(meal: Meal) { if (!window.confirm("删除整顿饭？它会从当天汇总中排除。")) return; saving.value = true; try { await nutritionApi.deleteMeal(meal.id, meal.revision); meals.value = meals.value.filter((value) => value.id !== meal.id); delete analysesByMeal[meal.id]; await refreshSummary(); notice.value = "这顿饭已从当前汇总中排除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时删除不了这顿饭"; } finally { saving.value = false; } }
@@ -607,18 +656,33 @@ onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTi
               </section>
               <ul v-if="meal.contributions.length" class="meal-items"><li v-for="item in meal.contributions" :key="item.id"><div><strong>{{ item.label }}</strong><span>{{ modeLabel(item.mode) }} · {{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }} · {{ item.reviewStatus === 'tentative' ? '照片估算，待确认' : '已确认' }}</span><small>{{ nutrientText(item.energyKcal, 'kcal') }} · 蛋白质 {{ nutrientText(item.proteinGrams, 'g') }} · 碳水 {{ nutrientText(item.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrientText(item.fatGrams, 'g') }}</small></div><span class="row-actions"><button class="text-action" type="button" @click="editContribution(meal, item)">{{ item.reviewStatus === 'tentative' ? '核对并确认' : '修正' }}</button><button class="text-action danger-text" type="button" @click="deleteContribution(meal, item)">{{ item.reviewStatus === 'tentative' ? '拒绝' : '移除' }}</button></span></li></ul><p v-else class="empty-copy">还没有填写这顿饭吃了什么。</p>
               <section class="meal-food-search" :aria-labelledby="`food-search-${meal.id}`">
-                <div><strong :id="`food-search-${meal.id}`">搜索更多个人记录</strong><span>可以查找更早的常用食物和最近 90 天记录。</span></div>
+                <div><strong :id="`food-search-${meal.id}`">搜索个人记录和公开包装食品</strong><span>个人常用与最近 90 天记录优先；输入至少 2 个字符后，也会搜索公开包装食品。</span></div>
                 <form class="food-search-row" @submit.prevent="searchFoods(meal.id)">
                   <label><span>食物或菜名</span><input v-model="foodSearchQueries[meal.id]" placeholder="留空查看最近使用" /></label>
                   <button class="action-button" type="submit" :disabled="searchingMealId === meal.id">{{ searchingMealId === meal.id ? '搜索中…' : '搜索' }}</button>
                 </form>
-                <ul v-if="foodSearchResults[meal.id]?.length" class="food-results">
+                <div v-if="foodSearchResults[meal.id]?.length" class="food-search-group">
+                  <strong>我的个人记录</strong>
+                  <ul class="food-results">
                   <li v-for="result in foodSearchResults[meal.id]" :key="result.id">
                     <div><strong>{{ result.label }}</strong><span>{{ result.source === 'personal_template' ? '我的常用' : '最近吃过' }} · {{ result.portionAmount ?? '份量未知' }} {{ result.portionUnit ?? '' }}</span><small>{{ nutrientText(result.energyKcal, 'kcal') }} · 蛋白质 {{ nutrientText(result.proteinGrams, 'g') }} · 碳水 {{ nutrientText(result.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrientText(result.fatGrams, 'g') }}</small></div>
                     <span class="row-actions"><button class="text-action" type="button" @click="quickAddFood(meal, result)">直接加入</button><button class="text-action" type="button" @click="useFoodSearchResult(meal.id, result)">调整后加入</button></span>
                   </li>
-                </ul>
-                <p v-else-if="foodSearchResults[meal.id]" class="empty-copy">没有匹配的个人记录；可以继续手工填写或拍照估算。</p>
+                  </ul>
+                </div>
+                <p v-else-if="foodSearchResults[meal.id]" class="empty-copy">没有匹配的个人记录；公开结果、手工填写和拍照估算仍可继续使用。</p>
+                <section v-if="publicFoodSearchResults[meal.id]?.length" class="food-search-group public-food-search" aria-label="公开包装食品结果">
+                  <div class="public-food-heading"><div><strong>公开包装食品</strong><span>每项先按每 100 g 展示；填写实际重量后换算到录入表单。</span></div><a href="https://world.openfoodfacts.org/" target="_blank" rel="noreferrer">Open Food Facts · ODbL</a></div>
+                  <p class="field-help">数据由社区贡献，可能缺失或不准确。计入前请核对包装标签；搜索词会发送给 Open Food Facts，不包含账号信息。</p>
+                  <ul class="food-results public-food-results">
+                    <li v-for="result in publicFoodSearchResults[meal.id]" :key="result.id">
+                      <div><strong>{{ result.label }}</strong><span>{{ result.brand ?? '品牌未知' }} · 每 100 g · 条码 {{ result.barcode }}</span><small>{{ nutrientText(result.energyKcal, 'kcal') }} · 蛋白质 {{ nutrientText(result.proteinGrams, 'g') }} · 碳水 {{ nutrientText(result.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrientText(result.fatGrams, 'g') }}</small><a :href="result.sourceUrl" target="_blank" rel="noreferrer">查看来源记录</a></div>
+                      <div class="public-food-actions"><label><span>实际重量（g）</span><input v-model="publicFoodPortions[publicFoodKey(meal.id, result.id)]" type="number" min="0.1" max="10000" step="any" :aria-label="`${result.label}实际重量（g）`" /></label><button class="text-action" type="button" @click="usePublicFoodResult(meal.id, result)">按这个重量带入</button></div>
+                    </li>
+                  </ul>
+                </section>
+                <p v-else-if="foodSearchResults[meal.id] && (foodSearchQueries[meal.id] ?? '').trim().length >= 2 && !publicFoodSearchErrors[meal.id]" class="empty-copy">公开包装食品中没有带可用营养数据的匹配结果。</p>
+                <p v-if="publicFoodSearchErrors[meal.id]" class="inline-warning" role="status">{{ publicFoodSearchErrors[meal.id] }}</p>
               </section>
               <form class="contribution-form" @submit.prevent="saveContribution(meal, meal.contributions.find((item) => item.id === editingContributionId))">
                 <div class="form-row"><label>录入方式<select v-model="formFor(meal.id).mode"><option value="item">单个食物</option><option value="whole_meal">整餐总量</option><option value="supplement">补充未覆盖项</option></select></label><label v-if="templates.length">我的常用项<select value="" @change="useTemplate(meal.id, ($event.target as HTMLSelectElement).value)"><option value="">选择后带入</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.label }}</option></select></label><label>名称<input v-model="formFor(meal.id).label" required placeholder="例如：米饭" /></label></div>

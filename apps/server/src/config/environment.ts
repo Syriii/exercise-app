@@ -20,6 +20,10 @@ export interface AppConfig {
   readonly deepseekBaseUrl: string;
   readonly deepseekVisionModel: string;
   readonly deepseekTimeoutMs: number;
+  readonly publicFoodSearchEnabled: boolean;
+  readonly openFoodFactsSearchUrl: string;
+  readonly publicFoodSearchTimeoutMs: number;
+  readonly publicFoodSearchCacheSeconds: number;
   readonly imageUploadMaxBytes: number;
   readonly exportMaxBytes: number;
   readonly exportRetentionHours: number;
@@ -191,6 +195,10 @@ export function loadConfig(
       environment.DEEPSEEK_TIMEOUT_MS,
       120_000,
     ),
+    publicFoodSearchEnabled: parseBoolean("PUBLIC_FOOD_SEARCH_ENABLED", environment.PUBLIC_FOOD_SEARCH_ENABLED, true),
+    openFoodFactsSearchUrl: environment.OPEN_FOOD_FACTS_SEARCH_URL ?? "https://search.openfoodfacts.org/search",
+    publicFoodSearchTimeoutMs: parseInteger("PUBLIC_FOOD_SEARCH_TIMEOUT_MS", environment.PUBLIC_FOOD_SEARCH_TIMEOUT_MS, 5_000),
+    publicFoodSearchCacheSeconds: parseInteger("PUBLIC_FOOD_SEARCH_CACHE_SECONDS", environment.PUBLIC_FOOD_SEARCH_CACHE_SECONDS, 600),
     imageUploadMaxBytes: parseInteger(
       "IMAGE_UPLOAD_MAX_BYTES",
       environment.IMAGE_UPLOAD_MAX_BYTES,

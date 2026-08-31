@@ -13,6 +13,7 @@ import { IdentityService } from "../modules/identity/service.js";
 import { FileSystemTemporaryMediaStore } from "../modules/media/filesystem-temporary-media-store.js";
 import { PostgresOperationsService } from "../modules/operations/service.js";
 import { PostgresNutritionRepository } from "../modules/nutrition/postgres-repository.js";
+import { OpenFoodFactsPublicFoodProvider } from "../modules/nutrition/public-food-provider.js";
 import { NutritionService } from "../modules/nutrition/service.js";
 import { PostgresPlanningRepository } from "../modules/planning/postgres-repository.js";
 import { PlanningService } from "../modules/planning/service.js";
@@ -51,7 +52,14 @@ const operationsService = new PostgresOperationsService({
 });
 const planningService = new PlanningService(new PostgresPlanningRepository(database.database));
 const nutritionRepository = new PostgresNutritionRepository(database.database);
-const nutritionService = new NutritionService(nutritionRepository);
+const publicFoodProvider = config.publicFoodSearchEnabled
+  ? new OpenFoodFactsPublicFoodProvider({
+      baseUrl: config.openFoodFactsSearchUrl,
+      timeoutMs: config.publicFoodSearchTimeoutMs,
+      cacheTtlMs: config.publicFoodSearchCacheSeconds * 1_000,
+    })
+  : null;
+const nutritionService = new NutritionService(nutritionRepository, publicFoodProvider);
 const trainingService = new TrainingService({
   repository: new PostgresTrainingRepository(database.database),
   planningService,

@@ -7,6 +7,7 @@ import { IdentityService } from "../identity/service.js";
 import { MemoryPlanningRepository } from "../planning/memory-repository.js";
 import { PlanningService } from "../planning/service.js";
 import { MemoryNutritionRepository } from "./memory-repository.js";
+import { FixedPublicFoodProvider } from "./public-food-provider.js";
 import { NutritionService } from "./service.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
@@ -16,7 +17,7 @@ describe("nutrition routes", () => {
   it("serializes an authenticated meal contribution and day summary", async () => {
     const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
     const identityService = new IdentityService({ repository: new MemoryIdentityRepository(), sessionSecret: config.sessionSecret, sessionTtlHours: config.sessionTtlHours });
-    const app = await buildApp({ config, checkDatabase: async () => undefined, identityService, planningService: new PlanningService(new MemoryPlanningRepository()), nutritionService: new NutritionService(new MemoryNutritionRepository()) });
+    const app = await buildApp({ config, checkDatabase: async () => undefined, identityService, planningService: new PlanningService(new MemoryPlanningRepository()), nutritionService: new NutritionService(new MemoryNutritionRepository(), new FixedPublicFoodProvider([{ id: "open_food_facts:6907992515960", provider: "open_food_facts", label: "原浆豆奶", brand: "示例品牌", barcode: "6907992515960", basisAmount: 100, basisUnit: "g", energyKcal: 62, proteinGrams: 6, carbohydrateGrams: 1.5, fatGrams: 3.6, sourceUrl: "https://world.openfoodfacts.org/product/6907992515960" }])) });
     apps.push(app);
     const registration = await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { username: "nutrition-route", password: "correct horse battery staple" } });
     const cookie = String(registration.headers["set-cookie"]).split(";", 1)[0];
@@ -29,6 +30,11 @@ describe("nutrition routes", () => {
     const search = await app.inject({ method: "GET", url: "/api/v1/nutrition/food-search?query=%E7%B1%B3%E9%A5%AD&asOfDate=2026-08-26", headers: { cookie } });
     expect(search.statusCode, search.body).toBe(200);
     expect(search.json()).toMatchObject([{ label: "米饭", source: "recent_meal", energyKcal: 232 }]);
+    const publicSearch = await app.inject({ method: "POST", url: "/api/v1/nutrition/public-food-search", headers: { cookie }, payload: { query: "豆奶" } });
+    expect(publicSearch.statusCode, publicSearch.body).toBe(200);
+    expect(publicSearch.json()).toMatchObject([{ provider: "open_food_facts", label: "原浆豆奶", basisAmount: 100, energyKcal: 62 }]);
+    const anonymousPublicSearch = await app.inject({ method: "POST", url: "/api/v1/nutrition/public-food-search", payload: { query: "豆奶" } });
+    expect(anonymousPublicSearch.statusCode).toBe(401);
     const summary = await app.inject({ method: "GET", url: "/api/v1/nutrition/day-summary?localDate=2026-08-26&timeZone=Asia%2FShanghai", headers: { cookie } });
     expect(summary.statusCode, summary.body).toBe(200);
     expect(summary.json()).toMatchObject({ energyKcal: { recorded: 232 }, fatGrams: { recorded: null, complete: false } });

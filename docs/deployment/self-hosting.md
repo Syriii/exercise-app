@@ -117,6 +117,9 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 - `WORKER_HEARTBEAT_INTERVAL_SECONDS`：worker 写入 PostgreSQL 存活信号的间隔，默认 15 秒。
 - `WORKER_HEARTBEAT_STALE_SECONDS`：管理页判定 worker 心跳过期的时间，默认 45 秒，必须大于写入间隔。
 - `DEEPSEEK_VISION_MODEL`：默认使用官方视觉指南当前列出的 `deepseek-v4-flash-vision-exp`；该模型带实验标记，因此部署时保留为可配置项。
+- `PUBLIC_FOOD_SEARCH_ENABLED`：是否启用 Open Food Facts 公开包装食品搜索，默认 `true`；关闭后个人常用食物、最近记录、手工录入和拍照估算不受影响。
+- `OPEN_FOOD_FACTS_SEARCH_URL`：公开包装食品搜索提供方地址，默认使用 Open Food Facts 的 Search-a-licious 公共服务。自托管替代服务时必须保持同一合约、许可归属和失败降级边界。
+- `PUBLIC_FOOD_SEARCH_TIMEOUT_MS` 与 `PUBLIC_FOOD_SEARCH_CACHE_SECONDS`：外部搜索超时和进程内公共结果缓存时间，默认 5 秒与 10 分钟；应用不会做输入即搜索，并限制上游请求频率。
 - `IMAGE_UPLOAD_MAX_BYTES`：应用接收单张照片的上限，默认 8 MiB，低于供应商文档的 32 MiB 单图限制，避免手机原图占用过多内存和临时磁盘。
 - `EXPORT_MAX_BYTES` 与 `EXPORT_RETENTION_HOURS`：账号 JSON 导出的大小上限与下载保留时间；默认 64 MiB、7 天。导出不包含密码、会话令牌或原始照片。
 - `MEDIA_CLEANUP_INTERVAL_SECONDS`：worker 清理过期导出和临时照片的间隔，默认 1 小时。

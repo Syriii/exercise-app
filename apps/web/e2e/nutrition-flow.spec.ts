@@ -53,7 +53,8 @@ test("a body measurement is a first-class history record", async ({ page }, test
   await expect(datedHistory.getByText("1 条测量")).toBeVisible();
 });
 
-test("a person can reuse only the matching foods from yesterday and manage common foods", async ({ page }, testInfo) => {
+test("a person can reuse matching foods, search public products, and manage common foods", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -95,6 +96,21 @@ test("a person can reuse only the matching foods from yesterday and manage commo
   await expect(todayItems.getByText("鸡蛋", { exact: true })).toBeVisible();
   await expect(todayItems.getByText("豆浆", { exact: true })).toBeVisible();
   await expect(todayItems.getByText("包子", { exact: true })).toHaveCount(0);
+
+  const publicFoodSearch = todayMeal.getByRole("region", { name: "搜索个人记录和公开包装食品" });
+  await publicFoodSearch.getByLabel("食物或菜名").fill("豆奶");
+  await publicFoodSearch.getByRole("button", { name: "搜索", exact: true }).click();
+  const publicResults = publicFoodSearch.getByRole("region", { name: "公开包装食品结果" });
+  await expect(publicResults.getByText("原浆豆奶", { exact: true })).toBeVisible();
+  await expect(publicResults.getByText("Open Food Facts · ODbL")).toBeVisible();
+  await publicResults.getByLabel("原浆豆奶实际重量（g）").fill("250");
+  await publicResults.getByRole("button", { name: "按这个重量带入" }).press("Enter");
+  await expect(todayMeal.getByLabel("份量")).toHaveValue("250");
+  await expect(todayMeal.getByLabel("能量 kcal")).toHaveValue("155");
+  await expect(todayMeal.getByLabel("蛋白质 g")).toHaveValue("15");
+  await expect(todayMeal.getByLabel("估算基准")).toHaveValue(/Open Food Facts.*6907992515960.*250 g/);
+  await todayMeal.getByRole("button", { name: "计入这顿饭" }).click();
+  await expect(todayItems.getByText("原浆豆奶（示例品牌）", { exact: true })).toBeVisible();
 
   await todayMeal.getByLabel("名称").fill("夹馍");
   await todayMeal.getByLabel("份量").fill("1");
@@ -181,7 +197,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await expect(page.getByText("已记录 250 kcal")).toBeVisible();
   await expect(page.getByText("营养记录已修正，旧值仍可追溯")).toBeVisible();
 
-  const foodSearch = meal.getByRole("region", { name: "搜索更多个人记录" });
+  const foodSearch = meal.getByRole("region", { name: "搜索个人记录和公开包装食品" });
   await foodSearch.getByLabel("食物或菜名").fill("米饭");
   await foodSearch.getByRole("button", { name: "搜索", exact: true }).click();
   const personalResult = foodSearch.getByRole("listitem").filter({ hasText: "我的常用" });

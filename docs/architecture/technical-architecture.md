@@ -211,6 +211,12 @@ Android 不是单独重写的第二套产品。首选路线是 Capacitor：
 
 普通 `deepseek-v4-flash` / `deepseek-v4-pro` 的纯文本限制不适用于独立的 `deepseek-v4-flash-vision-exp`。官方文档能高置信证明图片输入能力，但不证明模型能准确判断食堂菜品、隐藏油脂、份量和营养；后者继续通过本项目样本验证、范围表达和用户修正控制。
 
+### 6.4 公共食物提供方边界
+
+公开包装食品搜索使用可替换的服务端提供方，不把第三方目录导入仓库或业务数据库。首个提供方为 Open Food Facts Search-a-licious：只在用户明确提交至少 2 个字符后查询，最多读取 8 项名称、品牌、条码和每 100 克营养字段；请求不携带账号标识，使用可识别的项目 User-Agent。服务端使用 5 秒超时、10 分钟进程缓存和每分钟 9 次上游保护，提供方超时、限流或响应异常只让公开结果降级，个人常用、最近记录、拍照和手工录入继续可用。
+
+Open Food Facts 官方说明数据库采用 ODbL、单项内容采用 Database Contents License，数据由社区贡献且不保证准确、完整或可靠，并限制搜索请求为每 IP 每分钟 10 次。界面因此持续显示来源与许可归属，只采用含至少一项可用营养字段的结果，按每 100 克基准让用户填写实际克数后换算，并要求核对包装标签；不使用或再分发产品图片。来源依据见官方 [API 文档](https://openfoodfacts.github.io/openfoodfacts-server/api/) 与 [Search-a-licious API](https://openfoodfacts.github.io/search-a-licious/users/ref-openapi/)。
+
 ## 7. API 与异步交互
 
 ### 7.1 API 形式

@@ -9,6 +9,7 @@ export interface DietPlan { id: string; dateFrom: string; dateTo: string; title:
 export interface DietPlanInput { dateFrom: string; dateTo: string; title: string; note: string | null; entries: Array<Omit<DietPlanEntry, "id">>; }
 export interface PersonalFoodTemplate extends NutrientValues { id: string; label: string; portionAmount: number | null; portionUnit: string | null; basisDescription: string | null; revision: number; createdAt: string; updatedAt: string; }
 export interface FoodSearchResult extends NutrientValues { id: string; source: "personal_template" | "recent_meal"; label: string; portionAmount: number | null; portionUnit: string | null; basisDescription: string | null; lastUsedAt: string; }
+export interface PublicFoodSearchResult extends NutrientValues { id: string; provider: "open_food_facts"; label: string; brand: string | null; barcode: string; basisAmount: 100; basisUnit: "g"; sourceUrl: string; }
 export interface NutritionValueSummary { recorded: number | null; target: number | null; remaining: number | null; complete: boolean; }
 export interface NutritionDaySummary { localDate: string; mealCount: number; coverageConfirmed: boolean; energyKcal: NutritionValueSummary; proteinGrams: NutritionValueSummary; carbohydrateGrams: NutritionValueSummary; fatGrams: NutritionValueSummary; }
 export type ContributionInput = Omit<MealContribution, "id" | "mealId" | "source" | "reviewStatus" | "sourceAnalysisId" | "revision" | "createdAt" | "updatedAt">;
@@ -24,6 +25,7 @@ export const nutritionApi = {
   archiveDietPlan: (planId: string, revision: number) => apiRequest<DietPlan>(`/api/v1/nutrition/diet-plans/${planId}/archive`, { method: "POST", body: JSON.stringify({ revision }) }),
   listMeals: (from: string, to: string) => apiRequest<Meal[]>(`/api/v1/nutrition/meals?${new URLSearchParams({ from, to })}`),
   searchFoods: (query: string, asOfDate: string) => apiRequest<FoodSearchResult[]>(`/api/v1/nutrition/food-search?${new URLSearchParams({ query, asOfDate })}`),
+  searchPublicFoods: (query: string) => apiRequest<PublicFoodSearchResult[]>("/api/v1/nutrition/public-food-search", { method: "POST", body: JSON.stringify({ query }) }),
   createMeal: (input: Pick<Meal, "occurredAt" | "localDate" | "timeZone" | "name" | "note">) => apiRequest<Meal>("/api/v1/nutrition/meals", { method: "POST", body: JSON.stringify(input) }),
   updateMeal: (mealId: string, revision: number, input: Pick<Meal, "occurredAt" | "localDate" | "timeZone" | "name" | "note">) => apiRequest<Meal>(`/api/v1/nutrition/meals/${mealId}`, { method: "PUT", body: JSON.stringify({ revision, ...input }) }),
   deleteMeal: (mealId: string, revision: number) => apiRequest<void>(`/api/v1/nutrition/meals/${mealId}?${new URLSearchParams({ revision: revision.toString() })}`, { method: "DELETE" }),
