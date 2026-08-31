@@ -26,7 +26,7 @@ const loading = ref(true);
 const saving = ref(false);
 const errorMessage = ref("");
 const notice = ref("");
-const filter = ref<"all" | "training" | "nutrition">("all");
+const filter = ref<"all" | "training" | "nutrition" | "measurement">("all");
 const expandedSessionId = ref<string | null>(null);
 const editingItemId = ref<string | null>(null);
 const editingSessionId = ref<string | null>(null);
@@ -57,12 +57,18 @@ const expenditureForms = reactive<Record<string, { activityCode: TrainingExpendi
 
 const historyDays = computed(() => {
   const dates = new Set<string>();
-  if (filter.value !== "nutrition") sessions.value.forEach((value) => dates.add(value.localDate));
-  if (filter.value !== "training") meals.value.forEach((value) => dates.add(value.localDate));
+  if (filter.value === "all" || filter.value === "training") sessions.value.forEach((value) => dates.add(value.localDate));
+  if (filter.value === "all" || filter.value === "nutrition") meals.value.forEach((value) => dates.add(value.localDate));
+  if (filter.value === "all" || filter.value === "measurement") {
+    measurements.value.filter((value) => value.localDate >= daysAgo(89)).forEach((value) => dates.add(value.localDate));
+  }
   return [...dates].sort((left, right) => right.localeCompare(left)).map((date) => ({
     date,
-    sessions: filter.value === "nutrition" ? [] : sessions.value.filter((value) => value.localDate === date),
-    meals: filter.value === "training" ? [] : meals.value.filter((value) => value.localDate === date),
+    sessions: filter.value === "all" || filter.value === "training" ? sessions.value.filter((value) => value.localDate === date) : [],
+    meals: filter.value === "all" || filter.value === "nutrition" ? meals.value.filter((value) => value.localDate === date) : [],
+    measurements: filter.value === "all" || filter.value === "measurement"
+      ? measurements.value.filter((value) => value.localDate === date).sort((left, right) => right.measuredAt.localeCompare(left.measuredAt))
+      : [],
   }));
 });
 
@@ -113,12 +119,31 @@ const emptyState = computed(() => {
       action: "查看全部记录",
     };
   }
+  if (filter.value === "measurement") {
+    return {
+      title: "最近 90 天没有身体测量",
+      description: "训练和饮食记录仍然保留，切回全部可以一起查看。",
+      action: "查看全部记录",
+    };
+  }
   return {
     title: "最近 90 天还没有记录",
-    description: "完成的训练和保存的饮食会按日期出现在这里。",
+    description: "完成的训练、保存的饮食和身体测量会按日期出现在这里。",
     action: "回到今天",
   };
 });
+
+function historyDaySummary(day: { sessions: readonly TrainingSession[]; meals: readonly Meal[]; measurements: readonly BodyMeasurement[] }): string {
+  const parts: string[] = [];
+  if (day.sessions.length > 0) parts.push(`${day.sessions.length} 次训练`);
+  if (day.meals.length > 0) parts.push(`${day.meals.length} 顿`);
+  if (day.measurements.length > 0) parts.push(`${day.measurements.length} 条测量`);
+  return parts.join(" · ");
+}
+
+function openMeasurements() {
+  void router.push({ name: "settings", params: { section: "measurement" } });
+}
 
 function mealNutrient(dayMeals: readonly Meal[], key: "energyKcal" | "proteinGrams"): number | null {
   const known = dayMeals.flatMap((meal) => meal.contributions.map((value) => value[key])).filter((value): value is number => value !== null);
@@ -418,13 +443,13 @@ onMounted(() => void load());
 
 <template>
   <AppShell page-class="history-page" rail-note="按日期查看实际记录。">
-        <header class="view-header"><div><p class="date-line">最近 90 天</p><h1>历史记录</h1><p>按日期查看训练和饮食，也可以单独筛选。</p></div></header>
-        <div class="history-filters" aria-label="筛选按日记录"><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button><button type="button" :aria-pressed="filter === 'training'" @click="filter = 'training'">训练</button><button type="button" :aria-pressed="filter === 'nutrition'" @click="filter = 'nutrition'">饮食</button></div>
+        <header class="view-header"><div><p class="date-line">最近 90 天</p><h1>历史记录</h1><p>按日期查看训练、饮食和身体测量，也可以单独筛选。</p></div></header>
+        <div class="history-filters" aria-label="筛选按日记录"><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button><button type="button" :aria-pressed="filter === 'training'" @click="filter = 'training'">训练</button><button type="button" :aria-pressed="filter === 'nutrition'" @click="filter = 'nutrition'">饮食</button><button type="button" :aria-pressed="filter === 'measurement'" @click="filter = 'measurement'">测量</button></div>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取历史记录…</strong></section>
         <section v-else-if="historyDays.length === 0" class="work-panel training-empty history-empty"><strong>{{ emptyState.title }}</strong><p>{{ emptyState.description }}</p><button class="text-action" type="button" @click="useEmptyStateAction">{{ emptyState.action }}</button></section>
-        <section v-else class="history-list" aria-label="按日期排列的训练与饮食历史">
+        <section v-else class="history-list" aria-label="按日期排列的训练、饮食与身体测量历史">
           <article v-for="day in historyDays" :key="day.date" class="history-day history-day--real">
             <time :datetime="day.date">{{ displayDate(day.date) }}</time>
             <div class="history-day__sections">
@@ -510,8 +535,14 @@ onMounted(() => void load());
                 <p>{{ day.meals.map((meal) => meal.name ?? '未命名餐次').join('、') }}</p>
                 <small>只汇总已经填写的营养数值。</small>
               </section>
+              <section v-if="day.measurements.length" class="history-session history-measurement-summary">
+                <div class="history-session__heading"><div><strong>身体测量 · {{ day.measurements.length }} 条</strong><small>新增记录不会覆盖之前的测量。</small></div><button class="text-action" type="button" @click="openMeasurements">查看或修正</button></div>
+                <ul class="history-measurement-list">
+                  <li v-for="measurement in day.measurements" :key="measurement.id"><div><strong>{{ measurement.weightKg }} kg</strong><span v-if="measurement.waistCm !== null">腰围 {{ measurement.waistCm }} cm</span></div><small>{{ new Date(measurement.measuredAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}<template v-if="measurement.note"> · {{ measurement.note }}</template></small></li>
+                </ul>
+              </section>
             </div>
-            <span class="status-chip">{{ day.sessions.length }} 次训练 · {{ day.meals.length }} 顿</span>
+            <span class="status-chip">{{ historyDaySummary(day) }}</span>
           </article>
         </section>
         <section v-if="!loading && trendRows.length > 0" class="work-panel history-trends" aria-labelledby="history-trends-title">

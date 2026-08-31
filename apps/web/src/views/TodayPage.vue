@@ -82,6 +82,10 @@ function openSection(section: AppSection) {
   void router.push({ name: section });
 }
 
+function openNewMeal() {
+  void router.push({ name: "nutrition", query: { action: "new-meal" } });
+}
+
 function reportError(error: unknown) {
   console.error("Today operation failed", error);
   errorMessage.value = error instanceof ApiError ? error.message : "暂时读取不了今天的内容，请稍后再试";
@@ -209,7 +213,7 @@ onMounted(() => void load());
           </section>
           <section v-else-if="measurementReminderStatus?.state === 'snoozed'" class="work-panel reminder-card reminder-card--quiet" aria-label="已暂缓的身体测量提醒"><p>身体测量提醒已暂缓。</p></section>
           <section class="balance-panel" aria-labelledby="today-food-title">
-            <div class="panel-heading"><div><h2 id="today-food-title">今天还可以吃</h2><p>按已记录的餐食计算。</p></div><button class="text-action" type="button" @click="openSection('nutrition')">去记一顿 →</button></div>
+            <div class="panel-heading"><div><h2 id="today-food-title">今天还可以吃</h2><p>按已记录的餐食计算。</p></div><button class="text-action" type="button" @click="openNewMeal">去记一顿 →</button></div>
             <dl class="metric-list">
               <div><dt>能量</dt><dd>{{ remainingText(nutritionSummary?.energyKcal, 'kcal') }}</dd><span>{{ recordedText(nutritionSummary?.energyKcal, 'kcal') }}</span></div>
               <div><dt>蛋白质</dt><dd>{{ remainingText(nutritionSummary?.proteinGrams, 'g') }}</dd><span>{{ recordedText(nutritionSummary?.proteinGrams, 'g') }}</span></div>

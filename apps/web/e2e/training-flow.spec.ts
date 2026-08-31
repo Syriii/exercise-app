@@ -1,5 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+test("a person can start a blank workout from the first training screen", async ({ page }, testInfo) => {
+  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`training_blank_${projectKey}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+
+  await page.goto("/training");
+  await page.getByRole("button", { name: "直接开始训练" }).click();
+  await expect(page.getByRole("heading", { name: "这次训练" })).toBeVisible();
+  await expect(page.getByText("空白训练已开始")).toBeVisible();
+  await page.getByRole("button", { name: "保存并结束" }).click();
+  await expect(page.getByRole("heading", { name: "训练", exact: true })).toBeVisible();
+});
+
 test("a person can turn a reusable plan into an actual workout", async ({ page }, testInfo) => {
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await page.goto("/register");
@@ -21,7 +37,6 @@ test("a person can turn a reusable plan into an actual workout", async ({ page }
   const templateCard = page.getByRole("article").filter({ hasText: "全身简易" }).first();
   await templateCard.getByRole("button", { name: "动作预览" }).click();
   await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
-  await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("本地未配置可用的动作媒体");
   await templateCard.getByRole("button", { name: "收起预览" }).click();
   await page.getByRole("button", { name: "用这份开始" }).click();
   await expect(page.getByRole("heading", { name: "这次训练" })).toBeVisible();

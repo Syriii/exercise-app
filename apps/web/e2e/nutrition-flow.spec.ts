@@ -10,9 +10,47 @@ test("an empty history page shows one useful state instead of an empty trend rep
 
   await page.goto("/history");
   await expect(page.getByText("最近 90 天还没有记录")).toBeVisible();
-  await expect(page.getByText("完成的训练和保存的饮食会按日期出现在这里。")).toBeVisible();
+  await expect(page.getByText("完成的训练、保存的饮食和身体测量会按日期出现在这里。")).toBeVisible();
   await expect(page.getByRole("region", { name: "90 天概览" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "回到今天" })).toBeVisible();
+});
+
+test("today opens nutrition with the quick meal form ready", async ({ page }, testInfo) => {
+  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`quick_meal_${projectKey}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+
+  await page.getByRole("button", { name: "去记一顿" }).click();
+  await expect(page).toHaveURL(/\/nutrition/);
+  await expect(page.getByRole("region", { name: "快速记餐" })).toBeVisible();
+  await expect(page.getByLabel("餐次名称（可选）")).toBeFocused();
+});
+
+test("a body measurement is a first-class history record", async ({ page }, testInfo) => {
+  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`measurement_history_${projectKey}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+
+  await page.goto("/settings/measurement");
+  const measurements = page.getByRole("region", { name: "身体测量" });
+  await measurements.getByLabel("体重（kg）").fill("63");
+  await measurements.getByLabel("腰围（cm，可选）").fill("72");
+  await measurements.getByRole("button", { name: "记录这次测量" }).click();
+
+  await page.goto("/history");
+  await expect(page.getByText("最近 90 天还没有记录")).toHaveCount(0);
+  const datedHistory = page.getByLabel("按日期排列的训练、饮食与身体测量历史");
+  await expect(datedHistory.getByText("身体测量 · 1 条")).toBeVisible();
+  await expect(datedHistory.getByText("63 kg")).toBeVisible();
+  await expect(datedHistory.getByText("腰围 72 cm")).toBeVisible();
+  await page.locator(".history-filters").getByRole("button", { name: "测量", exact: true }).click();
+  await expect(datedHistory.getByText("1 条测量")).toBeVisible();
 });
 
 test("a person can record, correct, and review a meal without treating unknown nutrients as zero", async ({ page }, testInfo) => {
@@ -81,7 +119,7 @@ test("a person can record, correct, and review a meal without treating unknown n
 
   await page.goto("/history");
   await page.locator(".history-filters").getByRole("button", { name: "饮食", exact: true }).click();
-  const datedHistory = page.getByLabel("按日期排列的训练与饮食历史");
+  const datedHistory = page.getByLabel("按日期排列的训练、饮食与身体测量历史");
   const trends = page.getByRole("region", { name: "90 天概览" });
   await expect(datedHistory).toBeVisible();
   await expect(datedHistory.getByText("饮食 · 1 顿")).toBeVisible();

@@ -695,14 +695,23 @@ onMounted(() => void load());
             <p v-if="activeSession === null">选一份方案，也可以直接开始。</p>
             <p v-else>{{ activeSessionLabel }} · {{ activeSession.localDate }}</p>
           </div>
-          <button
-            v-if="activeSession === null"
-            class="action-button action-button--primary"
-            type="button"
-            @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()"
-          >
-            {{ planTab === "templates" ? "新建方案" : "新建周期计划" }}
-          </button>
+          <nav v-if="activeSession === null" class="view-header-actions" aria-label="训练快捷操作">
+            <button
+              class="action-button action-button--primary"
+              type="button"
+              :disabled="saving"
+              @click="startTraining(null)"
+            >
+              直接开始训练
+            </button>
+            <button
+              class="action-button"
+              type="button"
+              @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()"
+            >
+              {{ planTab === "templates" ? "新建方案" : "新建周期计划" }}
+            </button>
+          </nav>
           <span v-else class="status-chip" data-tone="accent">已完成 {{ completedCount }} 项 · 还需练 {{ remainingCount }} 项</span>
         </header>
 

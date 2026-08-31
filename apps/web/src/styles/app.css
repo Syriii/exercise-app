@@ -414,6 +414,17 @@ ol {
   letter-spacing: -0.02em;
 }
 
+.view-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: end;
+}
+
+.nutrition-header-actions .date-picker {
+  min-width: min(100%, 10rem);
+}
+
 .view-header > div > p:last-child,
 .split-heading > p,
 .daily-brief__intro > p:last-child {
@@ -1019,7 +1030,7 @@ ol {
   width: fit-content;
   max-width: 100%;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-2xs);
   padding: var(--space-2xs);
   border: var(--rule-thin) solid var(--color-rule-strong);
@@ -1028,7 +1039,7 @@ ol {
 }
 
 .history-filters button {
-  min-width: 4.5rem;
+  min-width: 4rem;
   padding-inline: var(--space-sm);
   border: 0;
   border-radius: var(--radius-sm);
@@ -1254,6 +1265,10 @@ ol {
   .split-heading {
     grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 0.8fr);
     align-items: end;
+  }
+
+  .view-header-actions {
+    justify-content: flex-end;
   }
 
   .daily-brief {
@@ -2100,6 +2115,31 @@ ol {
   gap: var(--space-xs);
 }
 
+.history-measurement-list {
+  display: grid;
+  gap: var(--space-xs);
+  list-style: none;
+}
+
+.history-measurement-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding-block: var(--space-xs);
+  border-top: var(--rule-thin) solid var(--color-rule);
+}
+
+.history-measurement-list li > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+}
+
+.history-measurement-list span,
+.history-measurement-list small {
+  color: var(--color-muted);
+}
+
 /* Hallmark · page: history · macrostructure: Long Document · designed-as-app · hierarchy: dated records before trends */
 /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 .history-page .app-main {
@@ -2372,6 +2412,20 @@ ol {
   border: var(--rule-thin) solid var(--color-rule);
   border-radius: var(--radius-md);
   background: var(--color-paper-2);
+}
+
+.quick-meal-panel {
+  scroll-margin-top: var(--space-lg);
+}
+
+.quick-meal-photo {
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.quick-meal-photo small {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
 }
 
 .meal-food-search {
@@ -2780,6 +2834,7 @@ ol {
   }
 
   .history-session__heading,
+  .history-measurement-list li,
   .history-item__heading {
     align-items: stretch;
     flex-direction: column;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
@@ -30,6 +30,8 @@ const dietPlans = ref<DietPlan[]>([]);
 const editingDietPlanId = ref<string | null>(null);
 const dietPlanForm = ref<DietPlanForm | null>(null);
 const creatingMeal = ref(false);
+const mealNameInput = ref<HTMLInputElement | null>(null);
+const quickMealImage = ref<PreparedMealImage | undefined>();
 const editingContributionId = ref<string | null>(null);
 const mealForm = reactive({ name: "", time: currentTime(), note: "" });
 const contributionForms = reactive<Record<string, ContributionForm>>({});
@@ -89,6 +91,7 @@ function resetDateScopedState() {
   editingDietPlanId.value = null;
   dietPlanForm.value = null;
   creatingMeal.value = false;
+  quickMealImage.value = undefined;
   editingContributionId.value = null;
   mealForm.name = "";
   mealForm.time = currentTime();
@@ -194,13 +197,75 @@ async function archiveDietPlan(plan: DietPlan) {
   catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时归档不了饮食安排"; }
   finally { saving.value = false; }
 }
+
+async function openMealComposer() {
+  creatingMeal.value = true;
+  await nextTick();
+  document.querySelector(".quick-meal-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  mealNameInput.value?.focus();
+}
+
+function closeMealComposer() {
+  creatingMeal.value = false;
+  quickMealImage.value = undefined;
+}
+
 async function createMeal() {
-  saving.value = true; errorMessage.value = "";
+  if (saving.value) return;
+  saving.value = true;
+  errorMessage.value = "";
+  const selectedImage = quickMealImage.value;
+  let saved: Meal;
   try {
-    const saved = await nutritionApi.createMeal({ occurredAt: new Date(`${selectedDate.value}T${mealForm.time}:00`).toISOString(), localDate: selectedDate.value, timeZone: browserTimeZone(), name: nullableText(mealForm.name), note: nullableText(mealForm.note) });
-    meals.value = [saved, ...meals.value]; formFor(saved.id); creatingMeal.value = false; mealForm.name = ""; mealForm.note = ""; notice.value = "餐次已建立，现在可以逐项填写吃了什么"; await refreshSummary();
-  } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了这顿饭"; }
-  finally { saving.value = false; }
+    saved = await nutritionApi.createMeal({ occurredAt: new Date(`${selectedDate.value}T${mealForm.time}:00`).toISOString(), localDate: selectedDate.value, timeZone: browserTimeZone(), name: nullableText(mealForm.name), note: nullableText(mealForm.note) });
+  } catch (error) {
+    errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了这顿饭";
+    saving.value = false;
+    return;
+  }
+
+  meals.value = [saved, ...meals.value];
+  formFor(saved.id);
+  creatingMeal.value = false;
+  mealForm.name = "";
+  mealForm.note = "";
+  quickMealImage.value = undefined;
+  if (selectedImage !== undefined) {
+    imageSelections.value = { ...imageSelections.value, [saved.id]: selectedImage };
+    notice.value = "餐次已建立，正在上传照片";
+  } else {
+    notice.value = "餐次已建立，可以继续填写吃了什么";
+  }
+
+  try {
+    await refreshSummary();
+  } catch (error) {
+    console.error("Nutrition summary refresh after meal creation failed", error);
+    errorMessage.value = "餐次已经保存，但当天汇总暂时刷新不了；请不要重复建立，稍后重新打开这一天即可。";
+  }
+  await nextTick();
+  document.getElementById(`meal-${saved.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    if (selectedImage !== undefined) await uploadMealImage(saved);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function selectQuickMealImage(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (file === undefined) {
+    quickMealImage.value = undefined;
+    return;
+  }
+  errorMessage.value = "";
+  try {
+    quickMealImage.value = await prepareMealImage(file);
+  } catch (error) {
+    console.error("Quick meal image preparation failed", error);
+    quickMealImage.value = undefined;
+    errorMessage.value = "这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。";
+  }
 }
 
 async function selectMealImage(mealId: string, event: Event) {
@@ -297,17 +362,34 @@ async function setCoverage(event: Event) {
   }
 }
 
+async function handleRequestedAction() {
+  if (route.query.action !== "new-meal") return;
+  await openMealComposer();
+  await router.replace({ name: "nutrition", query: selectedDate.value === localDate(new Date()) ? {} : { date: selectedDate.value } });
+}
+
 watch(() => route.query.date, (value) => { const next = typeof value === "string" ? value : localDate(new Date()); if (next !== selectedDate.value) { selectedDate.value = next; void load(); } });
-onMounted(() => { void load(); pollTimer = window.setInterval(() => void pollImageAnalyses(), 2_000); });
+watch(() => route.query.action, () => { void handleRequestedAction(); });
+onMounted(async () => { await load(); await handleRequestedAction(); pollTimer = window.setInterval(() => void pollImageAnalyses(), 2_000); });
 onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTimer); });
 </script>
 
 <template>
   <AppShell page-class="nutrition-page" rail-note="记录每一餐，随时看今天还可以吃多少。">
-        <header class="view-header"><div><p class="date-line">按天记录</p><h1>饮食</h1><p>记录每一餐，查看当天剩余。</p></div><label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || coverageSaving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label></header>
+        <header class="view-header"><div><p class="date-line">按天记录</p><h1>饮食</h1><p>记录每一餐，查看当天剩余。</p></div><nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作"><button class="action-button action-button--primary" type="button" @click="openMealComposer">快速记餐</button><label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || coverageSaving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label></nav></header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p><p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
         <div v-else class="view-stack">
+          <section v-if="creatingMeal" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
+            <div class="panel-heading"><div><h2 id="quick-meal-title">快速记餐</h2><p>可以直接拍照，也可以先建立餐次后手工填写。</p></div><button class="text-action" type="button" @click="closeMealComposer">取消</button></div>
+            <form class="inline-form meal-create-form" @submit.prevent="createMeal">
+              <label>餐次名称（可选）<input ref="mealNameInput" v-model="mealForm.name" placeholder="例如：午饭" /></label>
+              <label>用餐时间<input v-model="mealForm.time" type="time" required /></label>
+              <label>备注（可选）<input v-model="mealForm.note" placeholder="例如：食堂二楼或少吃了一半" /></label>
+              <label class="quick-meal-photo"><span>餐食照片（可选）</span><input type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" @change="selectQuickMealImage" /><small v-if="quickMealImage">{{ quickMealImage.file.name }} · <template v-if="quickMealImage.compressed">已压缩 {{ formatFileSize(quickMealImage.originalBytes) }} → {{ formatFileSize(quickMealImage.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(quickMealImage.uploadBytes) }}</template></small><small v-else>食堂餐可以在这里直接拍照</small></label>
+              <button class="primary-button" :disabled="saving || uploadingMealId !== null" type="submit">{{ quickMealImage ? '建立餐次并上传' : '建立餐次' }}</button>
+            </form>
+          </section>
           <section class="recommendation-panel" aria-labelledby="daily-reference-title">
             <div class="panel-heading"><div><h2 id="daily-reference-title">系统参考</h2><p>{{ selectedDate }} · 按个人档案、目标和日常活动计算</p></div><button class="text-action" type="button" @click="openSection('settings')">档案与策略 →</button></div>
             <dl class="metric-list"><div><dt>能量</dt><dd>{{ reference?.result.targetEnergyKcal ?? '—' }}<small> kcal</small></dd></div><div><dt>蛋白质</dt><dd>{{ reference?.result.proteinGrams ?? '—' }}<small> g</small></dd></div><div><dt>碳水</dt><dd>{{ reference?.result.carbohydrateGrams ?? '—' }}<small> g</small></dd></div><div><dt>脂肪</dt><dd>{{ reference?.result.fatGrams ?? '—' }}<small> g</small></dd></div></dl>
@@ -327,9 +409,8 @@ onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTi
             <p v-else-if="dietPlanForm === null" class="empty-copy">今天没有适用的饮食安排。</p>
           </section>
           <section class="balance-panel" aria-labelledby="remaining-title"><div class="panel-heading"><div><h2 id="remaining-title">还可以吃</h2><p>系统参考减去当前记录，负数表示已经超出。</p></div><span class="status-chip">{{ summary?.coverageConfirmed ? '全天已记全' : meals.length === 0 ? '尚未记餐' : '可能未记全' }}</span></div><dl class="metric-list"><div><dt>能量</dt><dd>{{ remainingText(summary?.energyKcal.remaining ?? null, 'kcal') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.energyKcal.recorded ?? null, 'kcal')} · ${summary?.energyKcal.complete ? '数值完整' : '有未知值'}` }}</span></div><div><dt>蛋白质</dt><dd>{{ remainingText(summary?.proteinGrams.remaining ?? null, 'g') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.proteinGrams.recorded ?? null, 'g')} · ${summary?.proteinGrams.complete ? '数值完整' : '有未知值'}` }}</span></div><div><dt>碳水</dt><dd>{{ remainingText(summary?.carbohydrateGrams.remaining ?? null, 'g') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.carbohydrateGrams.recorded ?? null, 'g')} · ${summary?.carbohydrateGrams.complete ? '数值完整' : '有未知值'}` }}</span></div><div><dt>脂肪</dt><dd>{{ remainingText(summary?.fatGrams.remaining ?? null, 'g') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.fatGrams.recorded ?? null, 'g')} · ${summary?.fatGrams.complete ? '数值完整' : '有未知值'}` }}</span></div></dl><label class="checkbox-row"><input type="checkbox" :checked="summary?.coverageConfirmed" :disabled="coverageSaving" @change="setCoverage" />今天吃过的内容都已记录</label></section>
-          <section class="work-panel meal-log" aria-labelledby="meal-log-title"><div class="panel-heading"><div><h2 id="meal-log-title">这一天吃了什么</h2><p>{{ meals.length === 0 ? '还没有餐食记录。' : `共 ${meals.length} 顿；每项营养都可以留空未知。` }}</p></div><button class="action-button" type="button" @click="creatingMeal = !creatingMeal">{{ creatingMeal ? '取消' : '记一顿' }}</button></div>
-            <form v-if="creatingMeal" class="inline-form meal-create-form" @submit.prevent="createMeal"><label>餐次名称（可选）<input v-model="mealForm.name" placeholder="例如：午饭" /></label><label>用餐时间<input v-model="mealForm.time" type="time" required /></label><label>备注（可选）<input v-model="mealForm.note" placeholder="例如：食堂二楼" /></label><button class="primary-button" :disabled="saving" type="submit">建立餐次</button></form>
-            <article v-for="meal in meals" :key="meal.id" class="meal-card"><header><div><strong>{{ meal.name ?? '未命名餐次' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div><button class="text-action danger-text" type="button" @click="deleteMeal(meal)">删除整顿</button></header>
+          <section class="work-panel meal-log" aria-labelledby="meal-log-title"><div class="panel-heading"><div><h2 id="meal-log-title">这一天吃了什么</h2><p>{{ meals.length === 0 ? '还没有餐食记录。' : `共 ${meals.length} 顿；每项营养都可以留空未知。` }}</p></div><button class="action-button" type="button" @click="openMealComposer">记一顿</button></div>
+            <article v-for="meal in meals" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card"><header><div><strong>{{ meal.name ?? '未命名餐次' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div><button class="text-action danger-text" type="button" @click="deleteMeal(meal)">删除整顿</button></header>
               <section class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
                 <div class="meal-image-panel__heading">
                   <div>

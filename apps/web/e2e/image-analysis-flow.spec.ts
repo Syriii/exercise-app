@@ -21,20 +21,19 @@ test("a person can turn a meal photo candidate into a corrected nutrition record
   await measurements.getByRole("button", { name: "记录这次测量" }).click();
 
   await page.goto("/nutrition");
-  await page.getByRole("button", { name: "记一顿" }).click();
+  await page.getByRole("button", { name: "快速记餐" }).click();
   await page.getByLabel("餐次名称（可选）").fill("食堂午饭");
-  await page.getByRole("button", { name: "建立餐次" }).click();
-  const meal = page.locator("article.meal-card").filter({ hasText: "食堂午饭" });
-  await meal.getByLabel("拍照或选图").setInputFiles({
+  await page.getByLabel("餐食照片（可选）").setInputFiles({
     name: "canteen.png",
     mimeType: "image/png",
     buffer: Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
     ]),
   });
-  await expect(meal.getByText("canteen.png")).toBeVisible();
-  await expect(meal.getByText(/保持原图/)).toBeVisible();
-  await meal.getByRole("button", { name: "上传并分析" }).click();
+  await expect(page.getByText("canteen.png")).toBeVisible();
+  await expect(page.getByText(/保持原图/)).toBeVisible();
+  await page.getByRole("button", { name: "建立餐次并上传" }).click();
+  const meal = page.locator("article.meal-card").filter({ hasText: "食堂午饭" });
   await expect(page.getByText("照片已上传；没有现有营养值时，分析完成后会先按暂定值计入，之后仍可核对或修正")).toBeVisible();
 
   const analysis = meal.locator("article.image-analysis-card").filter({ hasText: "食堂鸡腿套餐" });
@@ -52,4 +51,45 @@ test("a person can turn a meal photo candidate into a corrected nutrition record
   await expect(page.getByText("已记录 590 kcal")).toBeVisible();
   await expect(meal.getByText("590 kcal")).toBeVisible();
   await expect(analysis.getByText("这份结果已按你确认的数值计入。原始估算仍保留用于追溯。")).toBeVisible();
+});
+
+test("a failed quick photo upload keeps one meal and can retry without duplication", async ({ page }, testInfo) => {
+  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`image_retry_${projectKey}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册" }).click();
+  await expect(page).toHaveURL(/\/today$/);
+
+  let failedOnce = false;
+  await page.route("**/api/v1/image-analyses?**", async (route) => {
+    if (route.request().method() === "POST" && !failedOnce) {
+      failedOnce = true;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "image_analysis_unavailable", message: "temporary test failure" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/nutrition");
+  await page.getByRole("button", { name: "快速记餐" }).click();
+  await page.getByLabel("餐次名称（可选）").fill("上传重试餐");
+  await page.getByLabel("餐食照片（可选）").setInputFiles({
+    name: "retry.png",
+    mimeType: "image/png",
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  });
+  await page.getByRole("button", { name: "建立餐次并上传" }).click();
+
+  const meal = page.locator("article.meal-card").filter({ hasText: "上传重试餐" });
+  await expect(page.getByText("服务器暂时无法处理请求，请稍后重试")).toBeVisible();
+  await expect(page.locator("article.meal-card")).toHaveCount(1);
+  await expect(meal.getByText("retry.png")).toBeVisible();
+  await meal.getByRole("button", { name: "上传并分析" }).click();
+  await expect(page.getByText("照片已上传；没有现有营养值时，分析完成后会先按暂定值计入，之后仍可核对或修正")).toBeVisible();
+  await expect(page.locator("article.meal-card")).toHaveCount(1);
 });
