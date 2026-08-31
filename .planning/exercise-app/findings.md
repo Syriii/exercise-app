@@ -1652,3 +1652,6 @@
 - 生产只读审计确认当前版本 `96d195e` 的 API/Worker 健康，但两个容器都没有可用的 `DEEPSEEK_API_KEY_FILE`，审计任务标题为“结果=未配置”；本机部署 secret 和当前进程环境也均没有真实 Key。因而此刻无法诚实完成真实照片、usage、限流与超时的供应商验收，配置 secret 与重建容器还超出现有自动发布授权。
 - 自动重试实现采用“适配器总时限内重试”，不直接开启 pg-boss 重试：现有领域状态在一次 Worker 失败时立即从 running 写成 failed，直接打开队列重试会让后续投递因状态不再 pending 而空返回。总时限方案可对快速返回的 429/5xx/网络失败做最多两次指数退避，同时不会让多个队列投递重复写入候选。
 - 图片可靠性提交 `6de2116` 已完成受限发布。公网首页加载 `index-WLQ7BW1b.js` 且脚本含 `6de2116`，live/ready 均为 200；远程收尾标题确认 API/Worker 正常、PostgreSQL 与其他容器未变、IMG 未配置。该证据证明新适配代码已在线，但不证明模型可调用或估算准确。
+- 产品所有者随后通过服务器 `0600` 普通文件提供 Key 并明确授权启用；API/Worker 仅通过 `compose.deepseek.yaml` 增加只读 secret mount 后重建，PostgreSQL、Nginx、端口、volume 和其他容器均未修改。两个应用容器正常，live/ready 与 Worker 心跳正常。
+- 首次非敏感 1×1 PNG 被供应商以 `deepseek_invalid_request` 拒绝，未产生 request ID 或 usage；证据更符合图片尺寸/格式边界而非认证失败。随后使用内存生成的严格有效 512×512 RGB PNG、关闭适配器自动重试并只调用一次，真实合约成功：模型 `deepseek-v4-flash-vision-exp`、finish=`stop`、prompt/completion/total=`543/66/609`、耗时 `1140 ms`，供应商 request ID、usage 与结构化候选校验均存在/通过。
+- 真实合约成功证明生产 Key、网络、模型名、Base64 图片协议、JSON 输出和解析当前可用；它仍不证明餐食识别准确。下一证据必须来自产品所有者主动选择的非敏感真实餐食照片，并核对可见食物、份量、隐藏油脂不确定性、宏量值、人工修正及采用后原图删除。

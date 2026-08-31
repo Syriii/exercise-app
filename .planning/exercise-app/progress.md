@@ -1209,3 +1209,5 @@
 - 全仓类型复跑通过，图片适配器/服务定向测试继续为 14/14。线上只读审计与本机存在性检查均确认没有真实 DeepSeek Key；本批继续完成无需 Key 的代码与自动化门，真实供应商请求和生产 secret 配置不伪装为已完成。
 - Phase 6.5 无 Key 质量门已完成：全仓类型、27 个文件 114 项服务端测试、生产构建、API 合约、`git diff --check` 与完整桌面/手机 E2E 43/43 全部通过。识别成功/暂定计入/人工修正/采用/原图删除继续由 E2E 固定供应商覆盖；真实模型准确性和用量仍等待 Key。
 - 图片识别可靠性提交 `6de2116` 已推送并完成受限发布。公网独立确认 `index-WLQ7BW1b.js` 含目标版本、live/ready 200；远程收尾确认 API/Worker 正常、PostgreSQL/其他容器未变，同时 IMG 仍未配置。下一步不再增加外围功能，先等待安全提供 Key 与单独 secret 挂载授权后完成真实照片专项。
+- 产品所有者已安全填写 `deployment/secrets/deepseek_api_key` 并明确授权启用。元数据检查为非空普通文件、非符号链接、0600；内容未被读取或输出。API/Worker 已通过 DeepSeek Compose override 仅增加 secret mount 并重建，健康正常，PostgreSQL 与其他容器未变。
+- 首次 1×1 非敏感 PNG 合约因 `deepseek_invalid_request` 失败且无 request ID/usage；随后用内存生成的 512×512 RGB PNG、`retryLimit=0` 发起一次请求成功。模型 `deepseek-v4-flash-vision-exp`、finish `stop`、tokens 543/66/609、耗时 1140 ms，request ID、usage 和候选结构校验均正常。图片识别已在线启用，进入产品所有者真实餐食样本复核。
