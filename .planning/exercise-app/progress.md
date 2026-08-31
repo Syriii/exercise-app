@@ -1203,3 +1203,4 @@
 - 首次 `git add` 因沙箱禁止创建 `.git/index.lock` 在写入前退出；工作区文件和现有 Git 历史未改变。按项目持续发布授权，仅为本次已验收文件的 Git 索引与提交使用受控权限继续。
 - 首次远程发布指令把短提交 `96d195e` 手工补成了错误的完整 SHA；服务器在 `origin/main` 精确匹配门禁处安全停止，标题证据显示 API/Worker 正常、PostgreSQL/其他服务未变，未进入构建或切换。已用本地与 `origin/main` 的 `git rev-parse` 取得正确 SHA `96d195ee24b6a9d013201e313ceabcc0edd06f6d`，不再推测完整提交值。
 - 正确 SHA 的受限发布完成：远程脱敏结果为成功，API/Worker 正常，PostgreSQL 与其他服务未变。本机独立访问公网得到 `assets/index-C1yjsJWM.js`、`assets/index-CdA9zwH1.css` 均为 200，JS 含 `96d195e`，live/ready 均为 200。首次版本探测把 `curl` 直接接到会提前关闭的 `rg -q`，在已经命中时产生无害的 curl 23；改为完整缓冲同一 JS 后复核，版本明确存在。
+- 生产容器只读契约验收通过：`exercise-app-api-1` 使用镜像内同一 Node 网络栈访问 Open Food Facts 公开搜索端点，状态、hits 数组、条码/名称和至少一项每 100g 营养字段均正常；随后 API/Worker 与 live/ready 继续正常。未读取账号、数据库、secret、业务记录或媒体，也未产生服务器写入。
