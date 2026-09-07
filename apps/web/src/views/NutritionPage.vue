@@ -588,7 +588,7 @@ onBeforeUnmount(stopPolling);
 
 <template>
   <AppShell page-class="nutrition-page" rail-note="记录每一餐，随时看今天还可以吃多少。">
-        <header class="view-header"><div><p class="date-line">按天记录</p><h1>饮食</h1><p>记录每一餐，查看当天剩余。</p></div><nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作"><button class="action-button action-button--primary" type="button" @click="openMealComposer">快速记餐</button><label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || coverageSaving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label></nav></header>
+        <header class="view-header"><div><h1>饮食</h1><p>记录每一餐，查看当天剩余。</p></div><nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作"><button class="action-button action-button--primary" type="button" @click="openMealComposer">快速记餐</button><label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || coverageSaving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label></nav></header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p><p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
         <div v-else class="view-stack">

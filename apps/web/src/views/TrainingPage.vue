@@ -724,7 +724,6 @@ onActivated(() => void load());
   <AppShell page-class="training-page" rail-note="选方案，开始练，记下实际完成。" show-footer>
         <header class="view-header training-view-header">
           <div>
-            <p class="date-line">训练</p>
             <h1>{{ activeSession === null ? "训练" : "这次训练" }}</h1>
             <p v-if="activeSession === null">选一份方案，也可以直接开始。</p>
             <p v-else>{{ activeSessionLabel }} · {{ activeSession.localDate }}</p>

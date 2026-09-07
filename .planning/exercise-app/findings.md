@@ -1,5 +1,14 @@
 # 项目事实、假设与决策
 
+## 2026-09-07 手机层级与滚动修复 E
+
+<!-- Hallmark · scoped pre-emit critique: P4 H4 E4 S4 R4 V3. Existing design tokens preserved; this is not a whole-app visual certification. -->
+
+- scoped Hallmark复核：重复眉题与移动栏页面名已移除，页面h1保留；手机二级标题不再比主标题大，操作按钮/字体/底部导航在320/375/414/768/960/1440六宽度检查通过。414px真实截图已目视核对训练、饮食、账号、反馈；U04/U05的旧业务结构仍明确待改，不把样式缩减当业务改造完成。
+- 旧手机长页故障实测：pointerdown/up命中BUTTON后，mainScroll在合成click前从3204变3274，点击落到下方LABEL/SELECT，windowScroll=0且viewport.scale=1。改tap仍2/2失败；app-main禁用overflow-anchor后触控3/3、原鼠标3/3稳定通过，各次<1秒；固定构建全量49/49通过。事件诊断保留可选UX_SCROLL_DIAGNOSTIC与UX_POINTER_MOUSE，仅用于本地假数据E2E，不进入应用诊断或产品数据。
+- 证据目录：/tmp/exercise-ux-e-touch-check（失败事件/trace）、/tmp/exercise-ux-e-anchor-check（触控）、/tmp/exercise-ux-e-mouse-check（鼠标）、/tmp/exercise-ux-e-final（全量及414px截图）。
+- 回传阻塞：远程01a07aba-d61f-7d83-82f9-81b92307c46c已completed，但wait/read仍无内容；主任务fetch后origin/main仍e324fd5，约定的ux-a-postgres-verification-2026-09-07.md不存在。只能确认未收到本批真实PG证据，不能断言测试通过/失败、执行范围或发布完成。
+
 ## 2026-09-07 可用性修复 A 的实现边界
 
 - 训练完整保存复用现有 session/item/set/revision 表，在同一PG事务内验证 revision、写动作与额外动作、结束场次；响应丢失仅允许相同 revision+1、状态和规范化内容的重试确认。其他账号不能读取或完成该场次。

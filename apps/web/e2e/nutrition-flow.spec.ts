@@ -1,5 +1,28 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({page}) => {
+  if (process.env.UX_SCROLL_DIAGNOSTIC !== 'true') return;
+  await page.addInitScript(() => {
+    const events: unknown[] = [];
+    Object.assign(window, {uxScrollEvents:events});
+    for (const type of ['pointerdown','pointerup','click','focusin','scroll']) {
+      document.addEventListener(type, event => {
+        const element = event.target instanceof Element ? event.target : null;
+        const point = event instanceof MouseEvent ? {x:event.clientX,y:event.clientY} : null;
+        const hit = point ? document.elementFromPoint(point.x,point.y) : null;
+        events.push({type,t:performance.now(),tag:element?.tagName,classes:element?.className,point,hit:hit?.tagName,
+          mainScroll:document.querySelector('.app-main')?.scrollTop,windowScroll:window.scrollY,
+          viewport:window.visualViewport ? {top:window.visualViewport.offsetTop,height:window.visualViewport.height,scale:window.visualViewport.scale} : null});
+        if (events.length > 200) events.shift();
+      },true);
+    }
+  });
+});
+test.afterEach(async ({page},testInfo) => {
+  if (process.env.UX_SCROLL_DIAGNOSTIC !== 'true') return;
+  await testInfo.attach('scroll-events',{body:JSON.stringify(await page.evaluate(()=>Reflect.get(window,'uxScrollEvents'))),contentType:'application/json'});
+});
+
 test("an empty history page shows one useful state instead of an empty trend report", async ({ page }, testInfo) => {
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await page.goto("/register");
@@ -212,7 +235,14 @@ test("a person can record, correct, and review a meal without treating unknown n
 
   const foodSearch = meal.getByRole("region", { name: "搜索个人记录和公开包装食品" });
   await foodSearch.getByLabel("食物或菜名").fill("米饭");
-  await foodSearch.getByRole("button", { name: "搜索", exact: true }).click();
+  const searchButton = foodSearch.getByRole("button", { name: "搜索", exact: true });
+  await searchButton.scrollIntoViewIfNeeded();
+  await expect.poll(() => searchButton.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  })).toBe(true);
+  if (testInfo.project.name === "mobile-chromium" && process.env.UX_POINTER_MOUSE !== 'true') await searchButton.tap();
+  else await searchButton.click();
   const personalResult = foodSearch.getByRole("listitem").filter({ hasText: "我的常用" });
   const adjustButton = personalResult.getByRole("button", { name: "调整后加入" });
   await adjustButton.scrollIntoViewIfNeeded();
@@ -220,7 +250,7 @@ test("a person can record, correct, and review a meal without treating unknown n
     const rect = element.getBoundingClientRect();
     return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
   })).toBe(true);
-  if (testInfo.project.name === "mobile-chromium") await adjustButton.tap();
+  if (testInfo.project.name === "mobile-chromium" && process.env.UX_POINTER_MOUSE !== 'true') await adjustButton.tap();
   else await adjustButton.click();
   await expect(meal.getByLabel("能量 kcal")).toHaveValue("232");
   await expect(page.getByText("已记录 250 kcal")).toBeVisible();

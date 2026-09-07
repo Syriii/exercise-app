@@ -33,11 +33,11 @@ test("a person can manage independent reminders and download a private JSON expo
 
   await page.goto("/settings/data");
   const dataSection = page.getByRole("region", { name: "我的数据" });
-  await dataSection.getByRole("button", { name: "准备 JSON 导出" }).click();
+  await dataSection.getByRole("button", { name: "导出我的记录" }).click();
   await expect(dataSection.getByText("导出已完成")).toBeVisible({ timeout: 10_000 });
 
   const downloadPromise = page.waitForEvent("download");
-  await dataSection.getByRole("link", { name: "下载 JSON" }).click();
+  await dataSection.getByRole("link", { name: "下载记录文件" }).click();
   const download = await downloadPromise;
   const path = await download.path();
   expect(path).not.toBeNull();
@@ -78,7 +78,7 @@ test("a person can copy and download a privacy-limited problem report", async ({
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(reportText);
 
   const downloadPromise = page.waitForEvent("download");
-  await reportSection.getByRole("button", { name: "下载 .txt" }).click();
+  await reportSection.getByRole("button", { name: "下载报告" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^exercise-app-problem-report-.*\.txt$/);
   const path = await download.path();

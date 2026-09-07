@@ -3048,3 +3048,19 @@ ol {
     to { opacity: 1; }
   }
 }
+
+/* Compact app headers: the page h1 names the page; mobile chrome names the app. */
+@media (max-width: 59.999rem) {
+  .mobile-header { min-height: 3rem; }
+  .app-main { padding-top: var(--space-md); overflow-anchor: none; }
+  .view-header { gap: var(--space-sm); padding-block: var(--space-xs) var(--space-md); }
+  .view-header h1 { font-size: var(--text-xl); min-width: 0; overflow-wrap: anywhere; }
+  .view-header > div { gap: var(--space-2xs); }
+  .view-stack { gap: var(--space-lg); padding-block: var(--space-md); align-content: start; }
+  .training-page .app-main { gap: var(--space-md); align-content: start; }
+  .split-heading h2 { font-size: var(--text-lg); }
+}
+
+.feedback-privacy { margin-top: var(--space-md); }
+.feedback-privacy summary { cursor: pointer; min-height: 2.75rem; padding-block: var(--space-sm); }
+.feedback-privacy p { margin-block: var(--space-sm); color: var(--color-muted); }

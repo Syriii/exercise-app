@@ -34,9 +34,6 @@ const activeSection = computed<AppSection | null>(() => {
     : null;
 });
 
-const activeLabel = computed(
-  () => navigationItems.find((item) => item.id === activeSection.value)?.label ?? "应用",
-);
 const username = computed(() => sessionStore.account?.username ?? "");
 
 function openSection(section: AppSection) {
@@ -70,7 +67,7 @@ function openSection(section: AppSection) {
 
     <div class="app-column">
       <header class="mobile-header">
-        <strong class="mobile-brand">EA / {{ activeLabel }}</strong>
+        <strong class="mobile-brand" aria-label="Exercise App">EA</strong>
         <span
           class="mobile-account-name"
           :title="username"

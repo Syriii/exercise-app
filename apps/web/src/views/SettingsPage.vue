@@ -397,8 +397,8 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
   <AppShell page-class="settings-page" rail-note="资料、提醒和数据都在这里。">
         <header class="view-header settings-header">
           <div v-if="setupActive"><p class="date-line">首次设置 · {{ setupStep + 1 }}/{{ setupSteps.length }}</p><h1>{{ setupSteps[setupStep]!.label }}</h1><p>按顺序检查一遍，以后可以只改其中一项。</p></div>
-          <div v-else-if="selectedSection !== null"><p class="date-line">设置</p><h1>{{ sectionTitle }}</h1><p>只修改这部分，其他设置不会改变。</p></div>
-          <div v-else><p class="date-line">设置</p><h1>设置</h1><p>选择要修改的内容。</p></div>
+          <div v-else-if="selectedSection !== null"><h1>{{ sectionTitle }}</h1><p>只修改这部分，其他设置不会改变。</p></div>
+          <div v-else><h1>设置</h1><p>选择要修改的内容。</p></div>
           <button v-if="!setupActive && selectedSection !== null" class="action-button" type="button" @click="returnToSettings">返回设置</button>
           <button v-else-if="!setupActive" class="action-button" type="button" @click="openSettingsSection('setup')">按步骤检查</button>
           <button v-else class="text-action" type="button" @click="skipSetup">以后再设置</button>
@@ -417,7 +417,7 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
             <button type="button" @click="openSettingsSection('strategy')"><span><strong>目标与营养</strong><small>{{ weightStrategyLabel }} · 系统据此计算每日参考</small></span><b aria-hidden="true">›</b></button>
             <button type="button" @click="openSettingsSection('reminders')"><span><strong>提醒</strong><small>已开启 {{ enabledReminderCount }} 项</small></span><b aria-hidden="true">›</b></button>
             <button type="button" @click="openSettingsSection('data')"><span><strong>数据与账号</strong><small>导出记录或管理账号</small></span><b aria-hidden="true">›</b></button>
-            <button type="button" @click="router.push({ name: 'feedback' })"><span><strong>Bug 反馈</strong><small>生成可以复制或下载的问题报告</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="router.push({ name: 'feedback' })"><span><strong>帮助与反馈</strong><small>生成问题报告，检查后分享给应用维护者</small></span><b aria-hidden="true">›</b></button>
             <button v-if="adminVisible" type="button" @click="router.push({ name: 'admin' })"><span><strong>系统管理</strong><small>查看账号和运行状态</small></span><b aria-hidden="true">›</b></button>
           </section>
 
@@ -513,9 +513,9 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
               <button class="action-button" type="button" @click="router.push({ name: 'change-password' })">修改密码</button>
               <button class="action-button" type="button" :disabled="logoutSaving" @click="logout">{{ logoutSaving ? '正在退出…' : '退出登录' }}</button>
             </div>
-            <div class="panel-heading"><div><h2 id="data-control-title">我的数据</h2><p>导出只包含结构化记录和照片生命周期，不包含密码、会话令牌或原图。</p></div><button class="action-button" type="button" :disabled="exportSaving || !portabilityAvailable" @click="requestExport">{{ exportSaving ? '正在提交…' : '准备 JSON 导出' }}</button></div>
+            <div class="panel-heading"><div><h2 id="data-control-title">我的数据</h2><p>下载一份训练、饮食和身体记录，不包含密码或照片原图。文件使用 JSON 格式，可用于留存和数据处理，不是图片或表格。</p></div><button class="action-button" type="button" :disabled="exportSaving || !portabilityAvailable" @click="requestExport">{{ exportSaving ? '正在提交…' : '导出我的记录' }}</button></div>
             <ul v-if="portabilityTasks.filter((task) => task.type === 'data_export').length" class="measurement-list export-task-list">
-              <li v-for="task in portabilityTasks.filter((value) => value.type === 'data_export')" :key="task.id"><div><strong>{{ task.status === 'succeeded' ? (task.downloadAvailable ? '导出已完成' : '导出已过期') : task.status === 'failed' ? '导出失败' : task.status === 'running' ? '正在生成导出' : '等待后台处理' }}</strong><span>{{ new Date(task.createdAt).toLocaleString('zh-CN') }}<template v-if="task.expiresAt"> · 保留至 {{ new Date(task.expiresAt).toLocaleString('zh-CN') }}</template></span><small v-if="task.lastErrorCode">错误：{{ task.lastErrorCode }}</small></div><a v-if="task.downloadAvailable" class="text-action" :href="portabilityApi.downloadUrl(task.id)" download>下载 JSON</a></li>
+              <li v-for="task in portabilityTasks.filter((value) => value.type === 'data_export')" :key="task.id"><div><strong>{{ task.status === 'succeeded' ? (task.downloadAvailable ? '导出已完成' : '导出已过期') : task.status === 'failed' ? '导出失败' : task.status === 'running' ? '正在生成导出' : '等待后台处理' }}</strong><span>{{ new Date(task.createdAt).toLocaleString('zh-CN') }}<template v-if="task.expiresAt"> · 保留至 {{ new Date(task.expiresAt).toLocaleString('zh-CN') }}</template></span><small v-if="task.lastErrorCode">暂时生成不了，请稍后重新导出。</small></div><a v-if="task.downloadAvailable" class="text-action" :href="portabilityApi.downloadUrl(task.id)" download>下载记录文件</a></li>
             </ul>
             <p v-else class="data-note">还没有导出记录。导出在后台生成，完成后保留有限时间。</p>
             <form v-if="!adminVisible" class="account-deletion-form" @submit.prevent="requestAccountDeletion">

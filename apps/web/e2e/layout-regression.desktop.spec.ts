@@ -64,7 +64,7 @@ async function expectStableLayout(page: Page, route: string, width: number) {
   expect(result.undersizedText, `${route} @ ${width}px has text below 14px`).toEqual([]);
 }
 
-test("main pages stay readable and non-overlapping across supported widths", async ({ page }) => {
+test("main pages stay readable and non-overlapping across supported widths", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -92,6 +92,9 @@ test("main pages stay readable and non-overlapping across supported widths", asy
       await expect(page.locator("h1").first()).toBeVisible();
       await page.waitForLoadState("networkidle");
       await expectStableLayout(page, route, width);
+      if (width === 414 && ["/today", "/training", "/nutrition", "/settings/data", "/feedback"].includes(route)) {
+        await page.screenshot({path:testInfo.outputPath(`${route.replaceAll('/', '-')}-414.png`)});
+      }
     }
   }
 

@@ -83,3 +83,23 @@ test('food draft survives tab navigation; account actions are discoverable and l
   await expect(page.getByLabel('餐次名称（可选）')).toHaveCount(0);
   await expect(page.getByText('待保存早餐',{exact:true})).toHaveCount(0);
 });
+
+test('mobile headers leave the first feedback field visible and sharing remains explicit', async ({ page }, testInfo) => {
+  await page.goto('/feedback');
+  await expect(page.getByRole('heading',{name:'帮助与反馈',exact:true})).toBeVisible();
+  await expect(page.getByText('本页不会自动提交反馈。复制或下载后，请通过你与应用维护者已有的联系方式发送。')).toBeVisible();
+  await expect(page.getByRole('button',{name:'清除本机错误记录'})).toBeHidden();
+  if (testInfo.project.name === 'mobile-chromium') {
+    const field = await page.getByLabel('问题描述（可选）').boundingBox();
+    expect(field).not.toBeNull();
+    expect(field!.y+field!.height).toBeLessThan(page.viewportSize()!.height-80);
+    await expect(page.locator('.mobile-brand')).toHaveText('EA');
+  }
+  await page.getByLabel('问题描述（可选）').fill('保存后没有看到记录');
+  await page.getByRole('button',{name:'生成问题报告'}).click();
+  await expect(page.getByLabel('报告预览')).toHaveValue(/保存后没有看到记录/);
+  await page.getByText('报告包含什么',{exact:true}).click();
+  await page.getByRole('button',{name:'清除本机错误记录'}).click();
+  await expect(page.getByRole('status')).toContainText('训练、饮食和身体记录没有改变');
+  await expect(page.getByLabel('问题描述（可选）')).toHaveValue('保存后没有看到记录');
+});
