@@ -116,6 +116,22 @@ export class PostgresNutritionRepository implements NutritionRepository {
     const saved = await this.getMeal(userId, mealId); if (saved === null) throw new Error("saved meal not found"); return saved;
   }
 
+  public async addInitialModelContributions(userId: string, mealId: string, expectedMealRevision: number, inputs: readonly ContributionInput[]): Promise<Meal | "not_found" | "revision_conflict"> {
+    const result = await this.database.transaction(async (tx) => {
+      const [meal] = await tx.select().from(meals).where(and(eq(meals.id, mealId), eq(meals.userId, userId), isNull(meals.deletedAt))).for("update").limit(1);
+      if (meal === undefined) return "not_found" as const;
+      if (meal.revision !== expectedMealRevision) return "revision_conflict" as const;
+      const prior = await tx.select({ id: mealContributions.id }).from(mealContributions).where(eq(mealContributions.mealId, mealId)).limit(1);
+      if (prior.length === 0 && inputs.length > 0) {
+        await tx.insert(mealContributions).values(inputs.map((input, sourceItemIndex) => ({ mealId, ...numericValues(input), sourceItemIndex })));
+        await tx.update(meals).set({ revision: sql`${meals.revision} + 1`, updatedAt: new Date() }).where(eq(meals.id, mealId));
+      }
+      return "saved" as const;
+    });
+    if (result !== "saved") return result;
+    return (await this.getMeal(userId, mealId)) ?? "not_found";
+  }
+
   public async updateContribution(userId: string, mealId: string, contributionId: string, expectedMealRevision: number, expectedContributionRevision: number, input: ContributionInput, replaceExisting: boolean): Promise<Meal | "not_found" | "contribution_not_found" | "revision_conflict" | "replacement_required"> {
     const result = await this.database.transaction(async (transaction) => {
       const [meal] = await transaction.select().from(meals).where(and(eq(meals.id, mealId), eq(meals.userId, userId), isNull(meals.deletedAt))).for("update").limit(1);

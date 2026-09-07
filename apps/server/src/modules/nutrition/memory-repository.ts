@@ -63,6 +63,20 @@ export class MemoryNutritionRepository implements NutritionRepository {
     return clone(saved);
   }
 
+  public async addInitialModelContributions(userId: string, mealId: string, expectedMealRevision: number, inputs: readonly ContributionInput[]): Promise<Meal | "not_found" | "revision_conflict"> {
+    const pair = this.findMeal(userId, mealId);
+    if (pair === null) return "not_found";
+    if (pair.meal.revision !== expectedMealRevision) return "revision_conflict";
+    // Deleted or replaced input is still a user decision: late analysis must not restore it.
+    if (pair.meal.contributions.length > 0 || [...this.#contributionMeals.values()].includes(mealId) || inputs.length === 0) return clone(pair.meal);
+    const now = new Date();
+    const contributions = inputs.map((input): MealContribution => ({ ...input, id: randomUUID(), mealId, revision: 1, createdAt: now, updatedAt: now }));
+    contributions.forEach((value) => this.#contributionMeals.set(value.id, mealId));
+    const saved = { ...pair.meal, contributions, revision: expectedMealRevision + 1, updatedAt: now };
+    pair.values[pair.index] = saved;
+    return clone(saved);
+  }
+
   public async deleteMeal(userId: string, mealId: string, expectedRevision: number): Promise<"deleted" | "not_found" | "revision_conflict"> {
     const pair = this.findMeal(userId, mealId);
     if (pair === null) return "not_found";

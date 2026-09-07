@@ -50,5 +50,16 @@ describe("nutrition routes", () => {
     const otherPlans = await app.inject({ method: "GET", url: "/api/v1/nutrition/diet-plans?from=2026-08-26&to=2026-08-26", headers: { cookie: otherCookie } });
     expect(otherPlans.statusCode, otherPlans.body).toBe(200);
     expect(otherPlans.json()).toEqual([]);
+    const savedMeal = contribution.json<{ revision: number; contributions: Array<{ id: string; revision: number }> }>();
+    const item = savedMeal.contributions[0]!;
+    const portionUrl = `/api/v1/nutrition/meals/${meal.id}/contributions/${item.id}/portion`;
+    const portionPayload = { mealRevision: savedMeal.revision, contributionRevision: item.revision, portionAmount: 100 };
+    expect((await app.inject({ method: "PATCH", url: portionUrl, payload: portionPayload })).statusCode).toBe(401);
+    expect((await app.inject({ method: "PATCH", url: portionUrl, headers: { cookie: otherCookie }, payload: portionPayload })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url: portionUrl, headers: { cookie }, payload: { ...portionPayload, portionAmount: -1 } })).statusCode).toBe(400);
+    const changed = await app.inject({ method: "PATCH", url: portionUrl, headers: { cookie }, payload: portionPayload });
+    expect(changed.statusCode, changed.body).toBe(200);
+    expect(changed.json()).toMatchObject({ contributions: [{ energyKcal: 116, proteinGrams: 2.6, fatGrams: null }] });
+    expect((await app.inject({ method: "PATCH", url: portionUrl, headers: { cookie }, payload: portionPayload })).statusCode).toBe(409);
   });
 });

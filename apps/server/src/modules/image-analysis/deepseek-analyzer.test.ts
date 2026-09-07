@@ -5,6 +5,28 @@ import { DeepSeekImageAnalyzer, DeepSeekImageAnalyzerError } from "./deepseek-an
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DeepSeekImageAnalyzer", () => {
+  it("derives totals only from non-overlapping food items and preserves unknowns", async () => {
+    const foods = [
+      { label: "鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 },
+      { label: "混合菜", portionAmount: 1, portionUnit: "碗", note: null, energyKcal: 200, proteinGrams: null, carbohydrateGrams: 15, fatGrams: 8 },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ title: "早餐", foods, energyKcal: 9999, proteinGrams: 999, confidence: "low", assumptions: [], uncertaintyNote: "" }) } }] }), { status: 200 })));
+    const analyzer = new DeepSeekImageAnalyzer({ apiKey: "test-only", baseUrl: "https://api.deepseek.com", model: "test-model", timeoutMs: 1000 });
+    const result = await analyzer.analyze("image/png", Buffer.from("test"));
+    expect(result.candidate).toMatchObject({ foods, energyKcal: 340, proteinGrams: null, carbohydrateGrams: 17, fatGrams: 18 });
+  });
+
+  it.each([
+    [],
+    [{ label: "鸡蛋", portionAmount: 2, portionUnit: null, note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 }],
+    [{ label: "鸡蛋", portionAmount: 0, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 }],
+  ])("rejects invalid per-food structure %#", async (...entries) => {
+    const foods = entries;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ title: "早餐", foods, confidence: "low", assumptions: [], uncertaintyNote: "" }) } }] }), { status: 200 })));
+    const analyzer = new DeepSeekImageAnalyzer({ apiKey: "test-only", baseUrl: "https://api.deepseek.com", model: "test-model", timeoutMs: 1000, retryDelayMs: 0 });
+    await expect(analyzer.analyze("image/png", Buffer.from("test"))).rejects.toThrow("deepseek_invalid_candidate");
+  });
+
   it("uses the documented image_url content block and validates JSON output", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -13,7 +35,7 @@ describe("DeepSeekImageAnalyzer", () => {
         stream: false,
         thinking: { type: "disabled" },
         temperature: 0.2,
-        max_tokens: 1_200,
+        max_tokens: 6_000,
         response_format: { type: "json_object" },
       });
       const messages = body.messages as Array<{ content: Array<Record<string, unknown>> }>;
@@ -36,6 +58,7 @@ describe("DeepSeekImageAnalyzer", () => {
               message: {
                 content: JSON.stringify({
                   title: "测试餐食",
+                  foods: [{ label: "米饭", portionAmount: 200, portionUnit: "g", note: null, energyKcal: 300, proteinGrams: null, carbohydrateGrams: 60, fatGrams: null }],
                   observedFoods: [
                     { label: "米饭", estimatedPortion: null, note: null },
                   ],
@@ -89,6 +112,7 @@ describe("DeepSeekImageAnalyzer", () => {
                 message: {
                   content: JSON.stringify({
                     title: "错误结果",
+                    foods: [{ label: "米饭", portionAmount: 200, portionUnit: "g", note: null, energyKcal: -1, proteinGrams: null, carbohydrateGrams: null, fatGrams: null }],
                     observedFoods: [],
                     energyKcal: -1,
                     proteinGrams: null,
@@ -127,6 +151,7 @@ describe("DeepSeekImageAnalyzer", () => {
           finish_reason: "stop",
           message: { content: JSON.stringify({
             title: "重试成功",
+            foods: [{ label: "未识别食物", portionAmount: null, portionUnit: null, note: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null }],
             observedFoods: [],
             energyKcal: null,
             proteinGrams: null,

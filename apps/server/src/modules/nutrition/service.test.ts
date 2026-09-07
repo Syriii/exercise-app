@@ -8,6 +8,30 @@ const mealInput = { occurredAt: "2026-08-26T04:00:00.000Z", localDate: "2026-08-
 const rice = { mode: "item" as const, label: "米饭", portionAmount: 200, portionUnit: "g", basisDescription: "食堂一碗", energyKcal: 232, proteinGrams: 5.2, carbohydrateGrams: 51.8, fatGrams: null };
 
 describe("NutritionService", () => {
+  it("scales amount-only edits, preserves unknown nutrients and restores a zero portion", async () => {
+    const service = new NutritionService(new MemoryNutritionRepository());
+    let meal = await service.createMeal("user-a", mealInput);
+    meal = await service.addContribution("user-a", meal.id, meal.revision, rice, false);
+    const original = meal.contributions[0]!;
+    meal = await service.updateContribution("user-a", meal.id, original.id, meal.revision, original.revision, { ...rice, portionAmount: 100 }, false);
+    expect(meal.contributions[0]).toMatchObject({ portionAmount: 100, energyKcal: 116, proteinGrams: 2.6, carbohydrateGrams: 25.9, fatGrams: null });
+    await expect(service.changePortion("user-a", meal.id, original.id, 1, original.revision, 50)).rejects.toMatchObject({ code: "nutrition_revision_conflict" });
+    await expect(service.changePortion("user-b", meal.id, original.id, meal.revision, 2, 50)).rejects.toMatchObject({ code: "meal_not_found" });
+    meal = await service.changePortion("user-a", meal.id, original.id, meal.revision, meal.contributions[0]!.revision, 0);
+    expect(meal.contributions[0]).toMatchObject({ energyKcal: 0, fatGrams: null });
+    meal = await service.changePortion("user-a", meal.id, original.id, meal.revision, meal.contributions[0]!.revision, 100);
+    expect(meal.contributions[0]).toMatchObject({ energyKcal: 116, fatGrams: null });
+    expect(await service.listContributionRevisions("user-a", meal.id)).toEqual(expect.arrayContaining([expect.objectContaining({ energyKcal: 232 })]));
+  });
+
+  it("allows a named unknown food but refuses quantity scaling without a basis", async () => {
+    const service = new NutritionService(new MemoryNutritionRepository());
+    let meal = await service.createMeal("user-a", mealInput);
+    meal = await service.addContribution("user-a", meal.id, meal.revision, { ...rice, portionAmount: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null }, false);
+    const item = meal.contributions[0]!;
+    await expect(service.changePortion("user-a", meal.id, item.id, meal.revision, item.revision, 100)).rejects.toMatchObject({ code: "portion_basis_required" });
+  });
+
   it("uses the full daily target as remaining before any meal is recorded", async () => {
     const service = new NutritionService(new MemoryNutritionRepository());
     const summary = await service.getDaySummary("user-a", "2026-08-26", {

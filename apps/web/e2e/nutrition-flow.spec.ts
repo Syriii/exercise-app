@@ -16,6 +16,16 @@ test("an empty history page shows one useful state instead of an empty trend rep
 });
 
 test("today opens nutrition with the quick meal form ready", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (options) {
+      if (this.classList.contains("quick-meal-panel")) {
+        document.documentElement.dataset.composerScroll = typeof options === "object" ? options.behavior : "default";
+      }
+      return original.call(this, options);
+    };
+  });
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await page.goto("/register");
   await page.getByLabel("用户名").fill(`quick_meal_${projectKey}_${Date.now()}`);
@@ -27,6 +37,7 @@ test("today opens nutrition with the quick meal form ready", async ({ page }, te
   await expect(page).toHaveURL(/\/nutrition/);
   await expect(page.getByRole("region", { name: "快速记餐" })).toBeVisible();
   await expect(page.getByLabel("餐次名称（可选）")).toBeFocused();
+  await expect(page.locator("html")).toHaveAttribute("data-composer-scroll", "instant");
 });
 
 test("a body measurement is a first-class history record", async ({ page }, testInfo) => {
@@ -99,6 +110,7 @@ test("a person can reuse matching foods, search public products, and manage comm
 
   const publicFoodSearch = todayMeal.getByRole("region", { name: "搜索个人记录和公开包装食品" });
   await publicFoodSearch.getByLabel("食物或菜名").fill("豆奶");
+  await publicFoodSearch.getByRole("button", { name: "搜索", exact: true }).scrollIntoViewIfNeeded();
   await publicFoodSearch.getByRole("button", { name: "搜索", exact: true }).click();
   const publicResults = publicFoodSearch.getByRole("region", { name: "公开包装食品结果" });
   await expect(publicResults.getByText("原浆豆奶", { exact: true })).toBeVisible();
@@ -142,6 +154,7 @@ test("a person can reuse matching foods, search public products, and manage comm
 });
 
 test("a person can record, correct, and review a meal without treating unknown nutrients as zero", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await page.goto("/register");
   await page.getByLabel("用户名").fill(`nutrition_${projectKey}_${Date.now()}`);
@@ -201,7 +214,14 @@ test("a person can record, correct, and review a meal without treating unknown n
   await foodSearch.getByLabel("食物或菜名").fill("米饭");
   await foodSearch.getByRole("button", { name: "搜索", exact: true }).click();
   const personalResult = foodSearch.getByRole("listitem").filter({ hasText: "我的常用" });
-  await personalResult.getByRole("button", { name: "调整后加入" }).click();
+  const adjustButton = personalResult.getByRole("button", { name: "调整后加入" });
+  await adjustButton.scrollIntoViewIfNeeded();
+  await expect.poll(() => adjustButton.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  })).toBe(true);
+  if (testInfo.project.name === "mobile-chromium") await adjustButton.tap();
+  else await adjustButton.click();
   await expect(meal.getByLabel("能量 kcal")).toHaveValue("232");
   await expect(page.getByText("已记录 250 kcal")).toBeVisible();
 

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-test("a person can turn a meal photo candidate into a corrected nutrition record", async ({ page }, testInfo) => {
+test("photo foods count automatically and can be scaled and reused independently", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
   await page.goto("/register");
   await page.getByLabel("用户名").fill(`image_${projectKey}_${Date.now()}`);
@@ -34,23 +35,53 @@ test("a person can turn a meal photo candidate into a corrected nutrition record
   await expect(page.getByText(/保持原图/)).toBeVisible();
   await page.getByRole("button", { name: "建立餐次并上传" }).click();
   const meal = page.locator("article.meal-card").filter({ hasText: "食堂午饭" });
-  await expect(page.getByText("照片已上传；没有现有营养值时，分析完成后会先按暂定值计入，之后仍可核对或修正")).toBeVisible();
+  await expect(page.getByText("照片已上传；识别完成后会按食物计入，你可以直接修改份量。已有记录不会被覆盖")).toBeVisible();
 
   const analysis = meal.locator("article.image-analysis-card").filter({ hasText: "食堂鸡腿套餐" });
-  await expect(analysis.getByText("暂定计入", { exact: true }).last()).toBeVisible({ timeout: 8_000 });
-  await expect(analysis.getByText("照片无法确认烹调油和实际剩余量，请在采用前修正。")).toBeVisible();
-  await expect(analysis.getByText("米饭")).toBeVisible();
-  await expect(meal.getByText("照片估算，待确认")).toBeVisible();
+  await expect(analysis.getByText("照片估算", { exact: true }).last()).toBeVisible({ timeout: 8_000 });
+  await expect(analysis.getByRole("button", { name: "确认这些数值" })).toHaveCount(0);
+  const items = meal.locator(".meal-items > li");
+  await expect(items).toHaveCount(2);
+  const rice = items.filter({ hasText: "米饭" });
+  const chicken = items.filter({ hasText: "鸡腿" });
   await expect(page.getByText("已记录 620 kcal")).toBeVisible();
-  await analysis.getByLabel("能量 kcal").fill("590");
-  await analysis.getByLabel("脂肪 g").fill("18");
-  await analysis.getByRole("button", { name: "确认这些数值" }).click();
-
-  await expect(page.getByText("这份照片估算已确认；修正前的暂定值仍可追溯")).toBeVisible();
-  await expect(analysis.getByText("已确认", { exact: true }).last()).toBeVisible();
-  await expect(page.getByText("已记录 590 kcal")).toBeVisible();
-  await expect(meal.getByText("590 kcal")).toBeVisible();
-  await expect(analysis.getByText("这份结果已按你确认的数值计入。原始估算仍保留用于追溯。")).toBeVisible();
+  await rice.getByRole("button", { name: "改份量" }).click();
+  await rice.getByLabel("米饭份量（g）").fill("100");
+  let failOnce = true;
+  await page.route("**/contributions/*/portion", async (route) => {
+    if (failOnce) {
+      failOnce = false;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "test_failure", message: "测试保存失败" }) });
+    } else await route.continue();
+  });
+  await rice.getByRole("button", { name: "保存份量" }).click();
+  await expect(rice.getByRole("alert")).toBeVisible();
+  await expect(rice.getByLabel("米饭份量（g）")).toHaveValue("100");
+  await rice.getByRole("button", { name: "保存份量" }).click();
+  await expect(page.getByText("已记录 500 kcal")).toBeVisible();
+  await expect(rice.getByText(/120 kcal/)).toBeVisible();
+  await expect(chicken.getByText(/380 kcal/)).toBeVisible();
+  await rice.getByRole("button", { name: "设为常用" }).click();
+  await expect(page.getByText("已设为常用，下次可以单独添加这项食物")).toBeVisible();
+  await page.getByRole("button", { name: "快速记餐" }).click();
+  await page.getByLabel("餐次名称（可选）").fill("复用晚饭");
+  await page.getByRole("button", { name: "建立餐次", exact: true }).click();
+  const dinner = page.locator("article.meal-card").filter({ hasText: "复用晚饭" });
+  await dinner.getByRole("combobox", { name: "我的常用项", exact: true }).selectOption({ label: "米饭" });
+  const form = dinner.locator(".contribution-form");
+  await form.getByLabel("份量", { exact: true }).fill("50");
+  await form.getByRole("button", { name: "计入这顿饭" }).click();
+  await expect(dinner.locator(".meal-items > li")).toHaveCount(1);
+  await expect(dinner.locator(".meal-items").getByText(/60 kcal/)).toBeVisible();
+  await expect(rice.getByText(/120 kcal/)).toBeVisible();
+  await expect(page.getByText("已记录 560 kcal")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await chicken.getByRole("button", { name: "移除" }).click();
+  await expect(items).toHaveCount(1);
+  await expect(page.getByText("已记录 180 kcal")).toBeVisible();
+  await rice.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("photo-food-items.png") });
 });
 
 test("a failed quick photo upload keeps one meal and can retry without duplication", async ({ page }, testInfo) => {
@@ -90,6 +121,6 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
   await expect(page.locator("article.meal-card")).toHaveCount(1);
   await expect(meal.getByText("retry.png")).toBeVisible();
   await meal.getByRole("button", { name: "上传并分析" }).click();
-  await expect(page.getByText("照片已上传；没有现有营养值时，分析完成后会先按暂定值计入，之后仍可核对或修正")).toBeVisible();
+  await expect(page.getByText("照片已上传；识别完成后会按食物计入，你可以直接修改份量。已有记录不会被覆盖")).toBeVisible();
   await expect(page.locator("article.meal-card")).toHaveCount(1);
 });

@@ -76,6 +76,7 @@ export class ImageAnalysisService {
     const analysis = await this.options.repository.get(userId, analysisId);
     if (analysis === null) throw new ImageAnalysisError("analysis_not_found", "找不到这次图片分析", 404);
     if (analysis.status !== "succeeded" || analysis.candidate === null || analysis.adoptedAt !== null) throw new ImageAnalysisError("analysis_not_ready", "分析尚未成功，或结果已经采用", 409);
+    if (analysis.candidate.foods !== undefined) throw new ImageAnalysisError("analysis_item_edit_required", "请直接修改这一餐中的食物，不要用整餐总量覆盖单项", 409);
     const meal = await this.options.nutritionService.adoptModelContribution(userId, analysis.mealId, mealRevision, analysisId, input, input.replaceExisting);
     const adopted = await this.options.repository.markAdopted(userId, analysisId, analysisRevision);
     if (typeof adopted === "string") throw new ImageAnalysisError("analysis_revision_conflict", "分析状态已经变化，请刷新后重试", 409);

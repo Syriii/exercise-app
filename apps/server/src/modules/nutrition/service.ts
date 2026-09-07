@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { ImageNutritionCandidate } from "../image-analysis/types.js";
+import { imageFoodContributions } from "./image-foods.js";
 import { NutritionError } from "./errors.js";
 import { PublicFoodProviderError, type PublicFoodProvider } from "./public-food-provider.js";
 import type { ContributionInput, FoodTemplateInput, MealMetadataInput, NutritionRepository } from "./repository.js";
@@ -109,40 +111,51 @@ export class NutritionService {
     return this.unwrapMeal(await this.repository.addContribution(userId, mealId, mealRevision, confirmed, replaceExisting));
   }
 
-  public async ensureTentativeModelContribution(userId: string, mealId: string, analysisId: string, candidate: {
-    readonly title: string;
-    readonly energyKcal: number | null;
-    readonly proteinGrams: number | null;
-    readonly carbohydrateGrams: number | null;
-    readonly fatGrams: number | null;
-    readonly uncertaintyNote: string;
-  }): Promise<Meal> {
-    let meal = await this.getMeal(userId, mealId);
-    if (meal.contributions.length > 0 || [candidate.energyKcal, candidate.proteinGrams, candidate.carbohydrateGrams, candidate.fatGrams].every((value) => value === null)) return meal;
-    const result = await this.repository.addContribution(userId, mealId, meal.revision, {
-      mode: "whole_meal",
-      source: "model_adopted",
-      reviewStatus: "tentative",
-      sourceAnalysisId: analysisId,
-      label: candidate.title.trim() || "照片营养估算",
-      portionAmount: null,
-      portionUnit: null,
-      basisDescription: candidate.uncertaintyNote.trim() || "按照片中可见盛取量估算",
-      energyKcal: candidate.energyKcal,
-      proteinGrams: candidate.proteinGrams,
-      carbohydrateGrams: candidate.carbohydrateGrams,
-      fatGrams: candidate.fatGrams,
-    }, false);
-    if (result === "revision_conflict" || result === "replacement_required") {
-      meal = await this.getMeal(userId, mealId);
-      return meal;
-    }
+  public async ensureTentativeModelContribution(userId: string, mealId: string, analysisId: string, candidate: ImageNutritionCandidate): Promise<Meal> {
+    const meal = await this.getMeal(userId, mealId);
+    const result = await this.repository.addInitialModelContributions(userId, mealId, meal.revision, imageFoodContributions(analysisId, candidate));
+    if (result === "revision_conflict") return this.getMeal(userId, mealId);
     return this.unwrapMeal(result);
+  }
+
+  public async changePortion(userId: string, mealId: string, contributionId: string, mealRevision: number, contributionRevision: number, amount: number): Promise<Meal> {
+    nonnegative(amount, "份量", 100000);
+    const meal = await this.getMeal(userId, mealId);
+    const existing = meal.contributions.find((value) => value.id === contributionId);
+    if (existing === undefined) throw new NutritionError("contribution_not_found", "找不到这项食物", 404);
+    if (meal.revision !== mealRevision || existing.revision !== contributionRevision) this.revisionConflict();
+    let basis: Pick<ContributionInput, "portionAmount" | "portionUnit" | keyof NutrientValues> = existing;
+    if (basis.portionAmount === null || basis.portionAmount <= 0) {
+      const history = await this.listContributionRevisions(userId, mealId);
+      const prior = history.filter((value) => value.contributionId === existing.id
+        && value.label === existing.label && value.portionUnit === existing.portionUnit
+        && value.portionAmount !== null && value.portionAmount > 0)
+        .sort((left, right) => right.contributionRevision - left.contributionRevision)[0];
+      if (prior !== undefined) basis = prior;
+    }
+    if (basis.portionAmount === null || basis.portionAmount <= 0 || basis.portionUnit === null) {
+      throw new NutritionError("portion_basis_required", "这项食物缺少可换算的份量基准，请先补充份量和单位", 409);
+    }
+    const scale = (value: number | null) => value === null ? null : Math.round(value * amount / basis.portionAmount! * 1000) / 1000;
+    const nutrients = this.nutrients({ energyKcal: scale(basis.energyKcal), proteinGrams: scale(basis.proteinGrams), carbohydrateGrams: scale(basis.carbohydrateGrams), fatGrams: scale(basis.fatGrams) });
+    const input: ContributionInput = { mode: existing.mode, label: existing.label, source: existing.source,
+      sourceAnalysisId: existing.sourceAnalysisId, reviewStatus: "confirmed",
+      portionAmount: amount, portionUnit: existing.portionUnit, basisDescription: existing.basisDescription, ...nutrients };
+    return this.unwrapMeal(await this.repository.updateContribution(userId, mealId, contributionId, mealRevision, contributionRevision, input, false));
   }
 
   public async updateContribution(userId: string, mealId: string, contributionId: string, mealRevision: number, contributionRevision: number, input: ContributionRequest, replaceExisting: boolean): Promise<Meal> {
     const meal = await this.getMeal(userId, mealId);
     const existing = meal.contributions.find((value) => value.id === contributionId);
+    // Preserve old clients' amount-only edits as well as the dedicated portion endpoint.
+    if (existing !== undefined && !replaceExisting && input.portionAmount !== null
+      && input.portionAmount !== existing.portionAmount && input.label === existing.label
+      && input.portionUnit === existing.portionUnit && input.mode === existing.mode
+      && input.energyKcal === existing.energyKcal && input.proteinGrams === existing.proteinGrams
+      && input.carbohydrateGrams === existing.carbohydrateGrams && input.fatGrams === existing.fatGrams
+      && input.basisDescription === existing.basisDescription) {
+      return this.changePortion(userId, mealId, contributionId, mealRevision, contributionRevision, input.portionAmount);
+    }
     const normalized = this.contributionInput(input);
     const savedInput = existing?.source === "model_adopted"
       ? { ...normalized, source: existing.source, sourceAnalysisId: existing.sourceAnalysisId, reviewStatus: "confirmed" as const }
@@ -302,7 +315,7 @@ export class NutritionService {
 
   private contributionInput(input: ContributionRequest): ContributionInput {
     const nutrients = this.nutrients(input);
-    if (Object.values(nutrients).every((value) => value === null)) throw new NutritionError("invalid_nutrition_input", "至少填写一项营养值；未知项可以留空", 400);
+    if (input.mode !== "item" && Object.values(nutrients).every((value) => value === null)) throw new NutritionError("invalid_nutrition_input", "至少填写一项营养值；未知项可以留空", 400);
     return { mode: input.mode, source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null, label: cleanText(input.label, 100) ?? "", portionAmount: nonnegative(input.portionAmount, "份量", 100000), portionUnit: cleanText(input.portionUnit, 30), basisDescription: cleanText(input.basisDescription, 200), ...nutrients };
   }
 

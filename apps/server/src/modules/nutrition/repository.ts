@@ -20,6 +20,7 @@ export interface NutritionRepository {
   listMeals(userId: string, localDateFrom: string, localDateTo: string): Promise<readonly Meal[]>;
   getMeal(userId: string, mealId: string): Promise<Meal | null>;
   createMeal(userId: string, input: MealMetadataInput): Promise<Meal>;
+  addInitialModelContributions(userId: string, mealId: string, expectedMealRevision: number, inputs: readonly ContributionInput[]): Promise<Meal | "not_found" | "revision_conflict">;
   updateMeal(userId: string, mealId: string, expectedRevision: number, input: MealMetadataInput): Promise<Meal | "not_found" | "revision_conflict">;
   deleteMeal(userId: string, mealId: string, expectedRevision: number): Promise<"deleted" | "not_found" | "revision_conflict">;
   listMealRevisions(userId: string, mealId: string): Promise<readonly MealRevision[] | "not_found">;

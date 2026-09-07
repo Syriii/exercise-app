@@ -1,0 +1,6 @@
+ALTER TABLE "meal_contributions" DROP CONSTRAINT "meal_contributions_any_nutrient_ck";--> statement-breakpoint
+DROP INDEX "meal_contributions_source_analysis_uq";--> statement-breakpoint
+ALTER TABLE "meal_contributions" ADD COLUMN "source_item_index" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "meal_contributions_source_analysis_item_uq" ON "meal_contributions" USING btree ("source_analysis_id","source_item_index") WHERE "meal_contributions"."source_analysis_id" is not null;--> statement-breakpoint
+ALTER TABLE "meal_contributions" ADD CONSTRAINT "meal_contributions_source_item_nonnegative_ck" CHECK ("meal_contributions"."source_item_index" >= 0);--> statement-breakpoint
+ALTER TABLE "meal_contributions" ADD CONSTRAINT "meal_contributions_any_nutrient_ck" CHECK ("meal_contributions"."mode" = 'item' or "meal_contributions"."energy_kcal" is not null or "meal_contributions"."protein_grams" is not null or "meal_contributions"."carbohydrate_grams" is not null or "meal_contributions"."fat_grams" is not null);

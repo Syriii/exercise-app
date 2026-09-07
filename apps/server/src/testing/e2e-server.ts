@@ -65,6 +65,10 @@ const imageAnalysisService = new ImageAnalysisService({
   queue,
   analyzer: new FixedImageAnalyzer({
     title: "食堂鸡腿套餐",
+    foods: [
+      { label: "米饭", portionAmount: 200, portionUnit: "g", note: null, energyKcal: 240, proteinGrams: 4, carbohydrateGrams: 52, fatGrams: 0 },
+      { label: "鸡腿", portionAmount: 1, portionUnit: "个", note: "烹调油无法从照片准确判断", energyKcal: 380, proteinGrams: 28, carbohydrateGrams: 24, fatGrams: 20 },
+    ],
     observedFoods: [
       { label: "米饭", estimatedPortion: "约 200 克", note: null },
       { label: "鸡腿", estimatedPortion: "1 个", note: "烹调油无法从照片准确判断" },

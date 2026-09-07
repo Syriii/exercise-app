@@ -1,7 +1,20 @@
 export type ImageAnalysisStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 export type AnalysisAttemptStatus = "running" | "succeeded" | "failed";
 
+export interface ImageFoodCandidate {
+  readonly label: string;
+  readonly portionAmount: number | null;
+  readonly portionUnit: string | null;
+  readonly note: string | null;
+  readonly energyKcal: number | null;
+  readonly proteinGrams: number | null;
+  readonly carbohydrateGrams: number | null;
+  readonly fatGrams: number | null;
+}
+
 export interface ImageNutritionCandidate {
+  /** Absent only on stored pre-v2 whole-meal results. Never fabricate a split. */
+  readonly foods?: readonly ImageFoodCandidate[];
   readonly title: string;
   readonly observedFoods: readonly { readonly label: string; readonly estimatedPortion: string | null; readonly note: string | null }[];
   readonly energyKcal: number | null;

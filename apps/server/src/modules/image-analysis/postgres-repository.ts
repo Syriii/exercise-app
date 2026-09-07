@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../../db/database.js";
 import { mealContributions, mealImageAnalysisAttempts, mealImageAnalyses, meals, temporaryMedia } from "../../db/schema/index.js";
+import { imageFoodContributions } from "../nutrition/image-foods.js";
 import type { StoredTemporaryMedia } from "../media/temporary-media-store.js";
 import type { ImageAnalysisRepository } from "./repository.js";
 import type { AnalysisWorkItem, ImageAnalysisAttempt, ImageNutritionCandidate, MealImageAnalysis } from "./types.js";
@@ -34,22 +35,18 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       if (analysis?.status !== "running" || attempt?.status !== "running") return "not_running" as const;
       const [meal] = await tx.select().from(meals).where(and(eq(meals.id, analysis.mealId), eq(meals.userId, analysis.userId), isNull(meals.deletedAt))).for("update").limit(1);
       if (meal === undefined) return "not_running" as const;
-      const active = await tx.select({ id: mealContributions.id }).from(mealContributions).where(and(eq(mealContributions.mealId, meal.id), isNull(mealContributions.supersededAt))).for("update");
-      const hasNutrient = [candidate.energyKcal, candidate.proteinGrams, candidate.carbohydrateGrams, candidate.fatGrams].some((value) => value !== null);
-      if (active.length === 0 && hasNutrient) {
-        await tx.insert(mealContributions).values({
-          mealId: meal.id,
-          mode: "whole_meal",
-          source: "model_adopted",
-          reviewStatus: "tentative",
-          sourceAnalysisId: analysis.id,
-          label: candidate.title.trim() || "照片营养估算",
-          basisDescription: candidate.uncertaintyNote.trim() || "按照片中可见盛取量估算",
-          energyKcal: candidate.energyKcal?.toString() ?? null,
-          proteinGrams: candidate.proteinGrams?.toString() ?? null,
-          carbohydrateGrams: candidate.carbohydrateGrams?.toString() ?? null,
-          fatGrams: candidate.fatGrams?.toString() ?? null,
-        });
+      // Include superseded rows: an empty current meal may have been deliberately cleared.
+      const prior = await tx.select({ id: mealContributions.id }).from(mealContributions).where(eq(mealContributions.mealId, meal.id)).limit(1);
+      const items = imageFoodContributions(analysis.id, candidate);
+      if (prior.length === 0 && items.length > 0) {
+        await tx.insert(mealContributions).values(items.map((item, sourceItemIndex) => ({
+          ...item, mealId: meal.id, sourceItemIndex,
+          portionAmount: item.portionAmount?.toString() ?? null,
+          energyKcal: item.energyKcal?.toString() ?? null,
+          proteinGrams: item.proteinGrams?.toString() ?? null,
+          carbohydrateGrams: item.carbohydrateGrams?.toString() ?? null,
+          fatGrams: item.fatGrams?.toString() ?? null,
+        })));
         await tx.update(meals).set({ revision: sql`${meals.revision} + 1`, updatedAt: new Date() }).where(eq(meals.id, meal.id));
       }
       await tx.update(mealImageAnalysisAttempts).set({ status: "succeeded", providerRequestId, finishedAt: new Date() }).where(eq(mealImageAnalysisAttempts.id, attemptId));

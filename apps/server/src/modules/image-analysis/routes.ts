@@ -27,6 +27,12 @@ const candidateSchema = {
       ],
       properties: {
         title: { type: "string" },
+        foods: { type: "array", maxItems: 30, items: {
+          type: "object", additionalProperties: false,
+          required: ["label", "portionAmount", "portionUnit", "note", "energyKcal", "proteinGrams", "carbohydrateGrams", "fatGrams"],
+          properties: { label: { type: "string" }, portionAmount: nullableNumber, portionUnit: nullableString, note: nullableString,
+            energyKcal: nullableNumber, proteinGrams: nullableNumber, carbohydrateGrams: nullableNumber, fatGrams: nullableNumber },
+        } },
         observedFoods: {
           type: "array",
           items: {

@@ -756,6 +756,42 @@ describe("PostgreSQL integration", () => {
     ]));
   });
 
+  it("atomically persists individual photo foods, protects deleted edits and preserves unknown templates", async () => {
+    const rows = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1) returning id", [`photo-items-${randomUUID()}`]);
+    const userId = rows.rows[0]!.id;
+    const nutrition = new NutritionService(new PostgresNutritionRepository(database.database));
+    const images = new PostgresImageAnalysisRepository(database.database);
+    const input = { occurredAt: "2026-08-26T04:00:00.000Z", localDate: "2026-08-26", timeZone: "Asia/Shanghai", name: "单项照片", note: null };
+    const foods = [
+      { label: "鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 },
+      { label: "未知配菜", portionAmount: null, portionUnit: null, note: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null },
+    ];
+    const candidate = { title: "早餐", foods, observedFoods: [], energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null, confidence: "low" as const, assumptions: [], uncertaintyNote: "照片估算" };
+    const initial = await nutrition.createMeal(userId, input);
+    const analysis = await images.create(userId, initial.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "c".repeat(64) }, new Date("2026-08-27T00:00:00Z"), "test", "food-items-v2");
+    const attempt = await images.beginAttempt(analysis.id);
+    if (typeof attempt === "string") throw new Error("expected attempt");
+    const results = await Promise.all([images.succeed(analysis.id, attempt.attemptId, candidate, "test-1"), images.succeed(analysis.id, attempt.attemptId, candidate, "test-2")]);
+    expect(results).toEqual(expect.arrayContaining([{ status: "succeeded", tentativeHandled: true }, "not_running"]));
+    let meal = await nutrition.getMeal(userId, initial.id);
+    expect(meal.revision).toBe(initial.revision + 1);
+    expect(meal.contributions).toHaveLength(2);
+    const eggs = meal.contributions.find((item) => item.label === "鸡蛋")!;
+    meal = await nutrition.changePortion(userId, meal.id, eggs.id, meal.revision, eggs.revision, 1);
+    expect(meal.contributions.find((item) => item.id === eggs.id)).toMatchObject({ energyKcal: 70, portionAmount: 1 });
+    const unknown = meal.contributions.find((item) => item.label === "未知配菜")!;
+    const template = await nutrition.createFoodTemplate(userId, unknown);
+    expect(template).toMatchObject({ energyKcal: null, proteinGrams: null });
+    for (const item of [...meal.contributions]) {
+      meal = await nutrition.deleteContribution(userId, meal.id, item.id, meal.revision, item.revision);
+    }
+    const retry = await images.create(userId, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "d".repeat(64) }, new Date("2026-08-27T00:00:00Z"), "test", "food-items-v2");
+    const retryAttempt = await images.beginAttempt(retry.id);
+    if (typeof retryAttempt === "string") throw new Error("expected attempt");
+    await images.succeed(retry.id, retryAttempt.attemptId, candidate, "test-late");
+    expect((await nutrition.getMeal(userId, meal.id)).contributions).toHaveLength(0);
+  });
+
   it("commits a transactional job and leaves no job after rollback", async () => {
     let committedJobId = "";
     await database.database.transaction(async (transaction) => {

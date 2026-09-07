@@ -13,12 +13,14 @@ export interface PublicFoodSearchResult extends NutrientValues { id: string; pro
 export interface NutritionValueSummary { recorded: number | null; target: number | null; remaining: number | null; complete: boolean; }
 export interface NutritionDaySummary { localDate: string; mealCount: number; coverageConfirmed: boolean; energyKcal: NutritionValueSummary; proteinGrams: NutritionValueSummary; carbohydrateGrams: NutritionValueSummary; fatGrams: NutritionValueSummary; }
 export type ContributionInput = Omit<MealContribution, "id" | "mealId" | "source" | "reviewStatus" | "sourceAnalysisId" | "revision" | "createdAt" | "updatedAt">;
-export interface ImageNutritionCandidate extends NutrientValues { title: string; observedFoods: Array<{ label: string; estimatedPortion: string | null; note: string | null }>; confidence: "low" | "medium" | "high"; assumptions: string[]; uncertaintyNote: string; }
+export interface ImageFoodCandidate extends NutrientValues { label: string; portionAmount: number | null; portionUnit: string | null; note: string | null; }
+export interface ImageNutritionCandidate extends NutrientValues { foods?: ImageFoodCandidate[]; title: string; observedFoods: Array<{ label: string; estimatedPortion: string | null; note: string | null }>; confidence: "low" | "medium" | "high"; assumptions: string[]; uncertaintyNote: string; }
 export interface ImageAnalysisAttempt { id: string; sequence: number; status: "running" | "succeeded" | "failed"; providerRequestId: string | null; errorCode: string | null; startedAt: string; finishedAt: string | null; }
 export interface MealImageAnalysis { id: string; mealId: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; model: string; promptVersion: string; candidate: ImageNutritionCandidate | null; lastErrorCode: string | null; imageAvailable: boolean; adoptedAt: string | null; revision: number; attempts: ImageAnalysisAttempt[]; createdAt: string; updatedAt: string; }
 export type ImageAdoptionInput = ContributionInput & { analysisRevision: number; mealRevision: number; mode: "whole_meal" | "supplement"; replaceExisting: boolean; deleteOriginal: boolean };
 
 export const nutritionApi = {
+  changePortion: (meal: Meal, item: MealContribution, portionAmount: number) => apiRequest<Meal>(`/api/v1/nutrition/meals/${meal.id}/contributions/${item.id}/portion`, { method: "PATCH", body: JSON.stringify({ mealRevision: meal.revision, contributionRevision: item.revision, portionAmount }) }),
   listDietPlans: (from: string, to: string) => apiRequest<DietPlan[]>(`/api/v1/nutrition/diet-plans?${new URLSearchParams({ from, to })}`),
   createDietPlan: (input: DietPlanInput) => apiRequest<DietPlan>("/api/v1/nutrition/diet-plans", { method: "POST", body: JSON.stringify(input) }),
   updateDietPlan: (planId: string, revision: number, input: DietPlanInput) => apiRequest<DietPlan>(`/api/v1/nutrition/diet-plans/${planId}`, { method: "PUT", body: JSON.stringify({ revision, ...input }) }),

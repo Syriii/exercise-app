@@ -1,0 +1,1 @@
+ALTER TABLE "personal_food_templates" DROP CONSTRAINT "personal_food_templates_any_nutrient_ck";

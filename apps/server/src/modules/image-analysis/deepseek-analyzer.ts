@@ -1,11 +1,11 @@
 import type { ImageAnalyzer, ImageAnalyzerResult, ImageAnalyzerUsage } from "./analyzer.js";
-import type { ImageNutritionCandidate } from "./types.js";
+import type { ImageFoodCandidate, ImageNutritionCandidate } from "./types.js";
 
-export const imageAnalysisPromptVersion = "meal-image-estimate-2026-08-31.2";
+export const imageAnalysisPromptVersion = "meal-image-foods-2026-09-06.1";
 
 const defaultRetryLimit = 2;
 const defaultRetryDelayMs = 500;
-const maximumOutputTokens = 1_200;
+const maximumOutputTokens = 6_000;
 
 export class DeepSeekImageAnalyzerError extends Error {
   public constructor(
@@ -157,20 +157,18 @@ interface DeepSeekResponse {
   readonly usage?: unknown;
 }
 
-const nutritionAnalysisPrompt = `你是餐食图片营养估算助手。根据照片中可见内容估算食物、可见份量和整餐营养，只输出一个 JSON 对象，不要输出 Markdown 或解释文字。
+const nutritionAnalysisPrompt = `你是餐食图片营养估算助手。只返回 JSON，不输出 Markdown。按可辨认的单个食物、饮品或整道混合菜估算，条目互不重叠，不把整餐总值重复分配给每项。
 
 JSON 示例：
-{"title":"鸡蛋豆浆早餐","observedFoods":[{"label":"鸡蛋","estimatedPortion":"约 2 个","note":null},{"label":"豆浆","estimatedPortion":"约 1 碗","note":"是否加糖无法判断"}],"energyKcal":350,"proteinGrams":20,"carbohydrateGrams":25,"fatGrams":17,"confidence":"medium","assumptions":["按照片中可见盛取量估算"],"uncertaintyNote":"照片无法确认豆浆含糖量和未拍到的食物，请按实际情况修正。"}
+{"title":"鸡蛋豆浆早餐","foods":[{"label":"鸡蛋","portionAmount":2,"portionUnit":"个","energyKcal":144,"proteinGrams":12.6,"carbohydrateGrams":0.8,"fatGrams":9.6,"note":"约两个普通大小鸡蛋"},{"label":"豆浆","portionAmount":1,"portionUnit":"碗","energyKcal":90,"proteinGrams":7,"carbohydrateGrams":6,"fatGrams":4,"note":"估计这一碗约250毫升，含糖量不明"}],"confidence":"low","assumptions":["按照片中可见盛取量估算"],"uncertaintyNote":"大小和含糖量无法从照片精确确定。"}
 
 字段要求：
-- title：简短餐食名称；
-- observedFoods：可见食物数组，每项包含 label、estimatedPortion、note，无法判断的后两项使用 null；
-- energyKcal、proteinGrams、carbohydrateGrams、fatGrams：整餐非负数字，无法可靠判断时使用 null；
-- confidence：只能是 low、medium、high；
-- assumptions：估算所依赖的假设数组；
-- uncertaintyNote：明确说明照片看不到或无法确认的因素。
-
-只依据照片可见内容。不要臆造品牌、配方、精确重量或未拍到的食物；不确定时降低 confidence、使用 null，并在 uncertaintyNote 中说明。`;
+- title：简短餐名，最多100字；
+- foods：1至30项，每项 label 最多100字；portionAmount 为大于0的估算数量，portionUnit 为 g、ml、个、碗等实际计量单位，两者无法估计时同时为 null；
+- 每项 energyKcal、proteinGrams、carbohydrateGrams、fatGrams 表示该项所列份量的营养，不是每100克，也不是整餐。无法可靠判断的营养用 null，不能填0；能量不超过100000，其他营养不超过10000；
+- 每项 note 可为 null，或简述份量基准和不确定因素；碗、杯等须说明估算容量或大小，不能将估计当精确测量；
+- confidence：low、medium、high；assumptions：假设数组；uncertaintyNote：照片无法确认的因素。
+能辨认的鸡蛋、豆浆分别记录；混合菜可整道记录，不臆造原料克数、品牌、精确配方或未拍到的内容。完全无法识别时保留一项“未识别食物”，份量与营养均为 null。整餐合计由应用计算，不要输出重复的整餐条目。`;
 
 function classifyHttpError(status: number): DeepSeekImageAnalyzerError {
   if (status === 400) return new DeepSeekImageAnalyzerError("deepseek_invalid_request", false);
@@ -211,8 +209,9 @@ function validateCandidate(value: unknown): ImageNutritionCandidate {
     || !["low", "medium", "high"].includes(String(data.confidence))
     || !Array.isArray(data.assumptions)
     || data.assumptions.length > 20
-    || !Array.isArray(data.observedFoods)
-    || data.observedFoods.length > 50
+    || !Array.isArray(data.foods)
+    || data.foods.length < 1
+    || data.foods.length > 30
   ) {
     throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true);
   }
@@ -222,36 +221,42 @@ function validateCandidate(value: unknown): ImageNutritionCandidate {
     if (assumption === null) throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true);
     return assumption;
   });
-  const observedFoods = data.observedFoods.map((item) => {
-    if (typeof item !== "object" || item === null) {
-      throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true);
-    }
+  const foods: ImageFoodCandidate[] = data.foods.map((item) => {
+    if (typeof item !== "object" || item === null) throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true);
     const food = item as Record<string, unknown>;
-    const label = boundedText(food.label, 200, false);
-    const estimatedPortion = nullableBoundedText(food.estimatedPortion, 200);
-    const note = nullableBoundedText(food.note, 1_000);
-    if (label === null || estimatedPortion === undefined || note === undefined) {
+    const label = boundedText(food.label, 100, false);
+    const portionUnit = nullableBoundedText(food.portionUnit, 30);
+    const portionAmount = food.portionAmount === null ? null : nutrient(food.portionAmount, 100000);
+    const note = nullableBoundedText(food.note, 1000);
+    if (label === null || portionUnit === undefined || note === undefined
+      || (portionAmount === null) !== (portionUnit === null) || portionAmount === 0) {
       throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true);
     }
-    return { label, estimatedPortion, note };
+    return { label, portionAmount, portionUnit, note,
+      energyKcal: nutrient(food.energyKcal, 100000), proteinGrams: nutrient(food.proteinGrams),
+      carbohydrateGrams: nutrient(food.carbohydrateGrams), fatGrams: nutrient(food.fatGrams) };
   });
+  const total = (key: "energyKcal" | "proteinGrams" | "carbohydrateGrams" | "fatGrams") =>
+    foods.some((food) => food[key] === null) ? null : Math.round(foods.reduce((sum, food) => sum + food[key]!, 0) * 1000) / 1000;
+  const observedFoods = foods.map((food) => ({ label: food.label, estimatedPortion: food.portionAmount === null ? null : `${food.portionAmount} ${food.portionUnit}`, note: food.note }));
 
   return {
     title,
+    foods,
     observedFoods,
-    energyKcal: nutrient(data.energyKcal),
-    proteinGrams: nutrient(data.proteinGrams),
-    carbohydrateGrams: nutrient(data.carbohydrateGrams),
-    fatGrams: nutrient(data.fatGrams),
+    energyKcal: total("energyKcal"),
+    proteinGrams: total("proteinGrams"),
+    carbohydrateGrams: total("carbohydrateGrams"),
+    fatGrams: total("fatGrams"),
     confidence: data.confidence as "low" | "medium" | "high",
     assumptions,
     uncertaintyNote,
   };
 }
 
-function nutrient(value: unknown): number | null {
+function nutrient(value: unknown, maximum = 10000): number | null {
   if (value === null) return null;
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum) return Math.round(value * 1000) / 1000;
   throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true);
 }
 

@@ -888,6 +888,7 @@ export const mealContributions = pgTable(
     source: mealContributionSource("source").default("manual").notNull(),
     reviewStatus: mealContributionReviewStatus("review_status").default("confirmed").notNull(),
     sourceAnalysisId: uuid("source_analysis_id"),
+    sourceItemIndex: integer("source_item_index").default(0).notNull(),
     label: text("label").notNull(),
     portionAmount: numeric("portion_amount", { precision: 12, scale: 3 }),
     portionUnit: text("portion_unit"),
@@ -902,14 +903,15 @@ export const mealContributions = pgTable(
   },
   (table) => [
     index("meal_contributions_meal_idx").on(table.mealId),
-    uniqueIndex("meal_contributions_source_analysis_uq").on(table.sourceAnalysisId).where(sql`${table.sourceAnalysisId} is not null`),
+    uniqueIndex("meal_contributions_source_analysis_item_uq").on(table.sourceAnalysisId, table.sourceItemIndex).where(sql`${table.sourceAnalysisId} is not null`),
+    check("meal_contributions_source_item_nonnegative_ck", sql`${table.sourceItemIndex} >= 0`),
     check("meal_contributions_label_not_blank_ck", sql`length(btrim(${table.label})) > 0`),
     check("meal_contributions_portion_nonnegative_ck", sql`${table.portionAmount} is null or ${table.portionAmount} >= 0`),
     check("meal_contributions_energy_nonnegative_ck", sql`${table.energyKcal} is null or ${table.energyKcal} >= 0`),
     check("meal_contributions_protein_nonnegative_ck", sql`${table.proteinGrams} is null or ${table.proteinGrams} >= 0`),
     check("meal_contributions_carbohydrate_nonnegative_ck", sql`${table.carbohydrateGrams} is null or ${table.carbohydrateGrams} >= 0`),
     check("meal_contributions_fat_nonnegative_ck", sql`${table.fatGrams} is null or ${table.fatGrams} >= 0`),
-    check("meal_contributions_any_nutrient_ck", sql`${table.energyKcal} is not null or ${table.proteinGrams} is not null or ${table.carbohydrateGrams} is not null or ${table.fatGrams} is not null`),
+    check("meal_contributions_any_nutrient_ck", sql`${table.mode} = 'item' or ${table.energyKcal} is not null or ${table.proteinGrams} is not null or ${table.carbohydrateGrams} is not null or ${table.fatGrams} is not null`),
     check("meal_contributions_revision_positive_ck", sql`${table.revision} > 0`),
   ],
 );
@@ -977,7 +979,6 @@ export const personalFoodTemplates = pgTable(
     check("personal_food_templates_protein_nonnegative_ck", sql`${table.proteinGrams} is null or ${table.proteinGrams} >= 0`),
     check("personal_food_templates_carbohydrate_nonnegative_ck", sql`${table.carbohydrateGrams} is null or ${table.carbohydrateGrams} >= 0`),
     check("personal_food_templates_fat_nonnegative_ck", sql`${table.fatGrams} is null or ${table.fatGrams} >= 0`),
-    check("personal_food_templates_any_nutrient_ck", sql`${table.energyKcal} is not null or ${table.proteinGrams} is not null or ${table.carbohydrateGrams} is not null or ${table.fatGrams} is not null`),
     check("personal_food_templates_revision_positive_ck", sql`${table.revision} > 0`),
   ],
 );

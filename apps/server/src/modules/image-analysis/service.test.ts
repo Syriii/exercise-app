@@ -67,6 +67,40 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it("counts photo foods atomically, scales one item and never duplicates a repeated task", async () => {
+    const foods = [
+      { label: "鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 },
+      { label: "豆浆", portionAmount: 1, portionUnit: "碗", note: null, energyKcal: 100, proteinGrams: 8, carbohydrateGrams: 4, fatGrams: 5 },
+      { label: "看不清的配菜", portionAmount: null, portionUnit: null, note: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null },
+    ];
+    const values = await fixture(new FixedImageAnalyzer({ ...candidate, foods }));
+    const pending = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    await values.service.process(pending.id);
+    await values.service.process(pending.id);
+    let meal = await values.nutritionService.getMeal("user-1", values.meal.id);
+    expect(meal.revision).toBe(values.meal.revision + 1);
+    expect(meal.contributions).toHaveLength(3);
+    expect(meal.contributions.map((item) => item.energyKcal)).toEqual([140, 100, null]);
+    expect(meal.contributions.every((item) => item.mode === "item" && item.sourceAnalysisId === pending.id)).toBe(true);
+    const eggs = meal.contributions[0]!;
+    meal = await values.nutritionService.changePortion("user-1", meal.id, eggs.id, meal.revision, eggs.revision, 1);
+    expect(meal.contributions.map((item) => item.energyKcal)).toEqual([70, 100, null]);
+    const [analysis] = await values.service.list("user-1", meal.id);
+    expect(analysis!.candidate!.foods![0]!.portionAmount).toBe(2);
+    await expect(values.service.adopt("user-1", pending.id, analysis!.revision, meal.revision, { ...foods[0]!, mode: "whole_meal", basisDescription: null, replaceExisting: true, deleteOriginal: false })).rejects.toMatchObject({ code: "analysis_item_edit_required" });
+  });
+
+  it("does not resurrect deleted manual content when a new photo result arrives", async () => {
+    const values = await fixture(new FixedImageAnalyzer({ ...candidate, foods: [{ label: "鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 }] }));
+    const pending = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    let meal = await values.nutritionService.addContribution("user-1", values.meal.id, values.meal.revision, { mode: "item", label: "手填食物", portionAmount: 1, portionUnit: "份", basisDescription: null, energyKcal: 50, proteinGrams: null, carbohydrateGrams: null, fatGrams: null }, false);
+    const item = meal.contributions[0]!;
+    await values.nutritionService.deleteContribution("user-1", meal.id, item.id, meal.revision, item.revision);
+    await values.service.process(pending.id);
+    meal = await values.nutritionService.getMeal("user-1", meal.id);
+    expect(meal.contributions).toHaveLength(0);
+  });
+
   it("tentatively counts a first model result and preserves that revision when the user confirms an edit", async () => {
     const values = await fixture();
     const pending = await values.service.request(

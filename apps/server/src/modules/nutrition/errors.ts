@@ -1,5 +1,6 @@
 export type NutritionErrorCode =
   | "invalid_nutrition_input"
+  | "portion_basis_required"
   | "meal_not_found"
   | "contribution_not_found"
   | "food_template_not_found"
