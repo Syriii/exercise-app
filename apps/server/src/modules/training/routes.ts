@@ -34,6 +34,7 @@ interface SessionItemBody extends TrainingSessionItemUpdate, RevisionBody {}
 interface ExtraItemBody extends ExtraTrainingItemInput, RevisionBody {}
 interface FinishSessionBody extends RevisionBody {
   readonly status: "completed" | "abandoned";
+  readonly draft?: import("./types.js").TrainingCompletionDraft;
 }
 interface ExpenditureBody extends TrainingExpenditureAssessmentInput, RevisionBody {}
 interface ProgramBody extends TrainingProgramInput {}
@@ -739,9 +740,23 @@ export async function registerTrainingRoutes(app: FastifyInstance, options: Trai
   app.post<{ Params: { sessionId: string }; Body: FinishSessionBody }>("/api/v1/training/sessions/:sessionId/finish", {
     schema: {
       params: { type: "object", additionalProperties: false, required: ["sessionId"], properties: { sessionId: { type: "string", format: "uuid" } } },
-      body: { type: "object", additionalProperties: false, required: ["revision", "status"], properties: { revision: { type: "integer", minimum: 1 }, status: { type: "string", enum: ["completed", "abandoned"] } } },
+      body: { type: "object", additionalProperties: false, required: ["revision", "status"], properties: {
+        revision: { type: "integer", minimum: 1 }, status: { type: "string", enum: ["completed", "abandoned"] },
+        draft: { type: "object", additionalProperties: false, required: ["items", "extra"], properties: {
+          items: { type: "array", maxItems: 100, items: { type: "object", additionalProperties: false,
+            required: ["id", "status", "performedExerciseName", "actualNote", "sets"], properties: {
+              id: { type: "string", format: "uuid" }, status: { type: "string", enum: ["pending", "completed", "skipped"] },
+              performedExerciseName: nullableString, actualNote: nullableString, sets: { type: "array", maxItems: 100, items: setInputSchema },
+            } } },
+          extra: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+            required: ["id", "exerciseName", "actualNote", "sets"], properties: {
+              id: { type: "string", format: "uuid" }, exerciseName: { type: "string", minLength: 1, maxLength: 100 },
+              actualNote: nullableString, sets: { type: "array", maxItems: 100, items: setInputSchema },
+            } }] },
+        } },
+      } },
       response: { 200: sessionResponseSchema },
     },
-    handler: async (request) => publicSession(await trainingService.finishSession(await userId(request), request.params.sessionId, request.body.revision, request.body.status)),
+    handler: async (request) => publicSession(await trainingService.finishSession(await userId(request), request.params.sessionId, request.body.revision, request.body.status, request.body.draft)),
   });
 }

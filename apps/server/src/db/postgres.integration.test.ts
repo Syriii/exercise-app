@@ -379,6 +379,44 @@ describe("PostgreSQL integration", () => {
     ]));
   });
 
+  it("atomically saves completion drafts, rolls back late failures, and safely retries", async () => {
+    const identity = new IdentityService({
+      repository: new PostgresIdentityRepository(database.database),
+      sessionSecret: "a-completion-integration-session-secret-long-enough",
+      sessionTtlHours: 1, maxAccounts: 100,
+    });
+    const account = (await identity.register(`complete_${randomUUID().replaceAll("-", "")}`.slice(0,32), "an isolated integration password")).account;
+    const repository = new PostgresTrainingRepository(database.database);
+    const training = new TrainingService({repository});
+    const target = {targetSets:null,targetRepsMin:null,targetRepsMax:null,targetWeightKg:null,targetDurationSeconds:null,targetDistanceMeters:null,note:null};
+    const template = await training.createTemplate(account.id, {name:"完整保存测试",note:null,items:[
+      {...target,exerciseName:"深蹲"},{...target,exerciseName:"卧推"},
+    ]});
+    const other = await training.startSession(account.id,template.id,"Asia/Shanghai");
+    await training.finishSession(account.id,other.id,other.revision,"completed");
+    const session = await training.startSession(account.id,template.id,"Asia/Shanghai");
+    const sets = [{reps:10,weightKg:"40",durationSeconds:null,distanceMeters:null,note:null}];
+    const draft = {items:session.items.map(item=>({id:item.id,status:"completed" as const,performedExerciseName:item.exerciseName,actualNote:null,sets})),
+      extra:{id:randomUUID(),exerciseName:"拉伸",actualNote:null,sets:[]}};
+    // This PK conflict happens after item updates inside the transaction, proving rollback.
+    await expect(repository.finishSession(account.id,session.id,session.revision,"completed",new Date(),{
+      ...draft,extra:{...draft.extra,id:other.items[0]!.id},
+    })).rejects.toThrow();
+    const unchanged = await training.getSession(account.id,session.id);
+    expect(unchanged.revision).toBe(session.revision);
+    expect(unchanged.items.every(item=>item.status === "pending" && item.sets.length === 0)).toBe(true);
+    await expect(training.listSessionItemRevisions(account.id,session.id)).resolves.toEqual([]);
+    await expect(training.finishSession(randomUUID(),session.id,session.revision,"completed",draft)).rejects.toMatchObject({statusCode:404});
+    const completed = await training.finishSession(account.id,session.id,session.revision,"completed",draft);
+    expect(completed.revision).toBe(session.revision+1);
+    expect(completed.items).toHaveLength(3);
+    expect(completed.items.slice(0,2).every(item=>item.sets[0]?.reps === 10)).toBe(true);
+    const retried = await training.finishSession(account.id,session.id,session.revision,"completed",draft);
+    expect(retried.revision).toBe(completed.revision);
+    expect(retried.items).toHaveLength(3);
+    await expect(training.listSessionItemRevisions(account.id,session.id)).resolves.toHaveLength(2);
+  });
+
   it("persists a copied cycle unit, explicit refresh, and cycle workout snapshot", async () => {
     const identity = new IdentityService({
       repository: new PostgresIdentityRepository(database.database),

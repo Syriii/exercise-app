@@ -19,6 +19,19 @@ import type {
   TrainingTemplateInput,
 } from "./types.js";
 
+function completionMatches(session: TrainingSession, draft: import("./types.js").TrainingCompletionDraft): boolean {
+  const canonical = (item: TrainingSessionItemUpdate) => JSON.stringify({
+    status: item.status, performedExerciseName: item.performedExerciseName, actualNote: item.actualNote,
+    sets: item.sets.map((set) => ({ reps: set.reps, weightKg: set.weightKg === null ? null : Number(set.weightKg),
+      durationSeconds: set.durationSeconds, distanceMeters: set.distanceMeters === null ? null : Number(set.distanceMeters), note: set.note })),
+  });
+  return draft.items.every((change) => {
+    const item = session.items.find((value) => value.id === change.id);
+    return item !== undefined && canonical(item) === canonical(change);
+  }) && (draft.extra === null || session.items.some((item) => item.id === draft.extra!.id && item.origin === "extra"
+    && canonical(item) === canonical({ ...draft.extra!, status: "completed", performedExerciseName: draft.extra!.exerciseName })));
+}
+
 const trainingExpenditureActivities: readonly TrainingExpenditureActivity[] = [
   { code: "barbell_bench_25rm", label: "杠铃卧推 · 25RM", description: "5 组 × 25 次，组间休息 1 分钟", met: 4.9, intensity: "moderate" },
   { code: "barbell_bench_12rm", label: "杠铃卧推 · 12RM", description: "3 组 × 12 次，组间休息 2 分钟", met: 5.2, intensity: "vigorous" },
@@ -723,22 +736,37 @@ export class TrainingService {
     );
   }
 
-  public async finishSession(userId: string, sessionId: string, expectedRevision: number, status: "completed" | "abandoned"): Promise<TrainingSession> {
-    await this.#requireOpenSession(userId, sessionId);
-    return requireResult(
-      await this.#repository.finishSession(userId, sessionId, expectedRevision, status, this.#now()),
-      "training_session_not_found",
-    );
-  }
-
-  async #requireOpenSession(userId: string, sessionId: string): Promise<void> {
-    const session = await this.#repository.findSession(userId, sessionId);
-    if (session === null) {
-      throw new TrainingError("training_session_not_found", "没有找到这次训练", 404);
+  public async finishSession(userId: string, sessionId: string, expectedRevision: number, status: "completed" | "abandoned", draft?: import("./types.js").TrainingCompletionDraft): Promise<TrainingSession> {
+    const session = await this.getSession(userId, sessionId);
+    let normalized: import("./types.js").TrainingCompletionDraft | undefined;
+    if (draft !== undefined) {
+      if (draft.items.length > 100 || new Set(draft.items.map((item) => item.id)).size !== draft.items.length
+        || draft.items.some((item) => !session.items.some((current) => current.id === item.id))) {
+        throw new TrainingError("invalid_training_input", "训练动作已变化，请保留输入并重新核对", 400);
+      }
+      const extraName = draft.extra === null ? null : cleanText(draft.extra.exerciseName, 100);
+      if (draft.extra !== null && extraName === null) throw new TrainingError("invalid_training_input", "动作名称不能为空", 400);
+      normalized = {
+        items: draft.items.map((item) => ({ id: item.id, ...normalizeActual(item) })),
+        extra: draft.extra === null ? null : {
+          id: draft.extra.id, exerciseName: extraName!,
+          ...normalizeActual({ ...draft.extra, status: "completed", performedExerciseName: extraName }),
+        },
+      };
     }
     if (session.status !== "in_progress") {
-      throw new TrainingError("training_session_closed", "这次训练已经结束，不能继续修改", 409);
+      // A response can be lost after commit. Only acknowledge an identical retry.
+      if (normalized !== undefined && session.revision === expectedRevision + 1 && session.status === status
+        && completionMatches(session, normalized)) return session;
+      throw new TrainingError("training_session_closed", "这次训练已经结束，请核对历史记录；输入仍保留", 409);
     }
+    if (normalized?.extra && session.items.some((item) => item.id === normalized.extra!.id)) {
+      throw new TrainingError("invalid_training_input", "新增动作标识已使用，请重新核对", 400);
+    }
+    return requireResult(
+      await this.#repository.finishSession(userId, sessionId, expectedRevision, status, this.#now(), normalized),
+      "training_session_not_found",
+    );
   }
 
   async #requireEditableProgram(

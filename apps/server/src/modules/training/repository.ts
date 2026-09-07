@@ -1,4 +1,5 @@
 import type {
+  TrainingCompletionDraft,
   ExtraTrainingItemInput,
   TrainingProgram,
   TrainingProgramInput,
@@ -152,5 +153,6 @@ export interface TrainingRepository {
     expectedRevision: number,
     status: Exclude<TrainingSessionStatus, "in_progress">,
     endedAt: Date,
+    draft?: TrainingCompletionDraft,
   ): Promise<TrainingSession | "revision_conflict" | null>;
 }

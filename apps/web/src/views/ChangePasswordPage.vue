@@ -20,9 +20,10 @@ async function submit() {
     return;
   }
   submitting.value = true;
+  const firstLogin = session.account?.passwordChangeRequired === true;
   try {
     await session.changePassword(currentPassword.value, newPassword.value);
-    await router.push("/today");
+    await router.replace(firstLogin ? "/today" : "/settings/data");
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : "暂时无法修改密码。";
   } finally {
@@ -41,6 +42,7 @@ async function submit() {
         <label><span>再输入一次</span><input v-model="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <button class="action-button action-button--primary" type="submit" :disabled="submitting">{{ submitting ? "正在保存…" : "保存新密码" }}</button>
+        <button v-if="!session.account?.passwordChangeRequired" class="text-action" type="button" :disabled="submitting" @click="router.replace('/settings/data')">取消并返回账号</button>
       </form>
     </section>
   </main>

@@ -277,3 +277,9 @@ export interface ExtraTrainingItemInput {
   readonly actualNote: string | null;
   readonly sets: readonly TrainingSetInput[];
 }
+
+/** Changes submitted together with completion; existing items retain their identity. */
+export interface TrainingCompletionDraft {
+  readonly items: readonly (TrainingSessionItemUpdate & { readonly id: string })[];
+  readonly extra: (ExtraTrainingItemInput & { readonly id: string }) | null;
+}

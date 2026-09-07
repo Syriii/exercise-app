@@ -1076,7 +1076,41 @@ export class PostgresTrainingRepository implements TrainingRepository {
     expectedRevision: number,
     status: "completed" | "abandoned",
     endedAt: Date,
+    draft?: import("./types.js").TrainingCompletionDraft,
   ): Promise<TrainingSession | "revision_conflict" | null> {
+    if (draft !== undefined) {
+      const result = await this.#database.transaction(async (transaction) => {
+        const [session] = await transaction.select().from(trainingSessions)
+          .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId))).for("update").limit(1);
+        if (!session) return null;
+        if (session.revision !== expectedRevision || session.status !== "in_progress") return "revision_conflict" as const;
+        const existing = await transaction.select().from(trainingSessionItems).where(eq(trainingSessionItems.sessionId, sessionId));
+        // Validate the whole input before making any mutation.
+        if (draft.items.some((change) => !existing.some((item) => item.id === change.id))) return null;
+        if (draft.extra && existing.some((item) => item.id === draft.extra!.id)) return "revision_conflict" as const;
+        for (const change of draft.items) {
+          const item = existing.find((value) => value.id === change.id)!;
+          const sets = await transaction.select().from(trainingSessionSets).where(eq(trainingSessionSets.sessionItemId, item.id)).orderBy(asc(trainingSessionSets.sequence));
+          await transaction.insert(trainingSessionItemRevisions).values({ sessionId, sessionItemId: item.id, sessionRevision: session.revision,
+            status: item.status, performedExerciseName: item.performedExerciseName, actualNote: item.actualNote,
+            setsSnapshot: sets.map(({ id, sequence, reps, weightKg, durationSeconds, distanceMeters, note }) => ({ id, sequence, reps, weightKg, durationSeconds, distanceMeters, note })) });
+          await transaction.update(trainingSessionItems).set({ status: change.status, performedExerciseName: change.performedExerciseName, actualNote: change.actualNote, updatedAt: endedAt }).where(eq(trainingSessionItems.id, item.id));
+          await transaction.delete(trainingSessionSets).where(eq(trainingSessionSets.sessionItemId, item.id));
+          if (change.sets.length) await transaction.insert(trainingSessionSets).values(change.sets.map((set, index) => ({ ...set, sessionItemId: item.id, sequence: index + 1 })));
+        }
+        if (draft.extra) {
+          const extra = draft.extra;
+          await transaction.insert(trainingSessionItems).values({ id: extra.id, sessionId, origin: "extra", status: "completed",
+            sortOrder: existing.reduce((max, item) => Math.max(max, item.sortOrder), -1) + 1,
+            exerciseName: extra.exerciseName, performedExerciseName: extra.exerciseName, actualNote: extra.actualNote });
+          if (extra.sets.length) await transaction.insert(trainingSessionSets).values(extra.sets.map((set, index) => ({ ...set, sessionItemId: extra.id, sequence: index + 1 })));
+        }
+        await transaction.update(trainingSessions).set({ status, endedAt, revision: session.revision + 1, updatedAt: endedAt }).where(eq(trainingSessions.id, sessionId));
+        return "updated" as const;
+      });
+      if (result === null || result === "revision_conflict") return result;
+      return this.findSession(userId, sessionId);
+    }
     const [updated] = await this.#database
       .update(trainingSessions)
       .set({

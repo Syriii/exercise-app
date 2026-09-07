@@ -27,6 +27,15 @@ const nutritionReminderSaving = ref(false);
 const measurementReminderSaving = ref(false);
 const exportSaving = ref(false);
 const deletionSaving = ref(false);
+const logoutSaving = ref(false);
+async function logout() {
+  if (logoutSaving.value) return;
+  if (!window.confirm("退出登录会清除这台设备上尚未保存的草稿，已保存记录不会删除。继续退出？")) return;
+  logoutSaving.value = true;
+  try { await sessionStore.logout(); await router.replace({ name: "login" }); }
+  catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "退出失败，请稍后重试。"; }
+  finally { logoutSaving.value = false; }
+}
 const revision = ref(0);
 const nutritionReminderRevision = ref(0);
 const measurementReminderRevision = ref(0);
@@ -499,6 +508,11 @@ onBeforeUnmount(() => { if (portabilityTimer !== undefined) window.clearInterval
           </section>
 
           <section v-if="!setupActive && selectedSection === 'data'" class="work-panel" aria-labelledby="data-control-title">
+            <div class="panel-heading"><div><h2>账号</h2><p>{{ sessionStore.account?.username }}</p></div></div>
+            <div class="form-actions">
+              <button class="action-button" type="button" @click="router.push({ name: 'change-password' })">修改密码</button>
+              <button class="action-button" type="button" :disabled="logoutSaving" @click="logout">{{ logoutSaving ? '正在退出…' : '退出登录' }}</button>
+            </div>
             <div class="panel-heading"><div><h2 id="data-control-title">我的数据</h2><p>导出只包含结构化记录和照片生命周期，不包含密码、会话令牌或原图。</p></div><button class="action-button" type="button" :disabled="exportSaving || !portabilityAvailable" @click="requestExport">{{ exportSaving ? '正在提交…' : '准备 JSON 导出' }}</button></div>
             <ul v-if="portabilityTasks.filter((task) => task.type === 'data_export').length" class="measurement-list export-task-list">
               <li v-for="task in portabilityTasks.filter((value) => value.type === 'data_export')" :key="task.id"><div><strong>{{ task.status === 'succeeded' ? (task.downloadAvailable ? '导出已完成' : '导出已过期') : task.status === 'failed' ? '导出失败' : task.status === 'running' ? '正在生成导出' : '等待后台处理' }}</strong><span>{{ new Date(task.createdAt).toLocaleString('zh-CN') }}<template v-if="task.expiresAt"> · 保留至 {{ new Date(task.expiresAt).toLocaleString('zh-CN') }}</template></span><small v-if="task.lastErrorCode">错误：{{ task.lastErrorCode }}</small></div><a v-if="task.downloadAvailable" class="text-action" :href="portabilityApi.downloadUrl(task.id)" download>下载 JSON</a></li>

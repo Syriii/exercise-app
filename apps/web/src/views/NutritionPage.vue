@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
@@ -180,11 +180,12 @@ async function pollImageAnalyses() {
   }
 }
 
-async function load() {
+async function load(preserveDraft = false) {
   const requestedDate = selectedDate.value;
   const generation = ++loadGeneration;
-  loading.value = true; errorMessage.value = ""; notice.value = "";
-  resetDateScopedState();
+  if (!preserveDraft) loading.value = true;
+  errorMessage.value = ""; notice.value = "";
+  if (!preserveDraft) resetDateScopedState();
   const results = await Promise.allSettled([
       planningApi.getDailyReference(requestedDate, browserTimeZone()), nutritionApi.getDaySummary(requestedDate, browserTimeZone()), nutritionApi.listMeals(requestedDate, requestedDate), nutritionApi.listFoodTemplates(), nutritionApi.listDietPlans(requestedDate, requestedDate), nutritionApi.listMeals(shiftLocalDate(requestedDate, -14), shiftLocalDate(requestedDate, -1)),
   ] as const);
@@ -561,15 +562,28 @@ async function setCoverage(event: Event) {
 }
 
 async function handleRequestedAction() {
-  if (route.query.action !== "new-meal") return;
+  if (route.name !== "nutrition" || route.query.action !== "new-meal") return;
   await openMealComposer();
   await router.replace({ name: "nutrition", query: selectedDate.value === localDate(new Date()) ? {} : { date: selectedDate.value } });
 }
 
-watch(() => route.query.date, (value) => { const next = typeof value === "string" ? value : localDate(new Date()); if (next !== selectedDate.value) { selectedDate.value = next; void load(); } });
+watch(() => route.query.date, (value) => {
+  if (route.name !== "nutrition" || creatingMeal.value) return;
+  const next = typeof value === "string" ? value : localDate(new Date());
+  if (next !== selectedDate.value) { selectedDate.value = next; void load(); }
+});
 watch(() => route.query.action, () => { void handleRequestedAction(); });
-onMounted(async () => { await load(); await handleRequestedAction(); pollTimer = window.setInterval(() => void pollImageAnalyses(), 2_000); });
-onBeforeUnmount(() => { if (pollTimer !== undefined) window.clearInterval(pollTimer); });
+let pageActive = false;
+function stopPolling() { pageActive = false; if (pollTimer !== undefined) window.clearInterval(pollTimer); pollTimer = undefined; }
+onActivated(async () => {
+  pageActive = true;
+  await load(true);
+  if (!pageActive) return;
+  await handleRequestedAction();
+  if (pollTimer === undefined) pollTimer = window.setInterval(() => void pollImageAnalyses(), 2_000);
+});
+onDeactivated(stopPolling);
+onBeforeUnmount(stopPolling);
 </script>
 
 <template>

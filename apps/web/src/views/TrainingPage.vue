@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onActivated, reactive, ref } from "vue";
+import { submissionId } from "../support/submission-id";
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
@@ -54,6 +55,8 @@ const notice = ref("");
 const editorOpen = ref(false);
 const editingTemplate = ref<TrainingTemplate | null>(null);
 const actualForms = reactive<Record<string, ActualForm>>({});
+const savedActualForms: Record<string, string> = {};
+let extraDraftId = submissionId();
 const extraName = ref("");
 const extraNote = ref("");
 const extraSets = reactive<SetForm[]>([{ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" }]);
@@ -238,9 +241,9 @@ function describeTarget(item: TrainingSessionItem): string {
   return parts.length === 0 ? "没有预设训练量" : parts.join(" · ");
 }
 
-function syncActualForms(training: TrainingSession) {
+function syncActualForms(training: TrainingSession, savedItemId?: string) {
   for (const item of training.items) {
-    actualForms[item.id] = {
+    const form = {
       performedExerciseName: item.performedExerciseName ?? item.exerciseName,
       actualNote: item.actualNote ?? "",
       sets:
@@ -253,12 +256,17 @@ function syncActualForms(training: TrainingSession) {
             }))
           : [{ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" }],
     };
+    const untouched = actualForms[item.id] === undefined || JSON.stringify(actualForms[item.id]) === savedActualForms[item.id];
+    if (untouched || item.id === savedItemId) {
+      actualForms[item.id] = form;
+      savedActualForms[item.id] = JSON.stringify(form);
+    }
   }
 }
 
-function applySession(training: TrainingSession) {
+function applySession(training: TrainingSession, savedItemId?: string) {
   activeSession.value = training.status === "in_progress" ? training : null;
-  if (training.status === "in_progress") syncActualForms(training);
+  if (training.status === "in_progress") syncActualForms(training, savedItemId);
 }
 
 function reportError(error: unknown) {
@@ -282,6 +290,7 @@ async function toggleGuidance(key: string, exerciseName: string) {
 }
 
 async function load() {
+  if (saving.value) return;
   loading.value = true;
   errorMessage.value = "";
   const results = await Promise.allSettled([
@@ -295,8 +304,16 @@ async function load() {
   if (programsResult.status === "fulfilled") programs.value = programsResult.value;
   if (suggestionsResult.status === "fulfilled") suggestions.value = suggestionsResult.value;
   if (sessionsResult.status === "fulfilled") {
-    activeSession.value = sessionsResult.value[0] ?? null;
-    if (activeSession.value !== null) syncActualForms(activeSession.value);
+    const incoming = sessionsResult.value[0] ?? null;
+    const previous = activeSession.value;
+    const dirty = previous !== null && (previous.items.some(item => JSON.stringify(actualForms[item.id]) !== savedActualForms[item.id])
+      || extraName.value.trim().length > 0 || extraNote.value.trim().length > 0 || setPayload(extraSets).length > 0);
+    if (dirty && (incoming?.id !== previous?.id || incoming?.revision !== previous?.revision)) {
+      errorMessage.value = "这次训练在其他地方有更新；你的输入仍保留，请先核对，不会自动覆盖新记录。";
+    } else {
+      activeSession.value = incoming;
+      if (incoming !== null) syncActualForms(incoming);
+    }
   }
   const failed = results.find((result) => result.status === "rejected");
   if (failed?.status === "rejected") {
@@ -627,7 +644,7 @@ async function saveItem(item: TrainingSessionItem, status: "completed" | "pendin
       nullableText(form.actualNote),
       status === "pending" ? [] : setPayload(form.sets),
     );
-    applySession(training);
+    applySession(training, item.id);
     notice.value = status === "completed" ? `${item.exerciseName} 已记下` : status === "skipped" ? `${item.exerciseName} 已跳过` : `${item.exerciseName} 已恢复为待完成`;
   } catch (error) {
     reportError(error);
@@ -655,6 +672,7 @@ async function addExtra() {
     applySession(training);
     extraName.value = "";
     extraNote.value = "";
+    extraDraftId = submissionId();
     extraSets.splice(0, extraSets.length, { reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" });
     notice.value = "额外动作已加入本次训练";
   } catch (error) {
@@ -665,16 +683,32 @@ async function addExtra() {
 }
 
 async function finishTraining(status: "completed" | "abandoned") {
-  if (activeSession.value === null) return;
+  if (activeSession.value === null || saving.value) return;
   saving.value = true;
   errorMessage.value = "";
   try {
+    const changes = activeSession.value.items.filter((item) => actualForms[item.id] !== undefined
+      && JSON.stringify(actualForms[item.id]) !== savedActualForms[item.id]).map((item) => {
+      const form = actualForms[item.id]!;
+      return { id: item.id, status: "completed" as const, performedExerciseName: nullableText(form.performedExerciseName),
+        actualNote: nullableText(form.actualNote), sets: setPayload(form.sets) };
+    });
+    const extraHasData = extraName.value.trim() !== "" || extraNote.value.trim() !== "" || setPayload(extraSets).length > 0;
+    if (extraHasData && extraName.value.trim() === "") {
+      errorMessage.value = "还有未命名的动作，请填写动作名称后再保存；输入已保留。";
+      return;
+    }
     const finished = await trainingApi.finishSession(
       activeSession.value.id,
       activeSession.value.revision,
       status,
+      { items: changes, extra: extraHasData ? { id: extraDraftId, exerciseName: extraName.value, actualNote: nullableText(extraNote.value), sets: setPayload(extraSets) } : null },
     );
     applySession(finished);
+    extraName.value = "";
+    extraNote.value = "";
+    extraSets.splice(0, extraSets.length, { reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" });
+    extraDraftId = submissionId();
     notice.value = status === "completed" ? "这次训练已保存" : "训练已结束，已经完成的内容仍会保留";
   } catch (error) {
     reportError(error);
@@ -683,7 +717,7 @@ async function finishTraining(status: "completed" | "abandoned") {
   }
 }
 
-onMounted(() => void load());
+onActivated(() => void load());
 </script>
 
 <template>
@@ -974,7 +1008,7 @@ onMounted(() => void load());
           </template>
         </div>
 
-        <div v-else class="view-stack">
+        <fieldset v-else class="view-stack training-draft-fields" :disabled="saving" :aria-busy="saving">
           <section class="work-panel active-training" aria-labelledby="active-training-title">
             <div class="panel-heading">
               <div>
@@ -1058,6 +1092,10 @@ onMounted(() => void load());
               <button class="action-button action-button--primary" type="button" :disabled="saving" @click="finishTraining('completed')">保存并结束</button>
             </div>
           </section>
-        </div>
+        </fieldset>
   </AppShell>
 </template>
+
+<style scoped>
+.training-draft-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+</style>

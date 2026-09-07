@@ -14,11 +14,18 @@ export interface Account {
 export const useSessionStore = defineStore("session", () => {
   const account = ref<Account | null>(null);
   const restored = ref(false);
+  const draftScopeVersion = ref(0);
+  let draftOwnerId: string | null = null;
+  function adoptAccount(value: Account) {
+    if (draftOwnerId !== value.id) draftScopeVersion.value += 1;
+    draftOwnerId = value.id;
+    account.value = value;
+  }
 
   async function restore(): Promise<void> {
     if (restored.value) return;
     try {
-      account.value = await apiRequest<Account>("/api/v1/auth/me");
+      adoptAccount(await apiRequest<Account>("/api/v1/auth/me"));
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401) {
         console.error("Unable to restore session", error);
@@ -30,10 +37,10 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   async function authenticate(mode: "login" | "register", username: string, password: string) {
-    account.value = await apiRequest<Account>(`/api/v1/auth/${mode}`, {
+    adoptAccount(await apiRequest<Account>(`/api/v1/auth/${mode}`, {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    });
+    }));
     restored.value = true;
   }
 
@@ -46,6 +53,8 @@ export const useSessionStore = defineStore("session", () => {
 
   async function logout() {
     await apiRequest<void>("/api/v1/auth/logout", { method: "POST" });
+    draftOwnerId = null;
+    draftScopeVersion.value += 1;
     account.value = null;
     restored.value = true;
   }
@@ -55,5 +64,5 @@ export const useSessionStore = defineStore("session", () => {
     restored.value = true;
   }
 
-  return { account, restored, restore, authenticate, changePassword, logout, clearLocalSession };
+  return { account, restored, draftScopeVersion, restore, authenticate, changePassword, logout, clearLocalSession };
 });

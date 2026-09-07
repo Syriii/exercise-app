@@ -24,6 +24,29 @@ function createService() {
 }
 
 describe("TrainingService", () => {
+  it("commits every completion draft item together, and acknowledges only identical retries", async () => {
+    const { service, repository } = createService();
+    const template = await service.createTemplate("user-a", { name: "两个动作", note: null, items: [
+      { ...emptyTarget, exerciseName: "深蹲" }, { ...emptyTarget, exerciseName: "卧推" },
+    ] });
+    const session = await service.startSession("user-a", template.id, "Asia/Shanghai");
+    const set = { reps: 10, weightKg: "40", durationSeconds: null, distanceMeters: null, note: null };
+    const draft = { items: session.items.map((item) => ({ id: item.id, status: "completed" as const, performedExerciseName: item.exerciseName, actualNote: null, sets: [set] })),
+      extra: { id: "fd385eb3-8795-424a-b3d5-dbe6b0c36953", exerciseName: "拉伸", actualNote: null, sets: [] } };
+    await expect(service.finishSession("user-b", session.id, session.revision, "completed", draft)).rejects.toMatchObject({ code: "training_session_not_found" });
+    await expect(service.finishSession("user-a", session.id, session.revision, "completed", { ...draft, items: [...draft.items, { ...draft.items[0]!, id: "missing" }] })).rejects.toMatchObject({ code: "invalid_training_input" });
+    expect((await service.getSession("user-a", session.id)).revision).toBe(session.revision);
+    expect(repository.itemRevisions).toHaveLength(0);
+    const saved = await service.finishSession("user-a", session.id, session.revision, "completed", draft);
+    expect(saved.items).toHaveLength(3);
+    expect(saved.items.slice(0, 2).map((item) => item.sets[0]?.reps)).toEqual([10, 10]);
+    expect(saved.revision).toBe(session.revision + 1);
+    const retry = await service.finishSession("user-a", session.id, session.revision, "completed", draft);
+    expect(retry.revision).toBe(saved.revision);
+    expect(retry.items).toHaveLength(3);
+    expect(repository.itemRevisions).toHaveLength(2);
+    await expect(service.finishSession("user-a", session.id, session.revision, "completed", { ...draft, extra: { ...draft.extra, exerciseName: "跑步" } })).rejects.toMatchObject({ code: "training_session_closed" });
+  });
   it("returns only guidance with explicit source, license, version, and review state", () => {
     const { service } = createService();
     expect(service.getExerciseGuidance("罗马尼亚硬拉")).toMatchObject({

@@ -681,12 +681,26 @@ export class MemoryTrainingRepository implements TrainingRepository {
     expectedRevision: number,
     status: "completed" | "abandoned",
     endedAt: Date,
+    draft?: import("./types.js").TrainingCompletionDraft,
   ): Promise<TrainingSession | "revision_conflict" | null> {
-    const session = await this.findSession(userId, sessionId);
-    if (session === null) return null;
-    if (session.revision !== expectedRevision) return "revision_conflict";
+    const session = this.sessions.get(sessionId);
+    if (session === undefined || session.userId !== userId) return null;
+    if (session.revision !== expectedRevision || session.status !== "in_progress") return "revision_conflict";
+    if (draft?.items.some((change) => !session.items.some((item) => item.id === change.id))) return null;
+    if (draft?.extra && [...this.sessions.values()].some((entry) => entry.items.some((item) => item.id === draft.extra!.id))) return "revision_conflict";
+    const items = session.items.map((item) => {
+      const change = draft?.items.find((value) => value.id === item.id);
+      if (!change) return item;
+      this.itemRevisions.push({ id: randomUUID(), sessionId, sessionItemId: item.id, sessionRevision: session.revision,
+        status: item.status, performedExerciseName: item.performedExerciseName, actualNote: item.actualNote, sets: item.sets.map((set) => ({ ...set })), createdAt: now() });
+      return { ...item, ...change, sets: sessionSets(change.sets) };
+    });
+    if (draft?.extra) items.push({ id: draft.extra.id, sourceTemplateItemId: null, origin: "extra", status: "completed",
+      sortOrder: items.length, exerciseName: draft.extra.exerciseName, performedExerciseName: draft.extra.exerciseName, actualNote: draft.extra.actualNote,
+      target: { targetSets: null, targetRepsMin: null, targetRepsMax: null, targetWeightKg: null, targetDurationSeconds: null, targetDistanceMeters: null, note: null }, sets: sessionSets(draft.extra.sets) });
     const updated = {
       ...session,
+      items,
       status,
       revision: session.revision + 1,
       endedAt,

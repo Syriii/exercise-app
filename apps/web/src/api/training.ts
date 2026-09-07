@@ -396,9 +396,13 @@ export const trainingApi = {
     sessionId: string,
     revision: number,
     status: "completed" | "abandoned",
+    draft?: {
+      items: Array<{ id: string; status: "pending" | "completed" | "skipped"; performedExerciseName: string | null; actualNote: string | null; sets: TrainingSetInput[] }>;
+      extra: { id: string; exerciseName: string; actualNote: string | null; sets: TrainingSetInput[] } | null;
+    },
   ) =>
     apiRequest<TrainingSession>(`/api/v1/training/sessions/${sessionId}/finish`, {
       method: "POST",
-      body: JSON.stringify({ revision, status }),
+      body: JSON.stringify({ revision, status, draft }),
     }),
 };
