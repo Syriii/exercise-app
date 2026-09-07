@@ -2,7 +2,11 @@
 
 一个面向训练与饮食记录的开源健身辅助应用。项目先以响应式 Web App 验证真实使用体验，成熟后再封装为 Android APK。
 
-当前仓库采用单仓库、多应用结构；Vue Web、Fastify 服务端、PostgreSQL migration、pg-boss worker、账号会话和 Compose 部署定义已经完成。训练计划与实际记录、证据化训练建议和消耗估算、官方营养规划、独立饮食安排、手工与图片估餐、暂定值核对、历史趋势、三类提醒、账号导出/删除及朋友版安全边界均已有可运行实现，并已通过本地自动化验收。首台 OpenCloudOS 9 服务器的 Compose 首次启动、真实 migration/RLS、API/Worker 健康、非破坏性 smoke 和外部 `IP:5011` 访问已经通过；DeepSeek 真实请求、容器重建持久化、队列故障恢复和备份恢复仍待专项验收。大型公共食物目录等待合法数据源，Android 在 Web 版获得实际使用确认后实现。
+当前已有 Vue Web、Fastify API、PostgreSQL、pg-boss worker、账号与部署基础及训练/饮食主体实现。新一轮使用逻辑设计已确认并进入 Phase 6.6 改造；首个切片已接通单项照片食物、份量同比换算与常用复用，2026-09-07 本地 122 项测试、桌面/手机 43 项 E2E 及真实 PostgreSQL 15 项隔离测试通过，正在完成真实模型验证与上线。其余页面改造继续待实现，不能把旧版本测试通过视为新设计已交付。
+
+建议先看[完整页面文字行为树](docs/experience/experience-design.md)，再看[待实现与验收清单](docs/architecture/delivery-plan.md#phase-66-使用逻辑改造待实现)。新方向是“今天、饮食、训练、历史、我的”五入口，拍照产生可复用单项食物，训练以事后批量记录为主，身体数据在我的获得稳定入口。
+
+服务器已经完成首次启动、真实 migration/RLS 和健康/访问检查；域名/HTTPS 与服务器故障恢复、备份恢复等按独立专项后续处理。大型公共食物目录仍需合法数据源，Android 等待 Web 体验认可。准确当前阶段见[任务计划](.planning/exercise-app/task_plan.md)。
 
 ## 已确认的两个功能域
 
@@ -51,7 +55,7 @@ ALLOW_CONTAINER_RECREATE_TEST=true deployment/scripts/verify-increment0.sh full
 
 第一次部署可以直接跟随[快速部署教程](docs/deployment/quick-start.md)，启动容器前先运行其中的无副作用预检；持久化、安全、备份恢复、升级和完整验收见[自托管手册](docs/deployment/self-hosting.md)。
 
-运行中遇到页面问题时，可以在“设置 → 问题报告”生成可复制、可下载的脱敏文本。容器启动、数据库或后台任务异常时，在 `deployment/` 目录执行：
+运行中遇到页面问题时，现有版本可在“设置 → 问题报告”生成可复制、可下载的脱敏文本；新设计将入口移至“我的 → 设置”，尚待实施。容器启动、数据库或后台任务异常时，在 `deployment/` 目录执行：
 
 ```bash
 ./scripts/collect-diagnostics.sh
@@ -68,7 +72,7 @@ ALLOW_CONTAINER_RECREATE_TEST=true deployment/scripts/verify-increment0.sh full
 - 当前产品全貌：[`docs/product.md`](docs/product.md)
 - 已确认的领域规则：[`docs/domain/domain-rules.md`](docs/domain/domain-rules.md)
 - 训练与营养规划官方证据登记：[`docs/domain/calculation-evidence.md`](docs/domain/calculation-evidence.md)
-- 当前体验设计与原型范围：[`docs/experience/experience-design.md`](docs/experience/experience-design.md)
+- 当前页面行为树与跨页规则：[`docs/experience/experience-design.md`](docs/experience/experience-design.md)
 - 仓库架构与文件放置：[`docs/architecture/repository-layout.md`](docs/architecture/repository-layout.md)
 - 当前技术架构：[`docs/architecture/technical-architecture.md`](docs/architecture/technical-architecture.md)
 - 当前分阶段交付方案：[`docs/architecture/delivery-plan.md`](docs/architecture/delivery-plan.md)
@@ -94,7 +98,7 @@ ALLOW_CONTAINER_RECREATE_TEST=true deployment/scripts/verify-increment0.sh full
 - `.planning/exercise-app/`：Codex 使用的计划、研究和进度记录，不作为产品事实源。
 - 根目录：项目入口、全仓库规则、许可和跨应用编排配置。
 
-尚未产生内容的目录不会提前创建。临时餐食照片、个人记录、数据库、备份和访问凭证属于私有运行数据，不进入本仓库；确认后的餐食原图按产品规则删除，APK 和 AAB 作为发布产物也不直接提交到 Git。
+尚未产生内容的目录不会提前创建。临时餐食照片、个人记录、数据库、备份和访问凭证属于私有运行数据，不进入本仓库；原图按对应版本的临时媒体规则清理，结构化餐食不依赖原图长期存在。APK 和 AAB 作为发布产物也不直接提交到 Git。
 
 ## License
 

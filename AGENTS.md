@@ -18,7 +18,7 @@
 | `docs/product.md` | 已确认的唯一当前产品事实源 |
 | `docs/domain/domain-rules.md` | 已确认的当前领域事实源：概念、状态、计算责任、修正与异常规则 |
 | `docs/domain/calculation-evidence.md` | 训练与营养规划公式、阈值、适用范围、安全边界和产品推导的官方证据登记 |
-| `docs/experience/experience-design.md` | Phase 3 当前体验结构、核心流程、状态覆盖与低保真原型边界 |
+| `docs/experience/experience-design.md` | 当前完整页面文字行为树、核心流程、跨页规则与状态边界 |
 | `docs/architecture/technical-architecture.md` | 已确认的服务端、数据、任务、部署、安全与 Android 技术基线 |
 | `docs/architecture/delivery-plan.md` | 已确认的可运行增量、范围和验收顺序 |
 | `docs/product-decisions.md` | 只记录重要且经过权衡的决定 |
@@ -108,9 +108,9 @@ npm run test:e2e
 
 ## 7. 阶段约束
 
-Phase 5 Web 代码实现已经完成。完成性审计发现的训练消耗、图片暂定采用、饮食安排、历史趋势和上传体验缺口均已补齐并通过本地自动化验收；产品所有者已把真实服务器部署定义为独立后续目标。
+Phase 5 Web 主体代码与当时的自动化验收已经完成，这是既有版本历史，不代表 Phase 6.6 新设计已实现。2026-09-05 产品所有者已要求基于统一设计改造，进入 Phase 6.6 实施；按 task_plan 中的可运行切片推进，图片单项记录优先。现有缺陷与新能力验收见 delivery-plan 的 Phase 6.6 清单，生产 migration 仍须另获授权。
 
-- Phase 3 体验基线与 Phase 4 技术架构、交付顺序均已由产品所有者确认，不得重新降级为待讨论候选。
+- Phase 3 体验与 Phase 4 技术基线曾获确认；Phase 6.6 最新产品和体验规则替代其冲突流程，技术栈和安全边界不变。旧交付节中的实时训练、饮食安排、全天确认不能继续反推当前需求。
 - 后续若启动部署目标，再按自托管文档验证 Compose、PostgreSQL、pg-boss、DeepSeek、备份恢复和手机访问。图片不得进入导出或默认长期备份；Android 仍按既定门槛后移。
 - 可以创建真实的 `apps/server/` 和 `deployment/`；`apps/android/` 等到 Android 增量，`packages/` 仍只在真实跨应用复用出现后创建。
 - PostgreSQL 是业务事实源；Drizzle migration 必须生成可审阅 SQL，生产不得使用 schema `push`。pg-boss 只负责执行，自有任务表保存产品权威状态，Worker 按至少一次执行和幂等写回设计，当前不引入 Redis。
@@ -127,5 +127,6 @@ Phase 5 Web 代码实现已经完成。完成性审计发现的训练消耗、�
 - 保留用户已有改动，不覆盖无关文件。
 - 产品所有者已于 2026-08-30 明确要求：每批用户可见问题修改完成并通过本地验收后，默认自动提交到 `main`、推送 `origin/main`，并继续完成 Exercise App 的受限服务器重新部署和公网健康/版本验证，不再停在本地等待重复授权。
 - 上述持续授权只覆盖本项目代码的 fast-forward、应用镜像构建、私有应用版本键更新，以及只重建 Exercise App API/Worker；不覆盖 setup/migration、数据库写入、PostgreSQL、Nginx、Docker 服务、宿主机、端口、secret、volume、其他项目或清理操作。若某次变更需要这些操作，必须先说明影响并获得单独授权。
+- 2026-09-07 单次补充授权：产品所有者在 S1 真实模型验证与生产迁移说明后同意“直到完成上线”；本次允许 0019/0020 版本化生产迁移及必要的私有备份、专用 `_test` 恢复验证。不得借此运行会改共享角色密码或初始化账号的完整 setup，也不授权旧备份清理或上述其他基础设施变更；后续 migration 仍逐次授权。
 - 自动发布失败时保留现场、报告证据，不得为了完成部署擅自扩大操作边界；未经用户要求仍不执行破坏性 Git 操作。
 - 远程仓库为 `https://github.com/Syriii/exercise-app`，默认分支为 `main`。
