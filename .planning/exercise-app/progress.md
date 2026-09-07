@@ -2,6 +2,14 @@
 
 ## 2026-09-07 S1 上线推进
 
+- 最终完成：远程回合01a079fb-0eaf-7b33-ab15-da564f47e526正常结束。生产Drizzle21条；API/Worker均exercise-app:3659bbe、重启0；PG原容器保持running/重启0；Worker最后心跳7秒，secret只读及角色挂载隔离通过；/auth/me与nutrition私有GET未登录均401。本机与远程公网live/ready200，前端/assets/index-CXtbwpoF.js含3659bbe及单项照片/份量代码。未新建账号或写健康记录，未执行完整setup、共享角色改密、PG/Nginx/Docker/宿主机/端口/volume或其他项目变更。上线后只同步文档，不为纯文档提交再次重建应用。
+- 生产0019/0020已由窄入口执行，Drizzle共21条。迁移后检查最初错误期待0020已删除的约束仍存在，系统目录只读检查确认应为不存在；已纠正断言，未重跑迁移。后续约束目录拼接查询一次因pg内部char类型歧义失败，改为布尔检查后通过，均非业务故障。
+- 私有 .env 仅 APP_IMAGE_TAG/APP_BUILD_REVISION 两键变为3659bbe，权限0600和其他内容字节摘要未变；API/Worker已按 --no-deps --no-build 切换。主任务从本机独立读取公网live/ready均200、首页200，/assets/index-CXtbwpoF.js为200且含3659bbe、照片估算、/portion。等待远程最后心跳/权限/容器状态核对后完成交付。
+- 私有生产备份/隔离恢复升级通过：/newdata/data/xiesh/exercise-app-private-backups/s1-3659bbe/exercise-pre-3659bbe.dump，SHA256 4d3522411b0c4dfdfd7486f5632dc06db581f5c651c2b1e03f7f5c36d44cfcd6，目录0700/文件0600。exercise_s1_restore_test 从19迁移到21，ownerAclRlsPreserved、rowCountsPreserved、rowDigestsPreserved 均true；恢复库已删除且活动连接0。生产当时仍19，三容器未变、本机/公网健康200。日志 SHA256 2950ffcbba985f1382e01e5ec050a6e8309e7d6157176f62aa8b4e38625a5f27。仅证明同机本次备份恢复与升级，不代表异机灾难恢复。
+- 已发送条件发布指令且前置条件满足：仅运行已审阅的窄 Drizzle 入口在 exercise 应用0019/0020，确认21后只更新私有应用版本两键并以 base+DeepSeek Compose 的 --no-deps --no-build 重建API/Worker。当前等待生产执行和公网版本证据，不运行setup或修改共享角色。
+- 主任务审阅远程临时恢复/迁移脚本，要求执行前修正：docker exec 不接受 -T；备份恢复保留 owner/ACL；创建测试库成功后才安装清理 trap；不以备份后的生产实时计数强等于备份快照（可能有正常并发新增）；恢复库迁移前后比较稳定摘要并保留未知值；迁移使用单连接、5 秒锁超时/60 秒语句超时；备份父目录拒绝符号链接。上述脚本尚未执行，未造成生产影响。
+- 业务代码 6bf74de 与文档 3659bbe 已成功推送 origin/main；本次上线目标固定为 3659bbe34c64beb0644150cdd1cea7ec17e6b16c，远程已接收精确 SHA，生产切换仍等待窄入口审阅。
+- 新版真实 DeepSeek 合约单次通过：人工生成餐盘图 SHA256 0014ad1b024a2018ea4e9b615d58681bca833ba6c1634e3ed5d154f236e2d7bd，仅作临时夹具；模型 deepseek-v4-flash-vision-exp，foodsCount=3，份量与营养字段合法，finishReason=stop，usage prompt/completion/total=847/269/1116，耗时 11434 ms。retryLimit=0，无重试，不打印请求体、响应正文或密钥，未读取用户媒体。只证明合约可用，不证明餐食估算准确性。
 - 用户明确同意继续直到上线，已承接对新版模型验证与 0019/0020 生产迁移的单独授权；没有扩大到宿主机、共享角色改密或其他项目。
 - 使用 planning-with-files 留存质量门与回退证据，release-skills 辅助审阅发布范围；项目无 tag/changelog，三个 private workspace 版本均为 0.0.0，继续沿用既有提交 SHA 发布标识，不新增 npm/GitHub Release 流程或重复索要推送授权。gh 本机不可用，不影响既有 Git 推送。
 - 远程任务已接收新版真实模型单次合约与发布只读准备指令。模型只使用人工非敏感夹具，既有 Key 只读挂载，不读用户照片或输出原始响应；正式发布等待本地明确提交 SHA。
