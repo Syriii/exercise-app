@@ -8,6 +8,9 @@ import { planningApi, type DailyPlanningReference } from "../api/planning";
 import AppShell from "../app/AppShell.vue";
 import { type AppSection } from "../app/modules";
 import MealFoodItem from "../features/nutrition/MealFoodItem.vue";
+import FoodPicker from "../features/nutrition/FoodPicker.vue";
+import { foodCatalogApi } from "../api/food-catalog";
+import { newFoodPickerDraft, type FoodPickerDraft } from "../features/nutrition/food-picker-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
 
 interface ContributionForm { mode: MealContributionMode; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; saveAsTemplate: boolean; }
@@ -28,6 +31,13 @@ const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
 const recentMeals = ref<Meal[]>([]);
 const templates = ref<PersonalFoodTemplate[]>([]);
+const foodPickerDrafts = reactive<Record<string, FoodPickerDraft>>({});
+function foodPickerDraft(mealId: string): FoodPickerDraft { return foodPickerDrafts[mealId] ??= newFoodPickerDraft(); }
+async function selectionsSaved(meal: Meal) {
+  if (meal.localDate === selectedDate.value) meals.value = meals.value.map((value) => value.id === meal.id ? meal : value);
+  notice.value = "所选食物已保存，份量与营养已同步计算";
+  try { await refreshSummary(); } catch { errorMessage.value = "食物已保存，汇总暂时刷新不了，请不要重复添加。"; }
+}
 const dietPlans = ref<DietPlan[]>([]);
 const editingDietPlanId = ref<string | null>(null);
 const dietPlanForm = ref<DietPlanForm | null>(null);
@@ -382,14 +392,12 @@ async function portionSaved(saved: Meal) {
   try { await refreshSummary(saved.localDate); }
   catch { errorMessage.value = "份量已保存，但当天汇总暂时刷新不了，请不要重复保存。"; }
 }
-async function favoriteFood(item: MealContribution) {
+async function favoriteFood(meal: Meal, item: MealContribution) {
   if (saving.value) return;
   saving.value = true; errorMessage.value = "";
   try {
-    const input = foodSnapshotInput(item);
-    const existing = templates.value.find((value) => value.label === input.label && value.portionUnit === input.portionUnit);
-    if (existing) { notice.value = "常用食物中已有同名同单位的条目，可在常用管理中调整"; return; }
-    templates.value = sortTemplates([...templates.value, await nutritionApi.createFoodTemplate(input)]);
+    await foodCatalogApi.favoriteMealFood(meal.id, item.id);
+    templates.value = await nutritionApi.listFoodTemplates();
     notice.value = "已设为常用，下次可以单独添加这项食物";
   } catch (cause) { errorMessage.value = cause instanceof ApiError ? cause.message : "暂时设不了常用，请稍后重试"; }
   finally { saving.value = false; }
@@ -636,26 +644,7 @@ onBeforeUnmount(stopPolling);
               </ul>
             </section>
             <article v-for="meal in meals" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card"><header><div><strong>{{ meal.name ?? '未命名餐次' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div><button class="text-action danger-text" type="button" @click="deleteMeal(meal)">删除整顿</button></header>
-              <section class="meal-quick-add" :aria-labelledby="`quick-add-${meal.id}`">
-                <div class="meal-quick-add__heading"><div><strong :id="`quick-add-${meal.id}`">快速添加食物</strong><span>常用食物可直接加入；最近餐食可以只选其中相同的部分。</span></div></div>
-                <div v-if="templates.length" class="quick-food-group">
-                  <strong>我的常用食物</strong>
-                  <ul class="quick-food-list">
-                    <li v-for="item in templates" :key="item.id"><div><strong>{{ item.label }}</strong><small>{{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }} · {{ nutrientText(item.energyKcal, 'kcal') }}</small></div><span class="row-actions"><button class="text-action" type="button" :aria-label="`直接加入${item.label}`" :disabled="quickAddingMealId === meal.id" @click="quickAddFood(meal, item)">直接加入</button><button class="text-action" type="button" :aria-label="`调整后加入${item.label}`" @click="useTemplate(meal.id, item.id)">调整后加入</button></span></li>
-                  </ul>
-                </div>
-                <div v-if="recentMeals.length" class="recent-meal-group">
-                  <div><strong>从最近一餐选择</strong><span>只勾选今天仍然相同的食物。</span></div>
-                  <details v-for="(sourceMeal, sourceIndex) in recentMeals" :key="sourceMeal.id" class="recent-meal-card" :open="sourceIndex === 0">
-                    <summary><strong>{{ displayRecentMeal(sourceMeal) }}</strong><small>{{ sourceMeal.contributions.length }} 项可复用</small></summary>
-                    <ul>
-                      <li v-for="item in sourceMeal.contributions" :key="item.id"><label><input type="checkbox" :checked="isRecentSelected(meal.id, sourceMeal.id, item.id)" @change="toggleRecentSelection(meal.id, sourceMeal.id, item.id, ($event.target as HTMLInputElement).checked)" /><span><strong>{{ item.label }}</strong><small>{{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }} · {{ nutrientText(item.energyKcal, 'kcal') }}</small></span></label></li>
-                    </ul>
-                    <button class="action-button" type="button" :disabled="selectedRecentCount(meal.id, sourceMeal.id) === 0 || quickAddingMealId === meal.id" @click="addRecentFoods(meal, sourceMeal)">加入选中的 {{ selectedRecentCount(meal.id, sourceMeal.id) }} 项</button>
-                  </details>
-                </div>
-                <p v-if="templates.length === 0 && recentMeals.length === 0" class="empty-copy">还没有可复用的食物；先在下方录入一项，并勾选保存为常用食物。</p>
-              </section>
+              <!-- 食物选择与复用共用下方的目录。 -->
               <section class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
                 <div class="meal-image-panel__heading">
                   <div>
@@ -728,37 +717,9 @@ onBeforeUnmount(stopPolling);
                 </div>
               </section>
               <ul v-if="meal.contributions.length" class="meal-items">
-                <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(item)" />
+                <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)" />
               </ul><p v-else class="empty-copy">还没有填写这顿饭吃了什么。</p>
-              <section class="meal-food-search" :aria-labelledby="`food-search-${meal.id}`">
-                <div><strong :id="`food-search-${meal.id}`">搜索个人记录和公开包装食品</strong><span>个人常用与最近 90 天记录优先；输入至少 2 个字符后，也会搜索公开包装食品。</span></div>
-                <form class="food-search-row" @submit.prevent="searchFoods(meal.id)">
-                  <label><span>食物或菜名</span><input v-model="foodSearchQueries[meal.id]" placeholder="留空查看最近使用" /></label>
-                  <button class="action-button" type="submit" :disabled="searchingMealId === meal.id">{{ searchingMealId === meal.id ? '搜索中…' : '搜索' }}</button>
-                </form>
-                <div v-if="foodSearchResults[meal.id]?.length" class="food-search-group">
-                  <strong>我的个人记录</strong>
-                  <ul class="food-results">
-                  <li v-for="result in foodSearchResults[meal.id]" :key="result.id">
-                    <div><strong>{{ result.label }}</strong><span>{{ result.source === 'personal_template' ? '我的常用' : '最近吃过' }} · {{ result.portionAmount ?? '份量未知' }} {{ result.portionUnit ?? '' }}</span><small>{{ nutrientText(result.energyKcal, 'kcal') }} · 蛋白质 {{ nutrientText(result.proteinGrams, 'g') }} · 碳水 {{ nutrientText(result.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrientText(result.fatGrams, 'g') }}</small></div>
-                    <span class="row-actions"><button class="text-action" type="button" @click="quickAddFood(meal, result)">直接加入</button><button class="text-action" type="button" @click="useFoodSearchResult(meal.id, result)">调整后加入</button></span>
-                  </li>
-                  </ul>
-                </div>
-                <p v-else-if="foodSearchResults[meal.id]" class="empty-copy">没有匹配的个人记录；公开结果、手工填写和拍照估算仍可继续使用。</p>
-                <section v-if="publicFoodSearchResults[meal.id]?.length" class="food-search-group public-food-search" aria-label="公开包装食品结果">
-                  <div class="public-food-heading"><div><strong>公开包装食品</strong><span>每项先按每 100 g 展示；填写实际重量后换算到录入表单。</span></div><a href="https://world.openfoodfacts.org/" target="_blank" rel="noreferrer">Open Food Facts · ODbL</a></div>
-                  <p class="field-help">数据由社区贡献，可能缺失或不准确。计入前请核对包装标签；搜索词会发送给 Open Food Facts，不包含账号信息。</p>
-                  <ul class="food-results public-food-results">
-                    <li v-for="result in publicFoodSearchResults[meal.id]" :key="result.id">
-                      <div><strong>{{ result.label }}</strong><span>{{ result.brand ?? '品牌未知' }} · 每 100 g · 条码 {{ result.barcode }}</span><small>{{ nutrientText(result.energyKcal, 'kcal') }} · 蛋白质 {{ nutrientText(result.proteinGrams, 'g') }} · 碳水 {{ nutrientText(result.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrientText(result.fatGrams, 'g') }}</small><a :href="result.sourceUrl" target="_blank" rel="noreferrer">查看来源记录</a></div>
-                      <div class="public-food-actions"><label><span>实际重量（g）</span><input v-model="publicFoodPortions[publicFoodKey(meal.id, result.id)]" type="number" min="0.1" max="10000" step="any" :aria-label="`${result.label}实际重量（g）`" /></label><button class="text-action" type="button" @click="usePublicFoodResult(meal.id, result)">按这个重量带入</button></div>
-                    </li>
-                  </ul>
-                </section>
-                <p v-else-if="foodSearchResults[meal.id] && (foodSearchQueries[meal.id] ?? '').trim().length >= 2 && !publicFoodSearchErrors[meal.id]" class="empty-copy">公开包装食品中没有带可用营养数据的匹配结果。</p>
-                <p v-if="publicFoodSearchErrors[meal.id]" class="inline-warning" role="status">{{ publicFoodSearchErrors[meal.id] }}</p>
-              </section>
+              <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
               <form class="contribution-form" @submit.prevent="saveContribution(meal, meal.contributions.find((item) => item.id === editingContributionId))">
                 <div class="form-row"><label>录入方式<select v-model="formFor(meal.id).mode"><option value="item">单个食物</option><option value="whole_meal">整餐总量</option><option value="supplement">补充未覆盖项</option></select></label><label v-if="templates.length">我的常用项<select value="" @change="useTemplate(meal.id, ($event.target as HTMLSelectElement).value)"><option value="">选择后带入</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.label }}</option></select></label><label>名称<input v-model="formFor(meal.id).label" required placeholder="例如：米饭" /></label></div>
                 <div class="form-row"><label>份量<input v-model="formFor(meal.id).portionAmount" type="number" min="0" step="any" /></label><label>单位<input v-model="formFor(meal.id).portionUnit" placeholder="g / 碗 / 份" /></label><label>估算基准<input v-model="formFor(meal.id).basisDescription" placeholder="例如：食堂一碗" /></label></div>

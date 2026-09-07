@@ -1,5 +1,39 @@
 # 项目进度记录
 
+## 2026-09-07 B1 统一食物目录本地完成
+
+- 实现统一列表、整体分类、常用排序、多选份量与一次加入餐食。普通数据为官方USDA SR Legacy可复现16项起始子集，在线包装食品沿用OFF按需搜索，个人食物保留未知营养；不声称已覆盖全部中国食物。来源与许可见docs/domain/food-catalog-sources.md。
+- 新餐食条目固定来源/基准/营养快照，份量重算不覆盖历史；批量保存稳定提交ID、事务整体写入、缩短/修改/删除后的旧重试拒绝。普通切页保留账号会话内已选草稿；服务已保存但响应丢失后重试不重复。
+- 最终npm run check、npm run test（29文件131项）、npm run build、npm run api:contract及git diff --check通过；固定产物完整E2E 51/51（2 workers），目录手机/桌面2/2补验通过。320/375/414/768/960/1440六宽度选择器不横溢、可见输入/按钮/下拉高度至少44px；414px视口截图目视核对。最初元素截图被内部滚动/固定导航裁切，改为实际页面视口截图，未以错误裁图作为UI结论。
+- 新增真实PG用例 persists catalog preferences and immutable food snapshots with atomic batch retries and RLS，覆盖并发常用、批量重试、晚期失败回滚、快照与跨账号RLS；尚未执行，不用本地内存测试替代。待把固定提交交给现有114任务按已核实exercise_test隔离入口验收。
+- 0021/0022只在原有3表新增6字段与1私有唯一索引；无新表或历史合并/删除。生产当前迁移21，升级会到23，必须另获授权；本轮未运行生产迁移或部署。旧饮食安排/全天确认/模板管理与识别控制仍待B2，B/C/D未全部完成。
+- planning-with-files沿用现有项目记录，release-skills按项目SHA发布约定审阅；不引入版本号、tag或新的发布系统。此前Astra指令改写、完整旧计划归档与用户转贴A/E上线证据保留并一并收口。
+
+## 2026-09-07 A/E受限发布完成回传
+
+- 来源：用户复制远程任务最终回复。离线bundle为8195字节，校验通过；未重试网络fetch，未移动远程main/origin/main。detached源码位于`/tmp/exercise-ux-ae-release.UK0sOB/source-31acb96`，HEAD精确且干净，服务端/根依赖/deployment与真实PG16/16验收的e324fd5一致。
+- 远程报告镜像`exercise-app:31acb96`（ID仅回传缩写`sha256:c5928ba9…64d5e`）；内嵌版本与API/Worker入口检查通过，仅更新两个版本键，.env仍0600，API/Worker新镜像且重启0。PG容器ID/镜像/重启未变，迁移21，Worker心跳11秒；未运行PG测试、setup、migration、真实模型或人工业务写入。
+- 本机独立只读核对：公网首页、`/api/v1/health/live`、`/api/v1/health/ready`均200；`/assets/index-BYlNOVGg.js`为200且含`31acb96`。容器、迁移、私有接口401等结果来自用户转贴，未声称本机重新验证了服务器内部状态。
+- 远程保存仓库仍为41d472d8，跟踪源码未改；未提交脱敏发布报告位于`/newdata/data/xiesh/exercise-app/.planning/exercise-app/ux-ae-release-verification-2026-09-07.md`。文档尚未推送不影响已核实的应用版本上线；不重发发布或另建回传通道。
+- 当前计划已将A/E标为已上线并恢复应用任务，B/C/D保持未完成。B前置核对确认现有搜索仅合并个人模板及90天内最近餐食且截断50项，缺少稳定食物身份、全目录分页和整体分类；E-011尚无整库再分发授权，不能直接抓取导入。尚未修改B业务代码或运行其验收。
+
+## 2026-09-07 Astra 持久指令适配
+
+- 最终文档检查通过：20处本地引用无缺失，git diff --check通过，旧计划归档与修改前全文逐字节一致。AGENTS由132行改为65行；当前计划由93,298字节缩至约3.8KB。未提交、推送、部署或修改共享技能安装；应用发布状态仍待用户转贴远程结论。
+
+- 完整阅读官方Astra指南和用户提供的Eric原文；纠正“工具无法访问”等于“原文必须登录”的推断。完整依据、有效指令范围与规则变化见astra-instruction-audit-2026-09-07.md。
+- 改写根AGENTS：讨论/实施分开、按任务读取、按风险验证、清楚的完成/授权边界，以及远程正文读不到直接请用户复制；全局AGENTS为空，模型/权限配置与外部共享技能未改。
+- 将93,298字节旧task_plan完整归档，逐字节一致；新当前计划保留A–E全部未完成项、PG转贴及未确认发布状态。此前工作区3份规划文件改动均保留。
+- 首次AGENTS补丁因同文件delete/add被拒绝，未产生改动；随后改为单一Update成功。只验证指令/文档差异、引用及规则一致性，不跑业务测试或部署。
+
+## 2026-09-07 A/E 发布恢复（PG 结论由用户转贴）
+
+- 收到用户转贴的远程结论：精确 e324fd575935d7057fe2673829dc985e0efa2953 的真实 PostgreSQL 测试16/16通过，新增原子完成草稿/晚期失败回滚/安全重试用例通过；exercise_test不存在、活动连接0。生产API/Worker/PG容器ID、镜像、重启次数及exercise_api安全属性未变，生产迁移仍21，密码路径preserve；未动独立S1工作区、未构建正式镜像或部署。
+- 远程验收文档唯一提交为41d472d8b0e5c531bce0d88561acac34021e3176，原文位于服务器保存仓库 .planning/exercise-app/ux-a-postgres-verification-2026-09-07.md。推送两次30秒无结果，无残留Git进程，远程跟踪分支仍e324fd5、干净ahead1；无新增凭据。此处为用户转贴证据，不冒充主任务直接读到原文件。
+- 本机git ls-remote独立核对GitHub main为31acb96b9ada72506c67d8ea36b67abb7dd9c549；相对PG验收源码的apps/server、package.json、package-lock.json、deployment diff为空。前端批次沿用最终123项测试、49项E2E证据。
+- 远程wait快照仍无结果正文，已知对方没有send_message_to_thread，不再要求不存在的回传工具。通过同一用户授权任务发送有界fetch、独立detached源码构建、仅API/Worker切换指令；保留原41d472d8和S1工作区，不merge/rebase/reset/强推。文档未推送与PG验收通过分开记录，不重跑已完成测试。
+- 本轮按planning-with-files保留执行状态，release-skills辅助审阅发布；继续使用已有SHA版本标识，不新增semver/tag或GitHub Release。首次合并读取输出截断，已分文件分段补读，无业务文件受影响。发布尚待执行结果与公网独立核对。
+
 ## 2026-09-07 可用性修复 E（验收中）
 
 - 最终check/build、123项单元/API、49/49桌面/手机E2E通过；新滚动保护下触控和原鼠标模式分别3/3通过。最后构建index-BugyuS-L.js / index-DEV7L3gD.css；414px五页截图采集，训练/饮食/账号/反馈目视核对，未替代U04/U05待改业务。

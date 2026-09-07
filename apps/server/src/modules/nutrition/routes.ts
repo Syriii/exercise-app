@@ -6,11 +6,23 @@ import type { PlanningService } from "../planning/service.js";
 import type { ContributionRequest, NutritionService } from "./service.js";
 import type { PublicFoodSearchResult } from "./public-food-provider.js";
 import type { DietPlan, DietPlanInput, FoodSearchResult, Meal, PersonalFoodTemplate } from "./types.js";
+import { foodCategories, type FoodCategory } from "./food-catalog.js";
+import type { FoodSelection } from "./service.js";
 
 const nullableNumber = { anyOf: [{ type: "null" }, { type: "number" }] } as const;
 const nullableString = { anyOf: [{ type: "null" }, { type: "string" }] } as const;
 const nutrientProperties = { energyKcal: nullableNumber, proteinGrams: nullableNumber, carbohydrateGrams: nullableNumber, fatGrams: nullableNumber } as const;
-const contributionProperties = { id: { type: "string", format: "uuid" }, mealId: { type: "string", format: "uuid" }, mode: { type: "string", enum: ["item", "whole_meal", "supplement"] }, source: { type: "string", enum: ["manual", "model_adopted"] }, reviewStatus: { type: "string", enum: ["tentative", "confirmed"] }, sourceAnalysisId: { anyOf: [{ type: "null" }, { type: "string", format: "uuid" }] }, label: { type: "string" }, portionAmount: nullableNumber, portionUnit: nullableString, basisDescription: nullableString, ...nutrientProperties, revision: { type: "integer" }, createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } as const;
+const catalogProperties = { id: { type: "string" }, version: { type: "string" }, label: { type: "string" },
+  basisAmount: nullableNumber, basisUnit: nullableString, category: { type: "string", enum: Object.keys(foodCategories) },
+  provider: { type: "string", enum: ["usda_sr_legacy", "open_food_facts", "personal", "photo_estimate"] }, sourceName: { type: "string" },
+  sourceUrl: nullableString, license: nullableString, originalName: nullableString, ...nutrientProperties } as const;
+const foodDefinitionResponse = { type: "object", additionalProperties: false, required: Object.keys(catalogProperties), properties: catalogProperties } as const;
+const catalogFoodResponse = { ...foodDefinitionResponse, required: [...foodDefinitionResponse.required, "isFavorite"], properties: { ...catalogProperties, isFavorite: { type: "boolean" } } } as const;
+const catalogPageResponse = { type: "object", additionalProperties: false, required: ["items", "nextCursor", "total", "categories", "warning"], properties: {
+  items: { type: "array", items: catalogFoodResponse }, nextCursor: nullableString, total: { type: "integer" },
+  categories: { type: "object", additionalProperties: { type: "string" } }, warning: nullableString,
+} } as const;
+const contributionProperties = { foodSnapshot: { anyOf: [{ type: "null" }, foodDefinitionResponse] }, id: { type: "string", format: "uuid" }, mealId: { type: "string", format: "uuid" }, mode: { type: "string", enum: ["item", "whole_meal", "supplement"] }, source: { type: "string", enum: ["manual", "model_adopted"] }, reviewStatus: { type: "string", enum: ["tentative", "confirmed"] }, sourceAnalysisId: { anyOf: [{ type: "null" }, { type: "string", format: "uuid" }] }, label: { type: "string" }, portionAmount: nullableNumber, portionUnit: nullableString, basisDescription: nullableString, ...nutrientProperties, revision: { type: "integer" }, createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } as const;
 const contributionResponse = { type: "object", additionalProperties: false, required: Object.keys(contributionProperties), properties: contributionProperties } as const;
 const mealProperties = { id: { type: "string", format: "uuid" }, occurredAt: { type: "string", format: "date-time" }, localDate: { type: "string", format: "date" }, timeZone: { type: "string" }, name: nullableString, note: nullableString, revision: { type: "integer" }, contributions: { type: "array", items: contributionResponse }, createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } as const;
 const mealResponse = { type: "object", additionalProperties: false, required: Object.keys(mealProperties), properties: mealProperties } as const;
@@ -29,7 +41,7 @@ const dietPlanResponse = { type: "object", additionalProperties: false, required
 type MealInput = { occurredAt: string; localDate: string; timeZone: string; name: string | null; note: string | null };
 type ContributionBody = ContributionRequest & { replaceExisting: boolean };
 
-function serializeMeal(meal: Meal) { return { ...meal, occurredAt: meal.occurredAt.toISOString(), createdAt: meal.createdAt.toISOString(), updatedAt: meal.updatedAt.toISOString(), contributions: meal.contributions.map((value) => ({ ...value, createdAt: value.createdAt.toISOString(), updatedAt: value.updatedAt.toISOString() })) }; }
+function serializeMeal(meal: Meal) { return { ...meal, occurredAt: meal.occurredAt.toISOString(), createdAt: meal.createdAt.toISOString(), updatedAt: meal.updatedAt.toISOString(), contributions: meal.contributions.map((value) => ({ ...value, foodSnapshot: value.foodSnapshot ?? null, createdAt: value.createdAt.toISOString(), updatedAt: value.updatedAt.toISOString() })) }; }
 function serializeTemplate(value: PersonalFoodTemplate) { return { ...value, createdAt: value.createdAt.toISOString(), updatedAt: value.updatedAt.toISOString() }; }
 function serializeFoodSearch(value: FoodSearchResult) { return { ...value, lastUsedAt: value.lastUsedAt.toISOString() }; }
 function serializePublicFoodSearch(value: PublicFoodSearchResult) { return value; }
@@ -37,6 +49,38 @@ function serializeDietPlan(value: DietPlan) { const { userId: _userId, ...plan }
 
 export async function registerNutritionRoutes(app: FastifyInstance, options: { identityService: IdentityService; nutritionService: NutritionService; planningService: PlanningService }): Promise<void> {
   async function userId(request: FastifyRequest) { return (await options.identityService.authenticate(request.cookies[sessionCookieName])).id; }
+
+  app.get<{ Querystring: { query?: string; category?: FoodCategory | "all"; cursor?: string; limit?: number } }>("/api/v1/nutrition/food-catalog", {
+    schema: { querystring: { type: "object", additionalProperties: false, properties: { query: { type: "string", maxLength: 100 },
+      category: { type: "string", enum: ["all", ...Object.keys(foodCategories)] }, cursor: { type: "string", maxLength: 100 }, limit: { type: "integer", minimum: 1, maximum: 50 } } },
+    response: { 200: catalogPageResponse } }, handler: async (r) => options.nutritionService.getFoodCatalog(await userId(r), r.query.query, r.query.category, r.query.cursor ?? null, r.query.limit),
+  });
+  app.post<{ Body: { query: string; category?: FoodCategory | "all"; cursor?: string; limit?: number } }>("/api/v1/nutrition/food-catalog/search", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["query"], properties: {
+      query: { type: "string", maxLength: 100 }, category: { type: "string", enum: ["all", ...Object.keys(foodCategories)] }, cursor: { type: "string", maxLength: 100 }, limit: { type: "integer", minimum: 1, maximum: 50 },
+    } }, response: { 200: catalogPageResponse } }, handler: async (r) => options.nutritionService.searchFoodCatalog(await userId(r), r.body.query, r.body.category, r.body.cursor ?? null, r.body.limit),
+  });
+  app.put<{ Body: { foodId: string; isFavorite: boolean } }>("/api/v1/nutrition/food-catalog/favorite", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["foodId", "isFavorite"], properties: { foodId: { type: "string", maxLength: 100 }, isFavorite: { type: "boolean" } } }, response: { 204: { type: "null" } } },
+    handler: async (r, reply) => { await options.nutritionService.setFoodFavorite(await userId(r), r.body.foodId, r.body.isFavorite); return reply.status(204).send(); },
+  });
+  app.post<{ Params: { mealId: string; contributionId: string } }>("/api/v1/nutrition/meals/:mealId/contributions/:contributionId/favorite", {
+    schema: { params: twoIdParams, response: { 204: { type: "null" } } },
+    handler: async (r, reply) => { await options.nutritionService.favoriteMealFood(await userId(r), r.params.mealId, r.params.contributionId); return reply.status(204).send(); },
+  });
+  app.post<{ Body: ContributionRequest & { category: FoodCategory } }>("/api/v1/nutrition/food-catalog/personal", {
+    schema: { body: { ...contributionInput, required: [...contributionInput.required, "category"], properties: { ...contributionInput.properties, category: { type: "string", enum: Object.keys(foodCategories) } } }, response: { 201: catalogFoodResponse } },
+    handler: async (r, reply) => reply.status(201).send(await options.nutritionService.createPersonalFood(await userId(r), r.body)),
+  });
+  app.post<{ Params: { mealId: string }; Body: { mealRevision: number; submissionId: string; selections: FoodSelection[] } }>("/api/v1/nutrition/meals/:mealId/food-selections", {
+    schema: { params: idParams("mealId"), body: { type: "object", additionalProperties: false, required: ["mealRevision", "submissionId", "selections"], properties: {
+      mealRevision: { type: "integer", minimum: 1 }, submissionId: { type: "string", format: "uuid" },
+      selections: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", additionalProperties: false, required: ["foodId", "version", "amount"], properties: {
+        foodId: { type: "string", maxLength: 100 }, version: { type: "string", maxLength: 100 }, amount: { type: "number", exclusiveMinimum: 0, maximum: 100000 },
+      } } },
+    } }, response: { 201: mealResponse } },
+    handler: async (r, reply) => reply.status(201).send(serializeMeal(await options.nutritionService.addFoodSelections(await userId(r), r.params.mealId, r.body.mealRevision, r.body.submissionId, r.body.selections))),
+  });
 
   app.patch<{ Params: { mealId: string; contributionId: string }; Body: { mealRevision: number; contributionRevision: number; portionAmount: number } }>("/api/v1/nutrition/meals/:mealId/contributions/:contributionId/portion", {
     schema: { params: twoIdParams, body: { type: "object", additionalProperties: false, required: ["mealRevision", "contributionRevision", "portionAmount"], properties: {

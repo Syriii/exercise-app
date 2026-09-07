@@ -122,30 +122,27 @@ test("a person can reuse matching foods, search public products, and manage comm
   await page.getByLabel("餐次名称（可选）").fill("早餐");
   await page.getByRole("button", { name: "建立餐次" }).click();
   const todayMeal = page.locator("article.meal-card").filter({ hasText: "早餐" });
-  const yesterdayGroup = todayMeal.locator("details.recent-meal-card").filter({ hasText: "昨天 · 早餐" });
-  await yesterdayGroup.getByRole("checkbox", { name: /鸡蛋/ }).check();
-  await yesterdayGroup.getByRole("checkbox", { name: /豆浆/ }).check();
-  await yesterdayGroup.getByRole("button", { name: "加入选中的 2 项" }).click();
+  const picker = todayMeal.getByRole("region", { name: "添加食物", exact: true });
+  await picker.getByRole("button", { name: "添加食物", exact: true }).click();
+  await picker.getByRole("button", { name: "选择：鸡蛋", exact: true }).click();
+  await picker.getByRole("button", { name: "选择：豆浆", exact: true }).click();
+  await picker.getByRole("button", { name: "加入这顿饭（2项）", exact: true }).click();
   const todayItems = todayMeal.locator(".meal-items");
   await expect(todayItems.getByText("鸡蛋", { exact: true })).toBeVisible();
   await expect(todayItems.getByText("豆浆", { exact: true })).toBeVisible();
   await expect(todayItems.getByText("包子", { exact: true })).toHaveCount(0);
 
-  const publicFoodSearch = todayMeal.getByRole("region", { name: "搜索个人记录和公开包装食品" });
-  await publicFoodSearch.getByLabel("食物或菜名").fill("豆奶");
-  await publicFoodSearch.getByRole("button", { name: "搜索", exact: true }).scrollIntoViewIfNeeded();
-  await publicFoodSearch.getByRole("button", { name: "搜索", exact: true }).click();
-  const publicResults = publicFoodSearch.getByRole("region", { name: "公开包装食品结果" });
-  await expect(publicResults.getByText("原浆豆奶", { exact: true })).toBeVisible();
-  await expect(publicResults.getByText("Open Food Facts · ODbL")).toBeVisible();
-  await publicResults.getByLabel("原浆豆奶实际重量（g）").fill("250");
-  await publicResults.getByRole("button", { name: "按这个重量带入" }).press("Enter");
-  await expect(todayMeal.getByLabel("份量")).toHaveValue("250");
-  await expect(todayMeal.getByLabel("能量 kcal")).toHaveValue("155");
-  await expect(todayMeal.getByLabel("蛋白质 g")).toHaveValue("15");
-  await expect(todayMeal.getByLabel("估算基准")).toHaveValue(/Open Food Facts.*6907992515960.*250 g/);
-  await todayMeal.getByRole("button", { name: "计入这顿饭" }).click();
-  await expect(todayItems.getByText("原浆豆奶（示例品牌）", { exact: true })).toBeVisible();
+  await picker.getByRole("button", { name: "添加食物", exact: true }).click();
+  await picker.getByLabel("搜索食物", { exact: true }).fill("豆奶");
+  await picker.getByRole("button", { name: "搜索", exact: true }).click();
+  const online = picker.getByRole("listitem").filter({ hasText: "原浆豆奶 · 示例品牌" });
+  await online.getByText("来源与营养", { exact: true }).click();
+  await expect(online.getByText("Open Food Facts · 请核对包装标签")).toBeVisible();
+  await online.getByRole("button", { name: "选择：原浆豆奶 · 示例品牌", exact: true }).click();
+  await picker.getByLabel("原浆豆奶 · 示例品牌份量（g）").fill("250");
+  await expect(picker.getByRole("form", { name: "已选食物" }).getByText("155 kcal", { exact: true })).toBeVisible();
+  await picker.getByRole("button", { name: "加入这顿饭（1项）" }).click();
+  await expect(todayItems.getByText("原浆豆奶 · 示例品牌", { exact: true })).toBeVisible();
 
   await todayMeal.getByLabel("名称").fill("夹馍");
   await todayMeal.getByLabel("份量").fill("1");
@@ -158,7 +155,10 @@ test("a person can reuse matching foods, search public products, and manage comm
   await page.getByLabel("餐次名称（可选）").fill("加餐");
   await page.getByRole("button", { name: "建立餐次" }).click();
   const snack = page.locator("article.meal-card").filter({ hasText: "加餐" });
-  await snack.getByRole("button", { name: "直接加入豆浆" }).click();
+  const snackPicker = snack.getByRole("region", { name: "添加食物", exact: true });
+  await snackPicker.getByRole("button", { name: "添加食物", exact: true }).click();
+  await snackPicker.getByRole("button", { name: "选择：豆浆", exact: true }).click();
+  await snackPicker.getByRole("button", { name: "加入这顿饭（1项）" }).click();
   await expect(snack.locator(".meal-items").getByText("豆浆", { exact: true })).toBeVisible();
 
   const manager = page.getByRole("region", { name: "管理我的常用食物" });
@@ -233,8 +233,9 @@ test("a person can record, correct, and review a meal without treating unknown n
   await expect(page.getByText("已记录 250 kcal")).toBeVisible();
   await expect(page.getByText("营养记录已修正，旧值仍可追溯")).toBeVisible();
 
-  const foodSearch = meal.getByRole("region", { name: "搜索个人记录和公开包装食品" });
-  await foodSearch.getByLabel("食物或菜名").fill("米饭");
+  const foodSearch = meal.getByRole("region", { name: "添加食物", exact: true });
+  await foodSearch.getByRole("button", { name: "添加食物", exact: true }).click();
+  await foodSearch.getByLabel("搜索食物", { exact: true }).fill("米饭");
   const searchButton = foodSearch.getByRole("button", { name: "搜索", exact: true });
   await searchButton.scrollIntoViewIfNeeded();
   await expect.poll(() => searchButton.evaluate(element => {
@@ -243,8 +244,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   })).toBe(true);
   if (testInfo.project.name === "mobile-chromium" && process.env.UX_POINTER_MOUSE !== 'true') await searchButton.tap();
   else await searchButton.click();
-  const personalResult = foodSearch.getByRole("listitem").filter({ hasText: "我的常用" });
-  const adjustButton = personalResult.getByRole("button", { name: "调整后加入" });
+  const adjustButton = foodSearch.getByRole("button", { name: "选择：米饭", exact: true });
   await adjustButton.scrollIntoViewIfNeeded();
   await expect.poll(() => adjustButton.evaluate((element) => {
     const rect = element.getBoundingClientRect();
@@ -252,7 +252,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   })).toBe(true);
   if (testInfo.project.name === "mobile-chromium" && process.env.UX_POINTER_MOUSE !== 'true') await adjustButton.tap();
   else await adjustButton.click();
-  await expect(meal.getByLabel("能量 kcal")).toHaveValue("232");
+  await expect(foodSearch.getByRole("form", { name: "已选食物" }).getByText("232 kcal", { exact: true })).toBeVisible();
   await expect(page.getByText("已记录 250 kcal")).toBeVisible();
 
   await page.goto("/history");

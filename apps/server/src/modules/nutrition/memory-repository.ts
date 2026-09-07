@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sameSelection } from "./selection-retry.js";
 
 import type { ContributionInput, DietPlanRepositoryInput, FoodTemplateInput, MealMetadataInput, NutritionRepository } from "./repository.js";
 import type { DietPlan, Meal, MealContribution, MealContributionRevision, MealRevision, PersonalFoodTemplate } from "./types.js";
@@ -13,6 +14,34 @@ export class MemoryNutritionRepository implements NutritionRepository {
   readonly #coverage = new Map<string, boolean>();
   readonly #templates = new Map<string, PersonalFoodTemplate[]>();
   readonly #dietPlans = new Map<string, DietPlan[]>();
+  readonly #selectionIds = new Set<string>();
+  readonly #selectionBatches = new Map<string, number>();
+
+  public async setFoodFavorite(userId: string, foodId: string, favorite: boolean, publicFood: FoodTemplateInput | null): Promise<void> {
+    const values = this.#templates.get(userId) ?? [];
+    const existing = values.find((food) => food.catalogKey === foodId || `personal:${food.id}` === foodId);
+    if (existing) values[values.indexOf(existing)] = { ...existing, isFavorite: favorite, updatedAt: new Date() };
+    else if (publicFood) await this.createFoodTemplate(userId, { ...publicFood, isFavorite: favorite });
+  }
+
+  public async addSelectedFoods(userId: string, mealId: string, expectedRevision: number, inputs: readonly (ContributionInput & { id: string })[], submissionId: string) {
+    const pair = this.findMeal(userId, mealId);
+    if (!pair) return "not_found" as const;
+    const batchKey = `${userId}:${mealId}:${submissionId}`;
+    if (this.#selectionBatches.has(batchKey)) {
+      return this.#selectionBatches.get(batchKey) === inputs.length && inputs.every((input) => pair.meal.contributions.some((saved) => sameSelection(saved, input))) ? clone(pair.meal) : "revision_conflict" as const;
+    }
+    if (pair.meal.revision !== expectedRevision) return "revision_conflict" as const;
+    if (pair.meal.contributions.some((item) => item.mode === "whole_meal")) return "replacement_required" as const;
+    if (new Set(inputs.map((input) => input.id)).size !== inputs.length || inputs.some((input) => this.#selectionIds.has(input.id))) throw new Error("selection identifier collision");
+    const now = new Date();
+    const saved = { ...pair.meal, revision: expectedRevision + 1, updatedAt: now,
+      contributions: [...pair.meal.contributions, ...inputs.map((input) => ({ ...clone(input), mealId, revision: 1, createdAt: now, updatedAt: now }))] };
+    inputs.forEach((input) => { this.#selectionIds.add(input.id); this.#contributionMeals.set(input.id, mealId); });
+    this.#selectionBatches.set(batchKey, inputs.length);
+    pair.values[pair.index] = saved;
+    return clone(saved);
+  }
 
   public async listDietPlans(userId: string, dateFrom: string, dateTo: string, includeArchived: boolean): Promise<readonly DietPlan[]> {
     return clone((this.#dietPlans.get(userId) ?? []).filter((value) => value.dateFrom <= dateTo && value.dateTo >= dateFrom && (includeArchived || value.archivedAt === null)).sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()));
@@ -161,5 +190,5 @@ export class MemoryNutritionRepository implements NutritionRepository {
   private findMeal(userId: string, mealId: string) { const values = this.#meals.get(userId) ?? []; const index = values.findIndex((meal) => meal.id === mealId); return index < 0 ? null : { values, index, meal: values[index]! }; }
   private requiresReplacement(values: readonly MealContribution[], mode: MealContribution["mode"]) { return values.length > 0 && (mode === "whole_meal" || values.some((value) => value.mode === "whole_meal")); }
   private saveMealRevision(meal: Meal) { const values = this.#mealRevisions.get(meal.id) ?? []; values.push({ id: randomUUID(), mealId: meal.id, mealRevision: meal.revision, occurredAt: meal.occurredAt, localDate: meal.localDate, timeZone: meal.timeZone, name: meal.name, note: meal.note, createdAt: new Date() }); this.#mealRevisions.set(meal.id, values); }
-  private saveContributionRevision(value: MealContribution) { const values = this.#contributionRevisions.get(value.id) ?? []; values.push({ id: randomUUID(), contributionId: value.id, contributionRevision: value.revision, mode: value.mode, source: value.source, reviewStatus: value.reviewStatus, sourceAnalysisId: value.sourceAnalysisId, label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams, createdAt: new Date() }); this.#contributionRevisions.set(value.id, values); }
+  private saveContributionRevision(value: MealContribution) { const values = this.#contributionRevisions.get(value.id) ?? []; values.push({ id: randomUUID(), contributionId: value.id, contributionRevision: value.revision, mode: value.mode, source: value.source, reviewStatus: value.reviewStatus, sourceAnalysisId: value.sourceAnalysisId, foodSnapshot: value.foodSnapshot ?? null, label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams, createdAt: new Date() }); this.#contributionRevisions.set(value.id, values); }
 }

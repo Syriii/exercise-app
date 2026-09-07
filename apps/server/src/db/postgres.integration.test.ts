@@ -16,6 +16,8 @@ import { PostgresImageAnalysisRepository } from "../modules/image-analysis/postg
 import { PostgresOperationsService } from "../modules/operations/service.js";
 import { PostgresNutritionRepository } from "../modules/nutrition/postgres-repository.js";
 import { NutritionService } from "../modules/nutrition/service.js";
+import { builtinFoods } from "../modules/nutrition/food-catalog.js";
+import type { ContributionInput } from "../modules/nutrition/repository.js";
 import { PostgresPlanningRepository } from "../modules/planning/postgres-repository.js";
 import { PlanningService } from "../modules/planning/service.js";
 import { PostgresReminderRepository } from "../modules/reminders/postgres-repository.js";
@@ -828,6 +830,56 @@ describe("PostgreSQL integration", () => {
     if (typeof retryAttempt === "string") throw new Error("expected attempt");
     await images.succeed(retry.id, retryAttempt.attemptId, candidate, "test-late");
     expect((await nutrition.getMeal(userId, meal.id)).contributions).toHaveLength(0);
+  });
+
+  it("persists catalog preferences and immutable food snapshots with atomic batch retries and RLS", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`catalog-a-${randomUUID()}`, `catalog-b-${randomUUID()}`]);
+    const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;
+    const repository = new PostgresNutritionRepository(database.database);
+    const service = new NutritionService(repository);
+    const egg = builtinFoods.find((food) => food.id === "usda:173424")!;
+    await Promise.all([service.setFoodFavorite(userId, egg.id, true), service.setFoodFavorite(userId, egg.id, true)]);
+    expect((await repository.listFoodTemplates(userId)).filter((food) => food.catalogKey === egg.id)).toHaveLength(1);
+    expect((await service.getFoodCatalog(userId)).items[0]).toMatchObject({ id: egg.id, isFavorite: true });
+    expect((await service.getFoodCatalog(otherId, "鸡蛋")).items[0]!.isFavorite).toBe(false);
+    const personal = await service.createPersonalFood(userId, { mode: "item", label: "未知配菜", portionAmount: 100, portionUnit: "g", basisDescription: null, category: "vegetables", energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null });
+    const input = { occurredAt: "2026-09-07T00:00:00Z", localDate: "2026-09-07", timeZone: "UTC", name: "目录验收", note: null };
+    const meal = await service.createMeal(userId, input);
+    const choices = [{ foodId: egg.id, version: egg.version, amount: 200 }, { foodId: personal.id, version: personal.version, amount: 50 }];
+    const submission = randomUUID();
+    const [saved, retry] = await Promise.all([service.addFoodSelections(userId, meal.id, 1, submission, choices), service.addFoodSelections(userId, meal.id, 1, submission, choices)]);
+    expect(saved.contributions).toHaveLength(2);
+    expect(retry).toEqual(saved);
+    await expect(service.addFoodSelections(userId, meal.id, saved.revision, submission, choices.slice(0, 1))).rejects.toMatchObject({ statusCode: 409 });
+    expect(saved.contributions.find((c) => c.foodSnapshot?.id === egg.id)).toMatchObject({ energyKcal: 310, foodSnapshot: { basisAmount: 100, energyKcal: 155 } });
+    expect(saved.contributions.find((c) => c.foodSnapshot?.id === personal.id)!.energyKcal).toBeNull();
+    await expect(service.addFoodSelections(otherId, meal.id, 1, submission, choices)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(service.setFoodFavorite(otherId, personal.id, true)).rejects.toMatchObject({ statusCode: 404 });
+    const item = saved.contributions.find((c) => c.foodSnapshot?.id === egg.id)!;
+    const changed = await service.changePortion(userId, meal.id, item.id, saved.revision, item.revision, 50);
+    expect(changed.contributions.find((c) => c.id === item.id)!.energyKcal).toBe(77.5);
+    expect((await service.listContributionRevisions(userId, meal.id))[0]!.foodSnapshot).toEqual(item.foodSnapshot);
+    await service.setFoodFavorite(userId, egg.id, false);
+    expect((await service.getMeal(userId, meal.id)).contributions).toEqual(changed.contributions);
+    await expect(service.addFoodSelections(userId, meal.id, 1, submission, choices)).rejects.toMatchObject({ statusCode: 409 });
+
+    // A late PK collision must roll back the earlier entry and parent revision.
+    const empty = await service.createMeal(userId, input);
+    const firstId = randomUUID();
+    const contribution: ContributionInput = { mode: "item", source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null, label: "事务测试", portionAmount: 1, portionUnit: "份", basisDescription: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null, foodSnapshot: null };
+    await expect(repository.addSelectedFoods(userId, empty.id, 1, [{ ...contribution, id: firstId }, { ...contribution, id: item.id }], randomUUID())).rejects.toBeDefined();
+    expect(await service.getMeal(userId, empty.id)).toMatchObject({ revision: 1, contributions: [] });
+    expect((await database.pool.query("select id from meal_contributions where id = $1", [firstId])).rowCount).toBe(0);
+
+    const client = await database.pool.connect();
+    try {
+      await client.query("begin"); await client.query("set local role exercise_api");
+      await client.query("select set_config('exercise.user_id', $1, true)", [otherId]);
+      expect((await client.query("select catalog_metadata from personal_food_templates where user_id = $1", [userId])).rowCount).toBe(0);
+      expect((await client.query("select food_snapshot from meal_contributions where meal_id = $1", [meal.id])).rowCount).toBe(0);
+      expect((await client.query("update personal_food_templates set is_favorite = true where user_id = $1", [userId])).rowCount).toBe(0);
+      await client.query("rollback");
+    } finally { client.release(); }
   });
 
   it("commits a transactional job and leaves no job after rollback", async () => {

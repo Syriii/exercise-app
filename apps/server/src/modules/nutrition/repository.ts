@@ -13,6 +13,8 @@ export type FoodTemplateInput = Omit<PersonalFoodTemplate, "id" | "revision" | "
 export type DietPlanRepositoryInput = Omit<DietPlan, "id" | "userId" | "revision" | "archivedAt" | "createdAt" | "updatedAt">;
 
 export interface NutritionRepository {
+  setFoodFavorite(userId: string, foodId: string, favorite: boolean, publicFood: FoodTemplateInput | null): Promise<void>;
+  addSelectedFoods(userId: string, mealId: string, expectedRevision: number, inputs: readonly (ContributionInput & { id: string })[], submissionId: string): Promise<Meal | "not_found" | "revision_conflict" | "replacement_required">;
   listDietPlans(userId: string, dateFrom: string, dateTo: string, includeArchived: boolean): Promise<readonly DietPlan[]>;
   createDietPlan(userId: string, input: DietPlanRepositoryInput): Promise<DietPlan>;
   updateDietPlan(userId: string, planId: string, expectedRevision: number, input: DietPlanRepositoryInput): Promise<DietPlan | "not_found" | "revision_conflict">;

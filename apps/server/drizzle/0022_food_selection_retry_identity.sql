@@ -1,0 +1,1 @@
+ALTER TABLE "meal_contributions" ADD COLUMN "selection_batch_id" uuid;

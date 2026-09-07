@@ -1,3 +1,5 @@
+import type { FoodDefinition, FoodProvenance } from "./food-catalog.js";
+
 export type MealContributionMode = "item" | "whole_meal" | "supplement";
 export type MealContributionSource = "manual" | "model_adopted";
 export type MealContributionReviewStatus = "tentative" | "confirmed";
@@ -10,6 +12,7 @@ export interface NutrientValues {
 }
 
 export interface MealContribution extends NutrientValues {
+  readonly foodSnapshot?: FoodDefinition | null;
   readonly id: string;
   readonly mealId: string;
   readonly mode: MealContributionMode;
@@ -81,6 +84,7 @@ export interface MealRevision {
 }
 
 export interface MealContributionRevision extends NutrientValues {
+  readonly foodSnapshot?: FoodDefinition | null;
   readonly id: string;
   readonly contributionId: string;
   readonly contributionRevision: number;
@@ -113,6 +117,9 @@ export interface NutritionDaySummary {
 }
 
 export interface PersonalFoodTemplate extends NutrientValues {
+  readonly catalogKey?: string | null;
+  readonly catalogMetadata?: FoodProvenance | null;
+  readonly isFavorite?: boolean;
   readonly id: string;
   readonly label: string;
   readonly portionAmount: number | null;

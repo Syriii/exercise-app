@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { FoodDefinition, FoodProvenance } from "../../modules/nutrition/food-catalog.js";
 import {
   boolean,
   check,
@@ -889,6 +890,8 @@ export const mealContributions = pgTable(
     reviewStatus: mealContributionReviewStatus("review_status").default("confirmed").notNull(),
     sourceAnalysisId: uuid("source_analysis_id"),
     sourceItemIndex: integer("source_item_index").default(0).notNull(),
+    foodSnapshot: jsonb("food_snapshot").$type<FoodDefinition>(),
+    selectionBatchId: uuid("selection_batch_id"),
     label: text("label").notNull(),
     portionAmount: numeric("portion_amount", { precision: 12, scale: 3 }),
     portionUnit: text("portion_unit"),
@@ -922,6 +925,7 @@ export const mealContributionRevisions = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     contributionId: uuid("contribution_id").notNull().references(() => mealContributions.id, { onDelete: "cascade" }),
     contributionRevision: integer("contribution_revision").notNull(),
+    foodSnapshot: jsonb("food_snapshot").$type<FoodDefinition>(),
     mode: mealContributionMode("mode").notNull(),
     source: mealContributionSource("source").default("manual").notNull(),
     reviewStatus: mealContributionReviewStatus("review_status").default("confirmed").notNull(),
@@ -959,6 +963,9 @@ export const personalFoodTemplates = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    catalogKey: text("catalog_key"),
+    catalogMetadata: jsonb("catalog_metadata").$type<FoodProvenance>(),
+    isFavorite: boolean("is_favorite").default(true).notNull(),
     label: text("label").notNull(),
     portionAmount: numeric("portion_amount", { precision: 12, scale: 3 }),
     portionUnit: text("portion_unit"),
@@ -973,6 +980,7 @@ export const personalFoodTemplates = pgTable(
   },
   (table) => [
     index("personal_food_templates_user_idx").on(table.userId),
+    uniqueIndex("personal_food_templates_catalog_key_uq").on(table.userId, table.catalogKey),
     check("personal_food_templates_label_not_blank_ck", sql`length(btrim(${table.label})) > 0`),
     check("personal_food_templates_portion_nonnegative_ck", sql`${table.portionAmount} is null or ${table.portionAmount} >= 0`),
     check("personal_food_templates_energy_nonnegative_ck", sql`${table.energyKcal} is null or ${table.energyKcal} >= 0`),

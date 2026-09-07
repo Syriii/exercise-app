@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { catalogFoods, externalFoodVersion, foodCategories, foodSnapshot, personalFood, scaleFood, type FoodCategory, type FoodCatalogPage, type FoodDefinition } from "./food-catalog.js";
 
 import type { ImageNutritionCandidate } from "../image-analysis/types.js";
 import { imageFoodContributions } from "./image-foods.js";
@@ -36,7 +37,110 @@ function nonnegative(value: number | null, name: string, maximum: number): numbe
 function round(value: number): number { return Math.round(value * 10) / 10; }
 
 export class NutritionService {
+  readonly #externalFoods = new Map<string, { food: FoodDefinition; expiresAt: number }>();
   public constructor(private readonly repository: NutritionRepository, private readonly publicFoodProvider: PublicFoodProvider | null = null) {}
+
+  private externalFoods(): FoodDefinition[] {
+    for (const [key, value] of this.#externalFoods) if (value.expiresAt <= Date.now()) this.#externalFoods.delete(key);
+    return [...this.#externalFoods.values()].map((entry) => entry.food);
+  }
+
+  public async searchFoodCatalog(userId: string, query: string, category: FoodCategory | "all" = "all", cursor: string | null = null, limit = 25): Promise<FoodCatalogPage> {
+    const local = await this.getFoodCatalog(userId, query, category, null, limit);
+    if (query.trim().length < 2) return this.getFoodCatalog(userId, query, category, cursor, limit);
+    let external: FoodDefinition[];
+    try {
+      external = (await this.searchPublicFoods(query)).map((result) => {
+        const food: FoodDefinition = { id: result.id, version: "", label: result.brand ? `${result.label} · ${result.brand}` : result.label,
+          category: "other", provider: "open_food_facts", sourceName: "Open Food Facts · 请核对包装标签", sourceUrl: result.sourceUrl,
+          license: "ODbL-1.0 / DbCL-1.0", originalName: null, basisAmount: 100, basisUnit: "g",
+          energyKcal: result.energyKcal, proteinGrams: result.proteinGrams, carbohydrateGrams: result.carbohydrateGrams, fatGrams: result.fatGrams };
+        food.version = externalFoodVersion(food);
+        this.#externalFoods.set(food.id, { food, expiresAt: Date.now() + 600_000 });
+        return food;
+      });
+      this.externalFoods();
+      while (this.#externalFoods.size > 1000) this.#externalFoods.delete(this.#externalFoods.keys().next().value!);
+    } catch {
+      const page = cursor ? await this.getFoodCatalog(userId, query, category, cursor, limit) : local;
+      return { ...page, warning: "在线食物来源暂不可用；已有目录、已选内容和个人食物仍可使用。" };
+    }
+    return this.getFoodCatalog(userId, query, category, cursor, limit, external);
+  }
+
+  public async getFoodCatalog(userId: string, query = "", category: FoodCategory | "all" = "all", cursor: string | null = null, limit = 25, external: readonly FoodDefinition[] = []): Promise<FoodCatalogPage> {
+    if (query.length > 100 || !Number.isInteger(limit) || limit < 1 || limit > 50 || (category !== "all" && !Object.hasOwn(foodCategories, category)))
+      throw new NutritionError("invalid_nutrition_input", "食物查询条件无效", 400);
+    const text = query.trim().toLocaleLowerCase("zh-CN");
+    const foods = catalogFoods(await this.repository.listFoodTemplates(userId), external).filter((food) =>
+      (category === "all" || category === food.category) && `${food.label} ${food.originalName ?? ""}`.toLocaleLowerCase("zh-CN").includes(text));
+    const start = cursor === null ? 0 : foods.findIndex((food) => food.id === cursor) + 1;
+    if (cursor !== null && start === 0) throw new NutritionError("food_catalog_changed", "列表已变化，请重新搜索；已选食物会保留", 409);
+    const items = foods.slice(start, start + limit);
+    return { items, total: foods.length, nextCursor: start + items.length < foods.length ? items.at(-1)!.id : null, categories: foodCategories, warning: null };
+  }
+
+  public async setFoodFavorite(userId: string, foodId: string, favorite: boolean): Promise<void> {
+    const food = catalogFoods(await this.repository.listFoodTemplates(userId), this.externalFoods()).find((value) => value.id === foodId);
+    if (!food) throw new NutritionError("food_not_found", "找不到这个食物", 404);
+    const isPublic = food.provider === "usda_sr_legacy" || food.provider === "open_food_facts";
+    const { category, provider, sourceName, sourceUrl, license, originalName } = food;
+    await this.repository.setFoodFavorite(userId, foodId, favorite, isPublic ? {
+      label: food.label, portionAmount: food.basisAmount, portionUnit: food.basisUnit, basisDescription: food.sourceName,
+      energyKcal: food.energyKcal, proteinGrams: food.proteinGrams, carbohydrateGrams: food.carbohydrateGrams, fatGrams: food.fatGrams,
+      catalogKey: food.id, catalogMetadata: { category, provider, sourceName, sourceUrl, license, originalName }, isFavorite: favorite,
+    } : null);
+  }
+
+  public async createPersonalFood(userId: string, input: ContributionRequest & { category: FoodCategory }) {
+    if (!Object.hasOwn(foodCategories, input.category) || input.portionAmount === null || input.portionAmount <= 0 || !input.portionUnit?.trim())
+      throw new NutritionError("invalid_nutrition_input", "请填写食物分类与正数的基准份量和单位", 400);
+    return personalFood(await this.repository.createFoodTemplate(userId, { ...this.foodTemplateInput(input), isFavorite: false,
+      catalogMetadata: { category: input.category, provider: "personal", sourceName: "个人录入", sourceUrl: null, license: null, originalName: null } }));
+  }
+
+  public async favoriteMealFood(userId: string, mealId: string, contributionId: string): Promise<void> {
+    const item = (await this.getMeal(userId, mealId)).contributions.find((value) => value.id === contributionId);
+    if (!item) throw new NutritionError("contribution_not_found", "找不到这项食物", 404);
+    if (item.foodSnapshot && catalogFoods(await this.repository.listFoodTemplates(userId)).some((food) => food.id === item.foodSnapshot!.id)) {
+      await this.setFoodFavorite(userId, item.foodSnapshot.id, true);
+      return;
+    }
+    const basis = item.foodSnapshot;
+    const key = `meal-food:${item.id}`;
+    await this.repository.setFoodFavorite(userId, key, true, {
+      label: item.label, portionAmount: basis?.basisAmount ?? item.portionAmount, portionUnit: basis?.basisUnit ?? item.portionUnit,
+      basisDescription: basis?.sourceName ?? item.basisDescription,
+      energyKcal: basis ? basis.energyKcal : item.energyKcal, proteinGrams: basis ? basis.proteinGrams : item.proteinGrams,
+      carbohydrateGrams: basis ? basis.carbohydrateGrams : item.carbohydrateGrams, fatGrams: basis ? basis.fatGrams : item.fatGrams,
+      catalogKey: key, isFavorite: true, catalogMetadata: basis ? { category: basis.category, provider: basis.provider, sourceName: basis.sourceName, sourceUrl: basis.sourceUrl, license: basis.license, originalName: basis.originalName }
+        : { category: "other", provider: item.source === "model_adopted" ? "photo_estimate" : "personal", sourceName: item.source === "model_adopted" ? "照片估算（个人食物）" : "个人录入", sourceUrl: null, license: null, originalName: null },
+    });
+  }
+
+  public async addFoodSelections(userId: string, mealId: string, mealRevision: number, submissionId: string, selections: readonly FoodSelection[]): Promise<Meal> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(submissionId) || selections.length < 1 || selections.length > 20
+      || new Set(selections.map((s) => s.foodId)).size !== selections.length)
+      throw new NutritionError("invalid_nutrition_input", "每次请选择1–20种不同食物", 400);
+    // Verify ownership before resolving any private food references.
+    await this.getMeal(userId, mealId);
+    const catalog = catalogFoods(await this.repository.listFoodTemplates(userId), this.externalFoods());
+    const inputs = selections.map((selection, index): ContributionInput & { id: string } => {
+      const food = catalog.find((f) => f.id === selection.foodId);
+      if (!food) throw new NutritionError("food_not_found", "所选食物已不可用；其他选择仍会保留", 404);
+      if (food.version !== selection.version) throw new NutritionError("food_catalog_changed", "所选食物已修改，请重新选择该食物", 409);
+      if (!Number.isFinite(selection.amount) || selection.amount <= 0 || selection.amount > 100000 || food.basisAmount === null || food.basisAmount <= 0 || food.basisUnit === null)
+        throw new NutritionError("invalid_nutrition_input", "请填写有效份量；旧食物没有基准时需先补充个人食物", 400);
+      const amount = Math.round(selection.amount * 1000) / 1000;
+      if (amount <= 0) throw new NutritionError("invalid_nutrition_input", "份量最小为0.001", 400);
+      const hash = createHash("sha256").update(JSON.stringify([userId, mealId, submissionId, index])).digest("hex");
+      const id = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+      return { id, mode: "item", source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null,
+        label: food.label, portionAmount: amount, portionUnit: food.basisUnit, basisDescription: food.sourceName,
+        foodSnapshot: foodSnapshot(food), ...this.nutrients(scaleFood(food, amount)) };
+    });
+    return this.unwrapMeal(await this.repository.addSelectedFoods(userId, mealId, mealRevision, inputs, submissionId));
+  }
 
   public async listMeals(userId: string, from: string, to: string): Promise<readonly Meal[]> {
     this.assertDate(from); this.assertDate(to);
@@ -124,7 +228,8 @@ export class NutritionService {
     const existing = meal.contributions.find((value) => value.id === contributionId);
     if (existing === undefined) throw new NutritionError("contribution_not_found", "找不到这项食物", 404);
     if (meal.revision !== mealRevision || existing.revision !== contributionRevision) this.revisionConflict();
-    let basis: Pick<ContributionInput, "portionAmount" | "portionUnit" | keyof NutrientValues> = existing;
+    let basis: Pick<ContributionInput, "portionAmount" | "portionUnit" | keyof NutrientValues> = existing.foodSnapshot
+      ? { ...existing.foodSnapshot, portionAmount: existing.foodSnapshot.basisAmount, portionUnit: existing.foodSnapshot.basisUnit } : existing;
     if (basis.portionAmount === null || basis.portionAmount <= 0) {
       const history = await this.listContributionRevisions(userId, mealId);
       const prior = history.filter((value) => value.contributionId === existing.id
@@ -139,7 +244,7 @@ export class NutritionService {
     const scale = (value: number | null) => value === null ? null : Math.round(value * amount / basis.portionAmount! * 1000) / 1000;
     const nutrients = this.nutrients({ energyKcal: scale(basis.energyKcal), proteinGrams: scale(basis.proteinGrams), carbohydrateGrams: scale(basis.carbohydrateGrams), fatGrams: scale(basis.fatGrams) });
     const input: ContributionInput = { mode: existing.mode, label: existing.label, source: existing.source,
-      sourceAnalysisId: existing.sourceAnalysisId, reviewStatus: "confirmed",
+      sourceAnalysisId: existing.sourceAnalysisId, reviewStatus: "confirmed", foodSnapshot: existing.foodSnapshot ?? null,
       portionAmount: amount, portionUnit: existing.portionUnit, basisDescription: existing.basisDescription, ...nutrients };
     return this.unwrapMeal(await this.repository.updateContribution(userId, mealId, contributionId, mealRevision, contributionRevision, input, false));
   }
@@ -201,7 +306,7 @@ export class NutritionService {
 
   public async setCoverageConfirmed(userId: string, localDate: string, confirmed: boolean): Promise<boolean> { this.assertDate(localDate); return this.repository.setCoverageConfirmed(userId, localDate, confirmed); }
 
-  public async listFoodTemplates(userId: string) { return this.repository.listFoodTemplates(userId); }
+  public async listFoodTemplates(userId: string) { return (await this.repository.listFoodTemplates(userId)).filter((food) => food.isFavorite !== false); }
 
   public async searchFoods(userId: string, query: string, asOfDate: string): Promise<readonly FoodSearchResult[]> {
     this.assertDate(asOfDate);
@@ -274,7 +379,9 @@ export class NutritionService {
 
   public async createFoodTemplate(userId: string, input: ContributionRequest) { return this.repository.createFoodTemplate(userId, this.foodTemplateInput(input)); }
   public async updateFoodTemplate(userId: string, id: string, revision: number, input: ContributionRequest) {
-    const result = await this.repository.updateFoodTemplate(userId, id, revision, this.foodTemplateInput(input));
+    const previous = (await this.repository.listFoodTemplates(userId)).find((food) => food.id === id);
+    const result = await this.repository.updateFoodTemplate(userId, id, revision, { ...this.foodTemplateInput(input), catalogKey: null,
+      catalogMetadata: { category: previous?.catalogMetadata?.category ?? "other", provider: "personal", sourceName: "个人录入", sourceUrl: null, license: null, originalName: null } });
     if (result === "not_found") throw new NutritionError("food_template_not_found", "找不到这个常用食物", 404);
     if (result === "revision_conflict") this.revisionConflict();
     return result;
@@ -316,12 +423,14 @@ export class NutritionService {
   private contributionInput(input: ContributionRequest): ContributionInput {
     const nutrients = this.nutrients(input);
     if (input.mode !== "item" && Object.values(nutrients).every((value) => value === null)) throw new NutritionError("invalid_nutrition_input", "至少填写一项营养值；未知项可以留空", 400);
-    return { mode: input.mode, source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null, label: cleanText(input.label, 100) ?? "", portionAmount: nonnegative(input.portionAmount, "份量", 100000), portionUnit: cleanText(input.portionUnit, 30), basisDescription: cleanText(input.basisDescription, 200), ...nutrients };
+    const label = cleanText(input.label, 100);
+    if (label === null) throw new NutritionError("invalid_nutrition_input", "请填写食物名称", 400);
+    return { mode: input.mode, source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null, foodSnapshot: null, label, portionAmount: nonnegative(input.portionAmount, "份量", 100000), portionUnit: cleanText(input.portionUnit, 30), basisDescription: cleanText(input.basisDescription, 200), ...nutrients };
   }
 
   private foodTemplateInput(input: ContributionRequest): FoodTemplateInput {
     const value = this.contributionInput({ ...input, mode: "item" });
-    const { mode: _mode, source: _source, reviewStatus: _reviewStatus, sourceAnalysisId: _sourceAnalysisId, ...template } = value;
+    const { mode: _mode, source: _source, reviewStatus: _reviewStatus, sourceAnalysisId: _sourceAnalysisId, foodSnapshot: _snapshot, ...template } = value;
     return template;
   }
 
@@ -344,3 +453,5 @@ export interface ContributionRequest extends NutrientValues {
   readonly portionUnit: string | null;
   readonly basisDescription: string | null;
 }
+
+export interface FoodSelection { readonly foodId: string; readonly version: string; readonly amount: number; }

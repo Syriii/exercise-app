@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 
 import type { Database } from "../../db/database.js";
+import { sameSelection } from "./selection-retry.js";
 import {
   mealContributionRevisions,
   mealContributions,
@@ -18,14 +19,44 @@ function numericValues<T extends { portionAmount: number | null; energyKcal: num
   return { ...value, portionAmount: value.portionAmount?.toString() ?? null, energyKcal: value.energyKcal?.toString() ?? null, proteinGrams: value.proteinGrams?.toString() ?? null, carbohydrateGrams: value.carbohydrateGrams?.toString() ?? null, fatGrams: value.fatGrams?.toString() ?? null };
 }
 function contributionFromRow(row: typeof mealContributions.$inferSelect): MealContribution {
-  return { id: row.id, mealId: row.mealId, mode: row.mode, source: row.source, reviewStatus: row.reviewStatus, sourceAnalysisId: row.sourceAnalysisId, label: row.label, portionAmount: numberValue(row.portionAmount), portionUnit: row.portionUnit, basisDescription: row.basisDescription, energyKcal: numberValue(row.energyKcal), proteinGrams: numberValue(row.proteinGrams), carbohydrateGrams: numberValue(row.carbohydrateGrams), fatGrams: numberValue(row.fatGrams), revision: row.revision, createdAt: row.createdAt, updatedAt: row.updatedAt };
+  return { id: row.id, mealId: row.mealId, mode: row.mode, source: row.source, reviewStatus: row.reviewStatus, sourceAnalysisId: row.sourceAnalysisId, foodSnapshot: row.foodSnapshot, label: row.label, portionAmount: numberValue(row.portionAmount), portionUnit: row.portionUnit, basisDescription: row.basisDescription, energyKcal: numberValue(row.energyKcal), proteinGrams: numberValue(row.proteinGrams), carbohydrateGrams: numberValue(row.carbohydrateGrams), fatGrams: numberValue(row.fatGrams), revision: row.revision, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 function templateFromRow(row: typeof personalFoodTemplates.$inferSelect): PersonalFoodTemplate {
-  return { id: row.id, label: row.label, portionAmount: numberValue(row.portionAmount), portionUnit: row.portionUnit, basisDescription: row.basisDescription, energyKcal: numberValue(row.energyKcal), proteinGrams: numberValue(row.proteinGrams), carbohydrateGrams: numberValue(row.carbohydrateGrams), fatGrams: numberValue(row.fatGrams), revision: row.revision, createdAt: row.createdAt, updatedAt: row.updatedAt };
+  return { id: row.id, catalogKey: row.catalogKey, catalogMetadata: row.catalogMetadata, isFavorite: row.isFavorite, label: row.label, portionAmount: numberValue(row.portionAmount), portionUnit: row.portionUnit, basisDescription: row.basisDescription, energyKcal: numberValue(row.energyKcal), proteinGrams: numberValue(row.proteinGrams), carbohydrateGrams: numberValue(row.carbohydrateGrams), fatGrams: numberValue(row.fatGrams), revision: row.revision, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 
 export class PostgresNutritionRepository implements NutritionRepository {
   public constructor(private readonly database: Database) {}
+
+  public async setFoodFavorite(userId: string, foodId: string, favorite: boolean, publicFood: FoodTemplateInput | null): Promise<void> {
+    if (publicFood !== null) {
+      await this.database.insert(personalFoodTemplates).values({ userId, ...numericValues(publicFood), isFavorite: favorite })
+        .onConflictDoUpdate({ target: [personalFoodTemplates.userId, personalFoodTemplates.catalogKey],
+          set: { isFavorite: favorite, deletedAt: null, updatedAt: new Date() } });
+    } else {
+      await this.database.update(personalFoodTemplates).set({ isFavorite: favorite, updatedAt: new Date() })
+        .where(and(foodId.startsWith("personal:") ? eq(personalFoodTemplates.id, foodId.slice("personal:".length)) : eq(personalFoodTemplates.catalogKey, foodId), eq(personalFoodTemplates.userId, userId), isNull(personalFoodTemplates.deletedAt)));
+    }
+  }
+
+  public async addSelectedFoods(userId: string, mealId: string, expectedRevision: number, inputs: readonly (ContributionInput & { id: string })[], submissionId: string) {
+    const result = await this.database.transaction(async (tx) => {
+      const [meal] = await tx.select().from(meals).where(and(eq(meals.id, mealId), eq(meals.userId, userId), isNull(meals.deletedAt))).for("update");
+      if (!meal) return "not_found" as const;
+      const rows = await tx.select().from(mealContributions).where(eq(mealContributions.mealId, mealId));
+      const existing = rows.filter((row) => row.selectionBatchId === submissionId);
+      if (existing.length > 0) return existing.length === inputs.length && existing.every((row) => {
+        const input = inputs.find((i) => i.id === row.id);
+        return row.supersededAt === null && input !== undefined && sameSelection(contributionFromRow(row), input);
+      }) ? "saved" as const : "revision_conflict" as const;
+      if (meal.revision !== expectedRevision) return "revision_conflict" as const;
+      if (rows.some((row) => row.supersededAt === null && row.mode === "whole_meal")) return "replacement_required" as const;
+      await tx.insert(mealContributions).values(inputs.map((input, sourceItemIndex) => ({ mealId, selectionBatchId: submissionId, sourceItemIndex, ...numericValues(input) })));
+      await tx.update(meals).set({ revision: sql`${meals.revision} + 1`, updatedAt: new Date() }).where(eq(meals.id, mealId));
+      return "saved" as const;
+    });
+    return result === "saved" ? (await this.getMeal(userId, mealId)) ?? "not_found" as const : result;
+  }
 
   public async listDietPlans(userId: string, dateFrom: string, dateTo: string, includeArchived: boolean): Promise<readonly DietPlan[]> {
     const rows = await this.database.select().from(dietPlans).where(and(eq(dietPlans.userId, userId), lte(dietPlans.dateFrom, dateTo), gte(dietPlans.dateTo, dateFrom), ...(includeArchived ? [] : [isNull(dietPlans.archivedAt)]))).orderBy(desc(dietPlans.updatedAt));
@@ -105,7 +136,7 @@ export class PostgresNutritionRepository implements NutritionRepository {
       const active = await transaction.select().from(mealContributions).where(and(eq(mealContributions.mealId, mealId), isNull(mealContributions.supersededAt))).for("update");
       if (this.requiresReplacement(active, input.mode) && !replaceExisting) return "replacement_required" as const;
       if (replaceExisting && active.length > 0) {
-        await transaction.insert(mealContributionRevisions).values(active.map((value) => ({ contributionId: value.id, contributionRevision: value.revision, mode: value.mode, source: value.source, reviewStatus: value.reviewStatus, sourceAnalysisId: value.sourceAnalysisId, label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams })));
+        await transaction.insert(mealContributionRevisions).values(active.map((value) => ({ contributionId: value.id, contributionRevision: value.revision, mode: value.mode, source: value.source, reviewStatus: value.reviewStatus, sourceAnalysisId: value.sourceAnalysisId, foodSnapshot: value.foodSnapshot, label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams })));
         await transaction.update(mealContributions).set({ supersededAt: new Date(), updatedAt: new Date() }).where(and(eq(mealContributions.mealId, mealId), isNull(mealContributions.supersededAt)));
       }
       await transaction.insert(mealContributions).values({ mealId, ...numericValues(input) });
@@ -142,9 +173,9 @@ export class PostgresNutritionRepository implements NutritionRepository {
       if (existing.revision !== expectedContributionRevision) return "revision_conflict" as const;
       const others = await transaction.select().from(mealContributions).where(and(eq(mealContributions.mealId, mealId), ne(mealContributions.id, contributionId), isNull(mealContributions.supersededAt))).for("update");
       if (this.requiresReplacement(others, input.mode) && !replaceExisting) return "replacement_required" as const;
-      await transaction.insert(mealContributionRevisions).values({ contributionId, contributionRevision: existing.revision, mode: existing.mode, source: existing.source, reviewStatus: existing.reviewStatus, sourceAnalysisId: existing.sourceAnalysisId, label: existing.label, portionAmount: existing.portionAmount, portionUnit: existing.portionUnit, basisDescription: existing.basisDescription, energyKcal: existing.energyKcal, proteinGrams: existing.proteinGrams, carbohydrateGrams: existing.carbohydrateGrams, fatGrams: existing.fatGrams });
+      await transaction.insert(mealContributionRevisions).values({ contributionId, contributionRevision: existing.revision, mode: existing.mode, source: existing.source, reviewStatus: existing.reviewStatus, sourceAnalysisId: existing.sourceAnalysisId, foodSnapshot: existing.foodSnapshot, label: existing.label, portionAmount: existing.portionAmount, portionUnit: existing.portionUnit, basisDescription: existing.basisDescription, energyKcal: existing.energyKcal, proteinGrams: existing.proteinGrams, carbohydrateGrams: existing.carbohydrateGrams, fatGrams: existing.fatGrams });
       if (replaceExisting && others.length > 0) {
-        await transaction.insert(mealContributionRevisions).values(others.map((value) => ({ contributionId: value.id, contributionRevision: value.revision, mode: value.mode, source: value.source, reviewStatus: value.reviewStatus, sourceAnalysisId: value.sourceAnalysisId, label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams })));
+        await transaction.insert(mealContributionRevisions).values(others.map((value) => ({ contributionId: value.id, contributionRevision: value.revision, mode: value.mode, source: value.source, reviewStatus: value.reviewStatus, sourceAnalysisId: value.sourceAnalysisId, foodSnapshot: value.foodSnapshot, label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams })));
         await transaction.update(mealContributions).set({ supersededAt: new Date(), updatedAt: new Date() }).where(and(eq(mealContributions.mealId, mealId), ne(mealContributions.id, contributionId), isNull(mealContributions.supersededAt)));
       }
       await transaction.update(mealContributions).set({ ...numericValues(input), revision: sql`${mealContributions.revision} + 1`, updatedAt: new Date() }).where(and(eq(mealContributions.id, contributionId), eq(mealContributions.revision, expectedContributionRevision)));
@@ -161,7 +192,7 @@ export class PostgresNutritionRepository implements NutritionRepository {
       if (meal === undefined) return "not_found" as const; if (meal.revision !== expectedMealRevision) return "revision_conflict" as const;
       const [existing] = await transaction.select().from(mealContributions).where(and(eq(mealContributions.id, contributionId), eq(mealContributions.mealId, mealId), isNull(mealContributions.supersededAt))).for("update").limit(1);
       if (existing === undefined) return "contribution_not_found" as const; if (existing.revision !== expectedContributionRevision) return "revision_conflict" as const;
-      await transaction.insert(mealContributionRevisions).values({ contributionId, contributionRevision: existing.revision, mode: existing.mode, source: existing.source, reviewStatus: existing.reviewStatus, sourceAnalysisId: existing.sourceAnalysisId, label: existing.label, portionAmount: existing.portionAmount, portionUnit: existing.portionUnit, basisDescription: existing.basisDescription, energyKcal: existing.energyKcal, proteinGrams: existing.proteinGrams, carbohydrateGrams: existing.carbohydrateGrams, fatGrams: existing.fatGrams });
+      await transaction.insert(mealContributionRevisions).values({ contributionId, contributionRevision: existing.revision, mode: existing.mode, source: existing.source, reviewStatus: existing.reviewStatus, sourceAnalysisId: existing.sourceAnalysisId, foodSnapshot: existing.foodSnapshot, label: existing.label, portionAmount: existing.portionAmount, portionUnit: existing.portionUnit, basisDescription: existing.basisDescription, energyKcal: existing.energyKcal, proteinGrams: existing.proteinGrams, carbohydrateGrams: existing.carbohydrateGrams, fatGrams: existing.fatGrams });
       await transaction.update(mealContributions).set({ supersededAt: new Date(), updatedAt: new Date() }).where(eq(mealContributions.id, contributionId));
       await transaction.update(meals).set({ revision: sql`${meals.revision} + 1`, updatedAt: new Date() }).where(and(eq(meals.id, mealId), eq(meals.revision, expectedMealRevision)));
       return "saved" as const;
@@ -173,7 +204,7 @@ export class PostgresNutritionRepository implements NutritionRepository {
   public async listContributionRevisions(userId: string, mealId: string): Promise<readonly MealContributionRevision[] | "not_found"> {
     if (!(await this.ownsMeal(userId, mealId))) return "not_found";
     const rows = await this.database.select({ revision: mealContributionRevisions }).from(mealContributionRevisions).innerJoin(mealContributions, eq(mealContributionRevisions.contributionId, mealContributions.id)).where(eq(mealContributions.mealId, mealId)).orderBy(desc(mealContributionRevisions.createdAt));
-    return rows.map(({ revision: row }) => ({ id: row.id, contributionId: row.contributionId, contributionRevision: row.contributionRevision, mode: row.mode, source: row.source, reviewStatus: row.reviewStatus, sourceAnalysisId: row.sourceAnalysisId, label: row.label, portionAmount: numberValue(row.portionAmount), portionUnit: row.portionUnit, basisDescription: row.basisDescription, energyKcal: numberValue(row.energyKcal), proteinGrams: numberValue(row.proteinGrams), carbohydrateGrams: numberValue(row.carbohydrateGrams), fatGrams: numberValue(row.fatGrams), createdAt: row.createdAt }));
+    return rows.map(({ revision: row }) => ({ id: row.id, contributionId: row.contributionId, contributionRevision: row.contributionRevision, mode: row.mode, source: row.source, reviewStatus: row.reviewStatus, sourceAnalysisId: row.sourceAnalysisId, foodSnapshot: row.foodSnapshot, label: row.label, portionAmount: numberValue(row.portionAmount), portionUnit: row.portionUnit, basisDescription: row.basisDescription, energyKcal: numberValue(row.energyKcal), proteinGrams: numberValue(row.proteinGrams), carbohydrateGrams: numberValue(row.carbohydrateGrams), fatGrams: numberValue(row.fatGrams), createdAt: row.createdAt }));
   }
 
   public async getCoverageConfirmed(userId: string, localDate: string): Promise<boolean> { const [row] = await this.database.select({ value: nutritionDayStates.coverageConfirmed }).from(nutritionDayStates).where(and(eq(nutritionDayStates.userId, userId), eq(nutritionDayStates.localDate, localDate))).limit(1); return row?.value ?? false; }
@@ -185,7 +216,7 @@ export class PostgresNutritionRepository implements NutritionRepository {
   public async deleteFoodTemplate(userId: string, id: string, revision: number): Promise<"deleted" | "not_found" | "revision_conflict"> { const [existing] = await this.database.select().from(personalFoodTemplates).where(and(eq(personalFoodTemplates.id, id), eq(personalFoodTemplates.userId, userId), isNull(personalFoodTemplates.deletedAt))).limit(1); if (existing === undefined) return "not_found"; if (existing.revision !== revision) return "revision_conflict"; const [saved] = await this.database.update(personalFoodTemplates).set({ deletedAt: new Date(), revision: sql`${personalFoodTemplates.revision} + 1`, updatedAt: new Date() }).where(and(eq(personalFoodTemplates.id, id), eq(personalFoodTemplates.revision, revision))).returning({ id: personalFoodTemplates.id }); return saved === undefined ? "revision_conflict" : "deleted"; }
 
   private mealFromRow(row: typeof meals.$inferSelect, contributions: readonly MealContribution[]): Meal { return { id: row.id, occurredAt: row.occurredAt, localDate: row.localDate, timeZone: row.timeZone, name: row.name, note: row.note, revision: row.revision, contributions, createdAt: row.createdAt, updatedAt: row.updatedAt }; }
-  private async withContributions(rows: readonly (typeof meals.$inferSelect)[]): Promise<Meal[]> { if (rows.length === 0) return []; const ids = rows.map((row) => row.id); const values = await this.database.select().from(mealContributions).where(and(inArray(mealContributions.mealId, ids), isNull(mealContributions.supersededAt))).orderBy(asc(mealContributions.createdAt)); const grouped = new Map<string, MealContribution[]>(); for (const value of values) grouped.set(value.mealId, [...(grouped.get(value.mealId) ?? []), contributionFromRow(value)]); return rows.map((row) => this.mealFromRow(row, grouped.get(row.id) ?? [])); }
+  private async withContributions(rows: readonly (typeof meals.$inferSelect)[]): Promise<Meal[]> { if (rows.length === 0) return []; const ids = rows.map((row) => row.id); const values = await this.database.select().from(mealContributions).where(and(inArray(mealContributions.mealId, ids), isNull(mealContributions.supersededAt))).orderBy(asc(mealContributions.createdAt), asc(mealContributions.sourceItemIndex), asc(mealContributions.id)); const grouped = new Map<string, MealContribution[]>(); for (const value of values) grouped.set(value.mealId, [...(grouped.get(value.mealId) ?? []), contributionFromRow(value)]); return rows.map((row) => this.mealFromRow(row, grouped.get(row.id) ?? [])); }
   private async ownsMeal(userId: string, mealId: string): Promise<boolean> { const [row] = await this.database.select({ id: meals.id }).from(meals).where(and(eq(meals.id, mealId), eq(meals.userId, userId), isNull(meals.deletedAt))).limit(1); return row !== undefined; }
   private requiresReplacement(values: readonly { mode: string }[], mode: string) { return values.length > 0 && (mode === "whole_meal" || values.some((value) => value.mode === "whole_meal")); }
 }
