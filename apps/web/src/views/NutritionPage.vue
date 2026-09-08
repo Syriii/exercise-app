@@ -31,6 +31,11 @@ async function imageFoodsSaved(meal: Meal, analysis: MealImageAnalysis) {
   await selectionsSaved(meal);
   notice.value = analysis.replacement?.undone ? "已撤销这次替换，原食物已恢复" : "照片食物已保存，未选择替换的内容仍保留";
 }
+async function imageFoodsRefreshed(meal: Meal, analysis: MealImageAnalysis) {
+  analysesByMeal[meal.id] = (analysesByMeal[meal.id] ?? []).map(item => item.id === analysis.id ? analysis : item);
+  if (meal.localDate === selectedDate.value) meals.value = meals.value.map(value => value.id === meal.id ? meal : value);
+  try { await refreshSummary(); } catch { errorMessage.value = "餐食已重新读取，汇总暂时刷新不了。"; }
+}
 const reference = ref<DailyPlanningReference | null>(null);
 const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
@@ -547,7 +552,7 @@ onBeforeUnmount(stopPolling);
                         <ul class="observed-foods"><li v-for="(food, index) in analysis.candidate.foods" :key="index"><strong>{{ food.label }}</strong><span>{{ food.portionAmount ?? '份量未知' }} {{ food.portionUnit ?? '' }}</span></li></ul>
                         <p class="field-help">{{ analysis.candidate.uncertaintyNote }}</p>
                       </details>
-                      <ImageResultReplacement v-if="analysis.candidate.foods.length" :meal="meal" :analysis="analysis" :disabled="saving || actingAnalysisId !== null" @busy="saving = $event" @saved="imageFoodsSaved" />
+                      <ImageResultReplacement v-if="analysis.candidate.foods.length" :meal="meal" :analysis="analysis" :disabled="saving || actingAnalysisId !== null" @busy="saving = $event" @saved="imageFoodsSaved" @refreshed="imageFoodsRefreshed" />
                       <button v-if="analysis.imageAvailable" type="button" class="text-action" :disabled="saving || actingAnalysisId !== null" @click="retryImageAnalysis(meal.id, analysis)">重新识别这张照片</button>
                       <p v-else class="field-help">原图已不可用，不能重新识别；已保存的结果仍可查看和使用。</p>
                     </div>

@@ -3,13 +3,26 @@ import { ref } from "vue";
 import { ApiError } from "../../api/client";
 import { nutritionApi, type ImageReplacementInput, type Meal, type MealImageAnalysis } from "../../api/nutrition";
 const props = defineProps<{ meal: Meal; analysis: MealImageAnalysis; disabled?: boolean }>();
-const emit = defineEmits<{ saved: [meal: Meal, analysis: MealImageAnalysis]; busy: [value: boolean] }>();
+const emit = defineEmits<{ saved: [meal: Meal, analysis: MealImageAnalysis]; refreshed: [meal: Meal, analysis: MealImageAnalysis]; busy: [value: boolean] }>();
 const draft = ref<{ meal: Meal; analysis: MealImageAnalysis; input: ImageReplacementInput } | null>(null);
 const saving = ref(false);
 const error = ref("");
-function preview() {
-  draft.value = { meal: JSON.parse(JSON.stringify(props.meal)) as Meal, analysis: JSON.parse(JSON.stringify(props.analysis)) as MealImageAnalysis, input: { operationId: crypto.randomUUID(), mealRevision: props.meal.revision, analysisRevision: props.analysis.revision, replaceIds: props.meal.contributions.map(item => item.id) } };
+async function preview(refresh = false) {
+  if (saving.value || props.disabled) return;
   error.value = "";
+  let meal = props.meal, analysis = props.analysis;
+  if (refresh) {
+    saving.value = true; emit("busy", true);
+    try {
+      const [meals, analyses] = await Promise.all([nutritionApi.listMeals(meal.localDate, meal.localDate), nutritionApi.listImageAnalyses(meal.id)]);
+      const currentMeal = meals.find(item => item.id === meal.id), currentAnalysis = analyses.find(item => item.id === analysis.id);
+      if (!currentMeal || !currentAnalysis) throw new Error("record moved or removed");
+      meal = currentMeal; analysis = currentAnalysis; emit("refreshed", meal, analysis);
+    } catch { error.value = "未能重新读取这餐与结果，原选择仍保留。如果这餐已改期或删除，请回到对应日期查看。"; return; }
+    finally { saving.value = false; emit("busy", false); }
+  }
+  if (analysis.replacement && !analysis.replacement.undone) { draft.value = null; error.value = "这份结果已经保存，请查看当前食物；需要时可撤销这次替换。"; return; }
+  draft.value = { meal: JSON.parse(JSON.stringify(meal)) as Meal, analysis: JSON.parse(JSON.stringify(analysis)) as MealImageAnalysis, input: { operationId: crypto.randomUUID(), mealRevision: meal.revision, analysisRevision: analysis.revision, replaceIds: meal.contributions.map(item => item.id) } };
 }
 async function save(undo = false) {
   if (saving.value || props.disabled) return;
@@ -34,7 +47,7 @@ async function save(undo = false) {
         <p v-if="meal.revision !== analysis.replacement.mealRevision" class="field-help">替换后这餐又有修改，为保护后续记录，不能直接撤销；你仍可逐项编辑食物。</p>
       </template>
     </template>
-    <button v-if="(!analysis.replacement || analysis.replacement.undone) && !draft" class="action-button" type="button" :disabled="disabled" @click="preview">预览并使用这份结果</button>
+    <button v-if="(!analysis.replacement || analysis.replacement.undone) && !draft" class="action-button" type="button" :disabled="disabled" @click="preview()">预览并使用这份结果</button>
     <form v-if="draft" aria-label="照片结果替换预览" @submit.prevent="save()">
       <fieldset :disabled="saving || disabled">
         <h4>将加入的照片食物</h4>
@@ -44,7 +57,7 @@ async function save(undo = false) {
         <label v-for="item in draft.meal.contributions" :key="item.id" class="checkbox-row"><input v-model="draft.input.replaceIds" type="checkbox" :value="item.id" />{{ item.label }} · {{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }}</label>
         <p class="field-help">替换 {{ draft.input.replaceIds.length }} 项，保留 {{ draft.meal.contributions.length - draft.input.replaceIds.length }} 项。保存成功前原记录仍有效。</p>
         <p v-if="meal.revision !== draft.input.mealRevision || analysis.revision !== draft.input.analysisRevision" class="form-error">这餐或识别结果已变化。原预览保留，请重新查看后再保存。</p>
-        <div class="row-actions"><button type="submit" class="primary-button">{{ saving ? '正在保存…' : '使用照片食物并保存' }}</button><button type="button" class="text-action" @click="preview">重新查看当前内容</button><button type="button" class="text-action" @click="draft = null">取消</button></div>
+        <div class="row-actions"><button type="submit" class="primary-button">{{ saving ? '正在保存…' : '使用照片食物并保存' }}</button><button type="button" class="text-action" @click="preview(true)">重新查看当前内容</button><button type="button" class="text-action" @click="draft = null">取消</button></div>
       </fieldset>
     </form>
   </section>

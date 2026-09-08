@@ -191,6 +191,18 @@ test("manual photo recognition previews a partial replacement, retries safely an
   await expect(meal.locator("article.image-analysis-card")).toHaveCount(2);
   await expect(meal.locator("article.image-analysis-card").first().getByRole("button", { name: "预览并使用这份结果" })).toBeVisible({ timeout: 8_000 });
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
+  const latest = meal.locator("article.image-analysis-card").first();
+  await latest.getByRole("button", { name: "预览并使用这份结果" }).click();
+  const latestPreview = latest.getByRole("form", { name: "照片结果替换预览" });
+  await addPersonalFood(meal, "后来补的水果", "100", "g");
+  await latestPreview.getByRole("button", { name: "使用照片食物并保存" }).click();
+  await expect(latest.getByRole("alert")).toBeVisible();
+  await latestPreview.getByRole("button", { name: "重新查看当前内容" }).click();
+  await expect(latestPreview.getByLabel(/后来补的水果/)).toBeChecked();
+  await latestPreview.getByLabel(/后来补的水果/).uncheck();
+  await latestPreview.getByRole("button", { name: "使用照片食物并保存" }).click();
+  await expect(meal.locator(".meal-items > li")).toHaveCount(3);
+  await expect(meal.locator(".meal-items").getByText("后来补的水果", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("photo-replacement-restored.png") });
 });
