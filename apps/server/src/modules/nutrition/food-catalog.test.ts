@@ -14,9 +14,11 @@ describe("unified food catalog", () => {
   it("retries personal creation atomically without duplicates, cross-account sharing or resurrection", async () => {
     const repository = new MemoryNutritionRepository();
     const service = new NutritionService(repository);
-    const input = { ...unknownInput, submissionId: randomUUID() };
+    const input = { ...unknownInput, energyKcal: 12.34567, portionAmount: 100.00049, submissionId: randomUUID() };
     const [food, retry] = await Promise.all([service.createPersonalFood("owner", input), service.createPersonalFood("owner", input)]);
     expect(retry).toEqual(food);
+    expect(food).toMatchObject({ energyKcal: 12.346, basisAmount: 100 });
+    await expect(service.createPersonalFood("owner", { ...input, portionAmount: 0.0001 })).rejects.toMatchObject({ statusCode: 400 });
     expect((await service.getFoodCatalog("owner", input.label)).total).toBe(1);
     await service.setFoodFavorite("owner", food.id, true);
     expect(await service.createPersonalFood("owner", input)).toMatchObject({ id: food.id, isFavorite: true });

@@ -95,8 +95,13 @@ export class NutritionService {
   public async createPersonalFood(userId: string, input: ContributionRequest & { category: FoodCategory; submissionId?: string }) {
     if (!Object.hasOwn(foodCategories, input.category) || input.portionAmount === null || input.portionAmount <= 0 || !input.portionUnit?.trim())
       throw new NutritionError("invalid_nutrition_input", "请填写食物分类与正数的基准份量和单位", 400);
-    const definition: FoodTemplateInput = { ...this.foodTemplateInput(input), isFavorite: false,
+    const validated = this.foodTemplateInput(input);
+    const precision = (value: number | null) => value === null ? null : Math.round(value * 1000) / 1000;
+    const definition: FoodTemplateInput = { ...validated, portionAmount: precision(validated.portionAmount),
+      energyKcal: precision(validated.energyKcal), proteinGrams: precision(validated.proteinGrams),
+      carbohydrateGrams: precision(validated.carbohydrateGrams), fatGrams: precision(validated.fatGrams), isFavorite: false,
       catalogMetadata: { category: input.category, provider: "personal", sourceName: "个人录入", sourceUrl: null, license: null, originalName: null } };
+    if (definition.portionAmount === 0) throw new NutritionError("invalid_nutrition_input", "基准份量最小为0.001", 400);
     // Legacy clients without a submission ID retain their old contract.
     if (input.submissionId === undefined) return personalFood(await this.repository.createFoodTemplate(userId, definition));
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.submissionId))

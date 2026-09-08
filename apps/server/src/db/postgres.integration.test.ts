@@ -890,9 +890,10 @@ describe("PostgreSQL integration", () => {
     const service = new NutritionService(repository, new FixedPublicFoodProvider([
       { id: "open_food_facts:12345678", provider: "open_food_facts", label: "隔离测试豆奶", brand: null, barcode: "12345678", basisAmount: 100, basisUnit: "g", energyKcal: 60, proteinGrams: 4, carbohydrateGrams: null, fatGrams: null, sourceUrl: "https://world.openfoodfacts.org/product/12345678" },
     ]));
-    const input = { submissionId: randomUUID(), mode: "item" as const, label: "防重复配菜", category: "vegetables" as const, portionAmount: 100, portionUnit: "g", basisDescription: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null };
+    const input = { submissionId: randomUUID(), mode: "item" as const, label: "防重复配菜", category: "vegetables" as const, portionAmount: 100.00049, portionUnit: "g", basisDescription: null, energyKcal: 12.34567, proteinGrams: null, carbohydrateGrams: null, fatGrams: null };
     const [first, retry] = await Promise.all([service.createPersonalFood(owner, input), service.createPersonalFood(owner, input)]);
     expect(retry).toEqual(first);
+    expect(first).toMatchObject({ basisAmount: 100, energyKcal: 12.346 });
     expect((await service.getFoodCatalog(owner, input.label)).total).toBe(1);
     expect((await service.createPersonalFood(other, input)).id).not.toBe(first.id);
     await service.setFoodFavorite(owner, first.id, true);
