@@ -3,6 +3,8 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-
 import type { Database } from "../../db/database.js";
 import { sameSelection } from "./selection-retry.js";
 import { samePersonalFood } from "./personal-food-retry.js";
+import { replaceImageFoods } from "./image-replacement-postgres.js";
+import { mealImageAnalyses } from "../../db/schema/index.js";
 import {
   mealContributionRevisions,
   mealContributions,
@@ -27,6 +29,14 @@ function templateFromRow(row: typeof personalFoodTemplates.$inferSelect): Person
 }
 
 export class PostgresNutritionRepository implements NutritionRepository {
+  public async imageReplacement(userId: string, analysisId: string) {
+    const [row] = await this.database.select({ state: mealImageAnalyses.replacementState }).from(mealImageAnalyses).where(and(eq(mealImageAnalyses.userId, userId), eq(mealImageAnalyses.id, analysisId)));
+    return row?.state ?? null;
+  }
+  public async replaceImageFoods(userId: string, mealId: string, analysisId: string, input: import("../image-analysis/replacement.js").ImageReplacementInput, _foods: readonly ContributionInput[], undo: boolean) {
+    const result = await replaceImageFoods(this.database, userId, mealId, analysisId, input, undo);
+    return result === "saved" ? (await this.getMeal(userId, mealId)) ?? "not_found" : result;
+  }
   public constructor(private readonly database: Database) {}
 
   public async createPersonalFoodOnce(userId: string, id: string, input: FoodTemplateInput) {

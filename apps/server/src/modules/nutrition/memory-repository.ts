@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sameSelection } from "./selection-retry.js";
 import { samePersonalFood } from "./personal-food-retry.js";
+import { sameReplacement, startsNewReplacement, type StoredImageReplacement, type ImageReplacementInput } from "../image-analysis/replacement.js";
 
 import type { ContributionInput, DietPlanRepositoryInput, FoodTemplateInput, MealMetadataInput, NutritionRepository } from "./repository.js";
 import type { DietPlan, Meal, MealContribution, MealContributionRevision, MealRevision, PersonalFoodTemplate } from "./types.js";
@@ -8,6 +9,38 @@ import type { DietPlan, Meal, MealContribution, MealContributionRevision, MealRe
 function clone<T>(value: T): T { return structuredClone(value); }
 
 export class MemoryNutritionRepository implements NutritionRepository {
+  readonly #imageReplacements = new Map<string, StoredImageReplacement>();
+  public async imageReplacement(userId: string, analysisId: string) { return clone(this.#imageReplacements.get(`${userId}:${analysisId}`) ?? null); }
+  public async replaceImageFoods(userId: string, mealId: string, analysisId: string, input: ImageReplacementInput, foods: readonly ContributionInput[], undo: boolean) {
+    const pair = this.findMeal(userId, mealId);
+    if (!pair) return "not_found" as const;
+    const key = `${userId}:${analysisId}`;
+    const state = this.#imageReplacements.get(key);
+    const fresh = startsNewReplacement(state, input, undo);
+    if (state && !fresh && (!sameReplacement(state, input) || state.mealRevision !== pair.meal.revision)) return "revision_conflict" as const;
+    if (state && !fresh && state.undone === undo) return clone(pair.meal);
+    if (pair.meal.revision !== input.mealRevision || (!state && undo) || (state && !undo && !fresh)) return "revision_conflict" as const;
+    const now = new Date();
+    if (undo && state) {
+      pair.meal.contributions.forEach(item => this.saveContributionRevision(item));
+      const saved = { ...pair.meal, contributions: state.before.map(item => ({ ...item, revision: item.revision + 1, updatedAt: now })), revision: pair.meal.revision + 1, updatedAt: now };
+      pair.values[pair.index] = saved;
+      this.#imageReplacements.set(key, { ...state, undone: true, mealRevision: saved.revision });
+      return clone(saved);
+    }
+    const replaced = new Set(input.replaceIds);
+    if (replaced.size !== input.replaceIds.length || input.replaceIds.some(id => !pair.meal.contributions.some(item => item.id === id))) return "revision_conflict" as const;
+    const kept = pair.meal.contributions.filter(item => !replaced.has(item.id));
+    if (foods.length === 0 || kept.some(item => item.mode === "whole_meal" || item.sourceAnalysisId === analysisId)) return "replacement_required" as const;
+    const before = clone(pair.meal.contributions);
+    before.filter(item => replaced.has(item.id)).forEach(item => this.saveContributionRevision(item));
+    const added = foods.map(food => ({ ...food, id: randomUUID(), mealId, revision: 1, createdAt: now, updatedAt: now }));
+    added.forEach(item => this.#contributionMeals.set(item.id, mealId));
+    const saved = { ...pair.meal, contributions: [...kept, ...added], revision: pair.meal.revision + 1, updatedAt: now };
+    pair.values[pair.index] = saved;
+    this.#imageReplacements.set(key, { operationId: input.operationId, previousOperationIds: state ? [...(state.previousOperationIds ?? []), state.operationId] : [], mealRevision: saved.revision, undone: false, replaceIds: input.replaceIds, before, addedIds: added.map(item => item.id) });
+    return clone(saved);
+  }
   readonly #meals = new Map<string, Meal[]>();
   readonly #mealRevisions = new Map<string, MealRevision[]>();
   readonly #contributionRevisions = new Map<string, MealContributionRevision[]>();

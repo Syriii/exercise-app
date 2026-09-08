@@ -4,6 +4,8 @@ import { sessionCookieName } from "../identity/routes.js";
 import type { IdentityService } from "../identity/service.js";
 import type { ImageAnalysisService } from "./service.js";
 import type { MealImageAnalysis } from "./types.js";
+import { mealResponse, serializeMeal } from "../nutrition/routes.js";
+import type { ImageReplacementInput } from "./replacement.js";
 
 const supportedImageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const nullableNumber = { anyOf: [{ type: "null" }, { type: "number" }] } as const;
@@ -102,11 +104,12 @@ const analysisSchema = {
     mealId: { type: "string", format: "uuid" },
     status: {
       type: "string",
-      enum: ["pending", "running", "succeeded", "failed", "cancelled"],
+      enum: ["pending", "running", "succeeded", "failed", "cancelled", "waiting"],
     },
     model: { type: "string" },
     promptVersion: { type: "string" },
     candidate: candidateSchema,
+    replacement: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["operationId", "mealRevision", "undone"], properties: { operationId: { type: "string", format: "uuid" }, mealRevision: { type: "integer" }, undone: { type: "boolean" } } }] },
     lastErrorCode: nullableString,
     imageAvailable: { type: "boolean" },
     adoptedAt: { anyOf: [{ type: "null" }, { type: "string", format: "date-time" }] },
@@ -166,6 +169,25 @@ export async function registerImageAnalysisRoutes(
     (_request, payload, done) => done(null, payload),
   );
 
+  const settingsResponse = { type: "object", additionalProperties: false, required: ["automatic", "consentAt", "revision"], properties: { automatic: { type: "boolean" }, consentAt: nullableString, revision: { type: "integer" } } } as const;
+  app.get("/api/v1/photo-analysis-settings", { schema: { response: { 200: settingsResponse } }, handler: async request => {
+    const value = await options.imageAnalysisService.settings(await userId(request)); return { ...value, consentAt: value.consentAt?.toISOString() ?? null };
+  } });
+  app.put<{ Body: { revision: number; automatic: boolean; consent: boolean } }>("/api/v1/photo-analysis-settings", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["revision", "automatic", "consent"], properties: { revision: { type: "integer", minimum: 1 }, automatic: { type: "boolean" }, consent: { type: "boolean" } } }, response: { 200: settingsResponse } },
+    handler: async request => { const value = await options.imageAnalysisService.saveSettings(await userId(request), request.body.revision, request.body.automatic, request.body.consent); return { ...value, consentAt: value.consentAt?.toISOString() ?? null }; },
+  });
+  app.post<{ Params: { analysisId: string }; Body: { revision: number; consent: true } }>("/api/v1/image-analyses/:analysisId/reanalyze", {
+    schema: { params: analysisIdParams, body: { type: "object", additionalProperties: false, required: ["revision", "consent"], properties: { revision: { type: "integer", minimum: 1 }, consent: { type: "boolean", const: true } } }, response: { 202: analysisSchema } },
+    handler: async (request, reply) => reply.status(202).send(serializeAnalysis(await options.imageAnalysisService.reanalyze(await userId(request), request.params.analysisId, request.body.revision))),
+  });
+  for (const undo of [false, true]) app.post<{ Params: { analysisId: string }; Body: ImageReplacementInput }>(`/api/v1/image-analyses/:analysisId/${undo ? "undo-replacement" : "replace-foods"}`, {
+    schema: { params: analysisIdParams, body: { type: "object", additionalProperties: false, required: ["operationId", "analysisRevision", "mealRevision", "replaceIds"], properties: {
+      operationId: { type: "string", format: "uuid" }, analysisRevision: { type: "integer", minimum: 1 }, mealRevision: { type: "integer", minimum: 1 }, replaceIds: { type: "array", maxItems: 1000, uniqueItems: true, items: { type: "string", format: "uuid" } },
+    } }, response: { 200: { type: "object", additionalProperties: false, required: ["meal", "analysis"], properties: { meal: mealResponse, analysis: analysisSchema } } } },
+    handler: async request => { const result = await options.imageAnalysisService.replaceFoods(await userId(request), request.params.analysisId, request.body, undo); return { meal: serializeMeal(result.meal), analysis: serializeAnalysis(result.analysis) }; },
+  });
+
   app.post<{
     Querystring: { mealId: string };
     Body: NodeJS.ReadableStream;
@@ -183,11 +205,14 @@ export async function registerImageAnalysisRoutes(
       },
       handler: async (request, reply) => {
         const contentType = request.headers["content-type"]?.split(";", 1)[0];
+        const owner = await userId(request);
+        const settings = await options.imageAnalysisService.settings(owner);
         const result = await options.imageAnalysisService.request(
-          await userId(request),
+          owner,
           request.query.mealId,
           contentType,
           request.body,
+          settings.automatic && settings.consentAt !== null,
         );
         return reply.status(202).send(serializeAnalysis(result));
       },
@@ -213,7 +238,7 @@ export async function registerImageAnalysisRoutes(
     },
   );
 
-  app.post<{ Params: { analysisId: string }; Body: { revision: number } }>(
+  app.post<{ Params: { analysisId: string }; Body: { revision: number; consent: true } }>(
     "/api/v1/image-analyses/:analysisId/retry",
     {
       schema: {
@@ -221,8 +246,8 @@ export async function registerImageAnalysisRoutes(
         body: {
           type: "object",
           additionalProperties: false,
-          required: ["revision"],
-          properties: { revision: { type: "integer", minimum: 1 } },
+          required: ["revision", "consent"],
+          properties: { revision: { type: "integer", minimum: 1 }, consent: { type: "boolean", const: true } },
         },
         response: { 202: analysisSchema },
       },

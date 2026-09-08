@@ -15,6 +15,7 @@ import { IdentityService } from "../modules/identity/service.js";
 import { PostgresImageAnalysisRepository } from "../modules/image-analysis/postgres-repository.js";
 import { PostgresOperationsService } from "../modules/operations/service.js";
 import { PostgresNutritionRepository } from "../modules/nutrition/postgres-repository.js";
+import { PostgresUserDataExporter } from "../modules/portability/postgres-exporter.js";
 import { NutritionService } from "../modules/nutrition/service.js";
 import { builtinFoods } from "../modules/nutrition/food-catalog.js";
 import { FixedPublicFoodProvider } from "../modules/nutrition/public-food-provider.js";
@@ -831,6 +832,116 @@ describe("PostgreSQL integration", () => {
     if (typeof retryAttempt === "string") throw new Error("expected attempt");
     await images.succeed(retry.id, retryAttempt.attemptId, candidate, "test-late");
     expect((await nutrition.getMeal(userId, meal.id)).contributions).toHaveLength(0);
+  });
+
+  it("atomically replaces complete photo results, rolls back late failures and protects undo with RLS", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`replace-a-${randomUUID()}`, `replace-b-${randomUUID()}`]);
+    const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext();
+    const restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const repository = new PostgresNutritionRepository(restricted.database);
+    const nutrition = new NutritionService(repository);
+    const images = new PostgresImageAnalysisRepository(restricted.database);
+    const foods = [
+      { label: "照片鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 },
+      { label: "照片配菜", portionAmount: null, portionUnit: null, note: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null },
+    ];
+    const candidate = { title: "替换照片", foods, observedFoods: [], energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null, confidence: "low" as const, assumptions: [], uncertaintyNote: "测试估算" };
+    try {
+      await context.run(userId, async () => {
+        let meal = await nutrition.createMeal(userId, { occurredAt: "2026-09-08T00:00:00Z", localDate: "2026-09-08", timeZone: "UTC", name: "替换验收", note: null });
+        const manual = { mode: "item" as const, portionAmount: 100, portionUnit: "g", basisDescription: null, energyKcal: 100, proteinGrams: null, carbohydrateGrams: null, fatGrams: null };
+        meal = await nutrition.addContribution(userId, meal.id, meal.revision, { ...manual, label: "原主食" }, false);
+        meal = await nutrition.addContribution(userId, meal.id, meal.revision, { ...manual, label: "保留豆浆" }, false);
+        const original = meal;
+        const analysis = await images.create(userId, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "e".repeat(64) }, new Date(Date.now() + 86_400_000), "fixed-test", "food-items-v2");
+        const attempt = await images.beginAttempt(analysis.id);
+        if (typeof attempt === "string") throw new Error("expected attempt");
+        await images.succeed(analysis.id, attempt.attemptId, candidate, "test-replacement");
+        expect(await nutrition.getMeal(userId, meal.id)).toEqual(original);
+        const input = { operationId: randomUUID(), mealRevision: meal.revision, analysisRevision: (await images.get(userId, analysis.id))!.revision, replaceIds: [meal.contributions.find(item => item.label === "原主食")!.id] };
+        // Scoped fault injection only in the explicitly isolated _test database: the second food fails after the first was inserted.
+        await database.pool.query(`alter table meal_contributions add constraint integration_photo_late_failure check (meal_id <> '${meal.id}'::uuid or label <> '照片配菜')`);
+        try {
+          await expect(nutrition.replaceImageFoods(userId, meal.id, analysis.id, input, candidate, false)).rejects.toBeDefined();
+          expect(await nutrition.getMeal(userId, meal.id)).toEqual(original);
+          expect(await repository.imageReplacement(userId, analysis.id)).toBeNull();
+          expect(await nutrition.listContributionRevisions(userId, meal.id)).toHaveLength(0);
+        } finally { await database.pool.query("alter table meal_contributions drop constraint integration_photo_late_failure"); }
+        const [saved, retry] = await Promise.all([nutrition.replaceImageFoods(userId, meal.id, analysis.id, input, candidate, false), nutrition.replaceImageFoods(userId, meal.id, analysis.id, input, candidate, false)]);
+        expect(saved).toEqual(retry);
+        expect(saved.revision).toBe(original.revision + 1);
+        expect(saved.contributions.map(item => item.label).sort()).toEqual(["保留豆浆", "照片配菜", "照片鸡蛋"].sort());
+        await expect(nutrition.replaceImageFoods(userId, meal.id, analysis.id, { ...input, replaceIds: [] }, candidate, false)).rejects.toMatchObject({ statusCode: 409 });
+        await expect(nutrition.replaceImageFoods(otherId, meal.id, analysis.id, input, candidate, false)).rejects.toMatchObject({ statusCode: 404 });
+        await context.run(otherId, async () => {
+          expect(await images.get(otherId, analysis.id)).toBeNull();
+          expect(await repository.imageReplacement(userId, analysis.id)).toBeNull();
+          await expect(nutrition.replaceImageFoods(userId, meal.id, analysis.id, input, candidate, false)).rejects.toMatchObject({ statusCode: 404 });
+        });
+        const exported = await new PostgresUserDataExporter(restricted.database).exportUserData(userId, new Date());
+        expect(exported.data.meal_image_analyses).toEqual(expect.arrayContaining([expect.objectContaining({ id: analysis.id, replacement_state: expect.objectContaining({ operationId: input.operationId }) })]));
+        expect(exported.data.photo_analysis_settings).toEqual([expect.objectContaining({ automatic: false })]);
+        const undo = { ...input, mealRevision: saved.revision, analysisRevision: (await images.get(userId, analysis.id))!.revision };
+        const restored = await nutrition.replaceImageFoods(userId, meal.id, analysis.id, undo, candidate, true);
+        expect(restored.contributions.map(item => ({ id: item.id, label: item.label, energyKcal: item.energyKcal }))).toEqual(original.contributions.map(item => ({ id: item.id, label: item.label, energyKcal: item.energyKcal })));
+        expect(await nutrition.replaceImageFoods(userId, meal.id, analysis.id, undo, candidate, true)).toEqual(restored);
+        // A new explicit preview after undo is allowed; old operation IDs cannot be reused.
+        const again = { ...input, operationId: randomUUID(), mealRevision: restored.revision, analysisRevision: (await images.get(userId, analysis.id))!.revision };
+        const reapplied = await nutrition.replaceImageFoods(userId, meal.id, analysis.id, again, candidate, false);
+        expect(reapplied.contributions.filter(item => item.sourceAnalysisId === analysis.id).map(item => item.id).sort()).toEqual(saved.contributions.filter(item => item.sourceAnalysisId === analysis.id).map(item => item.id).sort());
+        const egg = reapplied.contributions.find(item => item.label === "照片鸡蛋")!;
+        meal = await nutrition.changePortion(userId, meal.id, egg.id, reapplied.revision, egg.revision, 1);
+        await expect(nutrition.replaceImageFoods(userId, meal.id, analysis.id, { ...again, mealRevision: meal.revision, analysisRevision: (await images.get(userId, analysis.id))!.revision }, candidate, true)).rejects.toMatchObject({ statusCode: 409 });
+        await expect(nutrition.replaceImageFoods(userId, meal.id, analysis.id, input, candidate, false)).rejects.toMatchObject({ statusCode: 409 });
+        expect((await nutrition.getMeal(userId, meal.id)).contributions.find(item => item.id === egg.id)!.energyKcal).toBe(70);
+        await nutrition.deleteMeal(userId, meal.id, meal.revision);
+        await expect(nutrition.replaceImageFoods(userId, meal.id, analysis.id, again, candidate, false)).rejects.toMatchObject({ statusCode: 404 });
+      });
+    } finally { await restricted.close(); }
+  });
+
+  it("persists photo consent without submitting old photos and isolates reanalysis and expired originals", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`photo-control-a-${randomUUID()}`, `photo-control-b-${randomUUID()}`]);
+    const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;
+    const images = new PostgresImageAnalysisRepository(database.database);
+    const nutrition = new NutritionService(new PostgresNutritionRepository(database.database));
+    const meal = await nutrition.createMeal(userId, { occurredAt: "2026-09-08T00:00:00Z", localDate: "2026-09-08", timeZone: "UTC", name: "手动识别", note: null });
+    expect(await images.getSettings(userId)).toEqual({ automatic: false, consentAt: null, revision: 1 });
+    const media = { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "f".repeat(64) };
+    const waiting = await images.create(userId, meal.id, "image/png", media, new Date(Date.now() + 86_400_000), "fixed-test", "food-items-v2", false);
+    expect(await images.beginAttempt(waiting.id)).toBe("not_ready");
+    expect(await images.saveSettings(userId, 1, true, true)).toMatchObject({ automatic: true, revision: 2, consentAt: expect.any(Date) });
+    expect(await images.saveSettings(userId, 1, false, false)).toBe("revision_conflict");
+    expect(await images.getSettings(otherId)).toMatchObject({ automatic: false, consentAt: null });
+    expect((await images.get(userId, waiting.id))!.status).toBe("waiting");
+    expect(await images.retry(otherId, waiting.id, waiting.revision)).toBe("not_found");
+    expect(await images.retry(userId, waiting.id, waiting.revision)).toMatchObject({ status: "pending" });
+    expect(await images.retry(userId, waiting.id, waiting.revision)).toBe("revision_conflict");
+    const attempt = await images.beginAttempt(waiting.id);
+    if (typeof attempt === "string") throw new Error("expected attempt");
+    const candidate = { title: "固定测试结果", observedFoods: [], foods: [{ label: "鸡蛋", portionAmount: 1, portionUnit: "个", note: null, energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5 }], energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5, confidence: "low" as const, assumptions: [], uncertaintyNote: "固定测试" };
+    await images.succeed(waiting.id, attempt.attemptId, candidate, "fixed-test");
+    const completed = (await images.get(userId, waiting.id))!;
+    const again = await images.reanalyze(userId, completed.id, completed.revision);
+    if (typeof again === "string") throw new Error("expected new analysis");
+    expect(again.id).not.toBe(completed.id);
+    expect(again).toMatchObject({ status: "pending", candidate: null });
+    expect((await images.get(userId, completed.id))!.candidate).toEqual(candidate);
+    expect(await images.reanalyze(userId, completed.id, completed.revision)).toBe("revision_conflict");
+    expect((await images.getUsage(userId)).temporaryMediaBytes).toBe(128);
+    const work = await images.getWorkItem(completed.id);
+    await database.pool.query("update temporary_media set expires_at = now() - interval '1 second' where id = $1", [work!.mediaId]);
+    expect((await images.get(userId, completed.id))!.imageAvailable).toBe(false);
+    expect(await images.reanalyze(userId, completed.id, (await images.get(userId, completed.id))!.revision)).toBe("not_ready");
+    const expired = await images.create(userId, meal.id, "image/png", { ...media, objectKey: `integration/${randomUUID()}.png` }, new Date(Date.now() - 1000), "fixed-test", "food-items-v2", false);
+    expect(await images.retry(userId, expired.id, expired.revision)).toBe("not_failed");
+    const reattempt = await images.beginAttempt(again.id);
+    if (typeof reattempt === "string") throw new Error("expected reanalysis attempt");
+    await images.markMediaStatus(work!.mediaId, "deleted");
+    expect(await images.succeed(again.id, reattempt.attemptId, candidate, "deleted-late-result")).toBe("not_running");
+    expect(await images.get(userId, again.id)).toMatchObject({ status: "cancelled", candidate: null });
+    expect((await images.get(userId, completed.id))!.candidate).toEqual(candidate);
   });
 
   it("persists catalog preferences and immutable food snapshots with atomic batch retries and RLS", async () => {

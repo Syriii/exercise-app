@@ -13,6 +13,8 @@ export type FoodTemplateInput = Omit<PersonalFoodTemplate, "id" | "revision" | "
 export type DietPlanRepositoryInput = Omit<DietPlan, "id" | "userId" | "revision" | "archivedAt" | "createdAt" | "updatedAt">;
 
 export interface NutritionRepository {
+  imageReplacement(userId: string, analysisId: string): Promise<import("../image-analysis/replacement.js").StoredImageReplacement | null>;
+  replaceImageFoods(userId: string, mealId: string, analysisId: string, input: import("../image-analysis/replacement.js").ImageReplacementInput, foods: readonly ContributionInput[], undo: boolean): Promise<Meal | "not_found" | "revision_conflict" | "replacement_required">;
   createPersonalFoodOnce(userId: string, id: string, input: FoodTemplateInput): Promise<PersonalFoodTemplate | "revision_conflict">;
   setFoodFavorite(userId: string, foodId: string, favorite: boolean, publicFood: FoodTemplateInput | null): Promise<void>;
   addSelectedFoods(userId: string, mealId: string, expectedRevision: number, inputs: readonly (ContributionInput & { id: string })[], submissionId: string): Promise<Meal | "not_found" | "revision_conflict" | "replacement_required">;

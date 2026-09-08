@@ -16,10 +16,16 @@ export type ContributionInput = Omit<MealContribution, "id" | "mealId" | "source
 export interface ImageFoodCandidate extends NutrientValues { label: string; portionAmount: number | null; portionUnit: string | null; note: string | null; }
 export interface ImageNutritionCandidate extends NutrientValues { foods?: ImageFoodCandidate[]; title: string; observedFoods: Array<{ label: string; estimatedPortion: string | null; note: string | null }>; confidence: "low" | "medium" | "high"; assumptions: string[]; uncertaintyNote: string; }
 export interface ImageAnalysisAttempt { id: string; sequence: number; status: "running" | "succeeded" | "failed"; providerRequestId: string | null; errorCode: string | null; startedAt: string; finishedAt: string | null; }
-export interface MealImageAnalysis { id: string; mealId: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; model: string; promptVersion: string; candidate: ImageNutritionCandidate | null; lastErrorCode: string | null; imageAvailable: boolean; adoptedAt: string | null; revision: number; attempts: ImageAnalysisAttempt[]; createdAt: string; updatedAt: string; }
+export interface MealImageAnalysis { id: string; mealId: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "waiting"; replacement?: { operationId: string; mealRevision: number; undone: boolean } | null; model: string; promptVersion: string; candidate: ImageNutritionCandidate | null; lastErrorCode: string | null; imageAvailable: boolean; adoptedAt: string | null; revision: number; attempts: ImageAnalysisAttempt[]; createdAt: string; updatedAt: string; }
 export type ImageAdoptionInput = ContributionInput & { analysisRevision: number; mealRevision: number; mode: "whole_meal" | "supplement"; replaceExisting: boolean; deleteOriginal: boolean };
 
+export interface PhotoAnalysisSettings { automatic: boolean; consentAt: string | null; revision: number; }
+export interface ImageReplacementInput { operationId: string; mealRevision: number; analysisRevision: number; replaceIds: string[]; }
 export const nutritionApi = {
+  photoSettings: () => apiRequest<PhotoAnalysisSettings>("/api/v1/photo-analysis-settings"),
+  savePhotoSettings: (input: { revision: number; automatic: boolean; consent: boolean }) => apiRequest<PhotoAnalysisSettings>("/api/v1/photo-analysis-settings", { method: "PUT", body: JSON.stringify(input) }),
+  reanalyze: (id: string, revision: number) => apiRequest<MealImageAnalysis>(`/api/v1/image-analyses/${id}/reanalyze`, { method: "POST", body: JSON.stringify({ revision, consent: true }) }),
+  replaceImageFoods: (id: string, input: ImageReplacementInput, undo = false) => apiRequest<{ meal: Meal; analysis: MealImageAnalysis }>(`/api/v1/image-analyses/${id}/${undo ? "undo-replacement" : "replace-foods"}`, { method: "POST", body: JSON.stringify(input) }),
   changePortion: (meal: Meal, item: MealContribution, portionAmount: number) => apiRequest<Meal>(`/api/v1/nutrition/meals/${meal.id}/contributions/${item.id}/portion`, { method: "PATCH", body: JSON.stringify({ mealRevision: meal.revision, contributionRevision: item.revision, portionAmount }) }),
   listDietPlans: (from: string, to: string) => apiRequest<DietPlan[]>(`/api/v1/nutrition/diet-plans?${new URLSearchParams({ from, to })}`),
   createDietPlan: (input: DietPlanInput) => apiRequest<DietPlan>("/api/v1/nutrition/diet-plans", { method: "POST", body: JSON.stringify(input) }),
@@ -42,6 +48,6 @@ export const nutritionApi = {
   deleteFoodTemplate: (id: string, revision: number) => apiRequest<void>(`/api/v1/nutrition/food-templates/${id}?${new URLSearchParams({ revision: revision.toString() })}`, { method: "DELETE" }),
   uploadMealImage: (mealId: string, file: File, onProgress: (percent: number) => void) => uploadBinary<MealImageAnalysis>(`/api/v1/image-analyses?${new URLSearchParams({ mealId })}`, file, onProgress),
   listImageAnalyses: (mealId: string) => apiRequest<MealImageAnalysis[]>(`/api/v1/image-analyses?${new URLSearchParams({ mealId })}`),
-  retryImageAnalysis: (analysisId: string, revision: number) => apiRequest<MealImageAnalysis>(`/api/v1/image-analyses/${analysisId}/retry`, { method: "POST", body: JSON.stringify({ revision }) }),
+  retryImageAnalysis: (analysisId: string, revision: number) => apiRequest<MealImageAnalysis>(`/api/v1/image-analyses/${analysisId}/retry`, { method: "POST", body: JSON.stringify({ revision, consent: true }) }),
   adoptImageAnalysis: (analysisId: string, input: ImageAdoptionInput) => apiRequest<{ analysis: MealImageAnalysis; meal: Meal }>(`/api/v1/image-analyses/${analysisId}/adopt`, { method: "POST", body: JSON.stringify(input) }),
 };

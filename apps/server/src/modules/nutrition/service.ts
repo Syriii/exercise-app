@@ -37,6 +37,14 @@ function nonnegative(value: number | null, name: string, maximum: number): numbe
 function round(value: number): number { return Math.round(value * 10) / 10; }
 
 export class NutritionService {
+  public imageReplacement(userId: string, analysisId: string) { return this.repository.imageReplacement(userId, analysisId); }
+  public async replaceImageFoods(userId: string, mealId: string, analysisId: string, input: import("../image-analysis/replacement.js").ImageReplacementInput, candidate: ImageNutritionCandidate, undo: boolean) {
+    const result = await this.repository.replaceImageFoods(userId, mealId, analysisId, input, imageFoodContributions(analysisId, candidate), undo);
+    if (result === "not_found") throw new NutritionError("meal_not_found", "找不到这顿饭或识别结果", 404);
+    if (result === "revision_conflict") throw new NutritionError("nutrition_revision_conflict", "餐食或识别结果已变化，请重新查看后操作；原内容未被覆盖", 409);
+    if (result === "replacement_required") throw new NutritionError("nutrition_replacement_required", "请选择照片覆盖的原食物；整餐总量不能与新食物重复计入", 409);
+    return result;
+  }
   readonly #externalFoods = new Map<string, { food: FoodDefinition; expiresAt: number }>();
   public constructor(private readonly repository: NutritionRepository, private readonly publicFoodProvider: PublicFoodProvider | null = null) {}
 

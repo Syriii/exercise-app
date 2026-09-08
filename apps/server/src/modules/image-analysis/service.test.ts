@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { randomUUID } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
@@ -67,6 +68,82 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it("keeps manual uploads waiting, starts only the selected photo, and never bulk starts old photos", async () => {
+    const values = await fixture();
+    expect(await values.service.settings("user-1")).toMatchObject({ automatic: false, consentAt: null });
+    const first = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png), false);
+    const second = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png), false);
+    await values.service.process(first.id);
+    expect((await values.service.list("user-1", values.meal.id)).every(value => value.status === "waiting")).toBe(true);
+    await expect(values.service.saveSettings("user-1", 1, true, false)).rejects.toMatchObject({ code: "photo_consent_required" });
+    await values.service.saveSettings("user-1", 1, true, true);
+    expect((await values.service.list("user-1", values.meal.id)).every(value => value.status === "waiting")).toBe(true);
+    await values.service.retry("user-1", first.id, first.revision);
+    await expect(values.service.retry("user-1", first.id, first.revision)).rejects.toMatchObject({ statusCode: 409 });
+    expect((await values.repository.get("user-1", second.id))?.status).toBe("waiting");
+    expect(await values.service.settings("user-2")).toMatchObject({ automatic: false, consentAt: null });
+    await values.repository.markMediaStatus((await values.repository.getWorkItem(second.id))!.mediaId, "deleted");
+    await expect(values.service.retry("user-1", second.id, second.revision)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("replaces a previewed subset once, preserves other foods, undoes once and rejects later edits", async () => {
+    const foods = [{ label: "照片鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 }];
+    const values = await fixture(new FixedImageAnalyzer({ ...candidate, foods }));
+    const manual = { mode: "item" as const, label: "原来的鸡蛋", portionAmount: 1, portionUnit: "个", basisDescription: null, energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5 };
+    let meal = await values.nutritionService.addContribution("user-1", values.meal.id, 1, manual, false);
+    const replacedId = meal.contributions[0]!.id;
+    meal = await values.nutritionService.addContribution("user-1", meal.id, meal.revision, { ...manual, label: "照片外的豆浆", energyKcal: 100 }, false);
+    const pending = await values.service.request("user-1", meal.id, "image/png", Readable.from(png));
+    await values.service.process(pending.id);
+    const analysis = (await values.service.list("user-1", meal.id))[0]!;
+    const input = { operationId: randomUUID(), mealRevision: meal.revision, analysisRevision: analysis.revision, replaceIds: [replacedId] };
+    await expect(values.service.replaceFoods("user-2", analysis.id, input)).rejects.toMatchObject({ statusCode: 404 });
+    const replaced = await values.service.replaceFoods("user-1", analysis.id, input);
+    expect(replaced.meal.contributions.map(item => item.label)).toEqual(["照片外的豆浆", "照片鸡蛋"]);
+    expect((await values.service.replaceFoods("user-1", analysis.id, input)).meal.revision).toBe(replaced.meal.revision);
+    await expect(values.service.replaceFoods("user-1", analysis.id, { ...input, replaceIds: [] })).rejects.toMatchObject({ statusCode: 409 });
+    const undoInput = { ...input, mealRevision: replaced.meal.revision, analysisRevision: replaced.analysis.revision };
+    const restored = await values.service.replaceFoods("user-1", analysis.id, undoInput, true);
+    expect(restored.meal.contributions.map(item => item.label)).toEqual(["原来的鸡蛋", "照片外的豆浆"]);
+    expect((await values.service.replaceFoods("user-1", analysis.id, undoInput, true)).meal.revision).toBe(restored.meal.revision);
+    const reapplied = await values.service.replaceFoods("user-1", analysis.id, { ...input, operationId: randomUUID(), mealRevision: restored.meal.revision, analysisRevision: restored.analysis.revision });
+    expect(reapplied.meal.contributions.map(item => item.label)).toEqual(["照片外的豆浆", "照片鸡蛋"]);
+    await values.nutritionService.addContribution("user-1", meal.id, reapplied.meal.revision, { ...manual, label: "后来加的" }, false);
+    await expect(values.service.replaceFoods("user-1", analysis.id, undoInput, true)).rejects.toMatchObject({ statusCode: 409 });
+    await expect(values.service.replaceFoods("user-1", analysis.id, input)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("retains an uploaded image when enqueue fails and allows safe manual retry", async () => {
+    const values = await fixture();
+    values.queue.enqueue = async () => { throw new Error("queue offline"); };
+    const saved = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    expect(saved).toMatchObject({ status: "failed", lastErrorCode: "queue_unavailable", imageAvailable: true });
+    expect(await values.mediaStore.open((await values.repository.getWorkItem(saved.id))!.objectKey)).toBeTruthy();
+  });
+
+  it("creates a fresh reanalysis without overwriting the old result and rejects repeated source revisions", async () => {
+    const values = await fixture();
+    const first = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    await values.service.process(first.id);
+    const original = (await values.service.list("user-1", values.meal.id))[0]!;
+    const fresh = await values.service.reanalyze("user-1", first.id, original.revision);
+    expect(fresh.id).not.toBe(first.id);
+    expect(fresh.candidate).toBeNull();
+    await expect(values.service.reanalyze("user-1", first.id, original.revision)).rejects.toMatchObject({ statusCode: 409 });
+    expect((await values.repository.get("user-1", first.id))?.candidate).toEqual(candidate);
+    expect((await values.repository.getUsage("user-1")).temporaryMediaBytes).toBe(png.length);
+  });
+
+  it("does not apply a late result after its original photo has been deleted", async () => {
+    const values = await fixture();
+    const pending = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    const attempt = await values.repository.beginAttempt(pending.id);
+    if (typeof attempt === "string") throw new Error("expected attempt");
+    await values.repository.markMediaStatus(attempt.work.mediaId, "deleted");
+    expect(await values.repository.succeed(pending.id, attempt.attemptId, candidate, "late-deleted")).toBe("not_running");
+    expect(await values.repository.get("user-1", pending.id)).toMatchObject({ status: "cancelled", candidate: null });
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(0);
+  });
   it("counts photo foods atomically, scales one item and never duplicates a repeated task", async () => {
     const foods = [
       { label: "鸡蛋", portionAmount: 2, portionUnit: "个", note: null, energyKcal: 140, proteinGrams: 12, carbohydrateGrams: 2, fatGrams: 10 },

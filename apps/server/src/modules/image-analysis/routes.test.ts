@@ -74,6 +74,12 @@ describe("image analysis routes", () => {
       payload: { username: "image-route", password: "correct horse battery staple" },
     });
     const cookie = String(registration.headers["set-cookie"]).split(";", 1)[0];
+    const settings = await app.inject({ method: "GET", url: "/api/v1/photo-analysis-settings", headers: { cookie } });
+    expect(settings.json()).toMatchObject({ automatic: false, consentAt: null, revision: 1 });
+    const noConsent = await app.inject({ method: "PUT", url: "/api/v1/photo-analysis-settings", headers: { cookie }, payload: { revision: 1, automatic: true, consent: false } });
+    expect(noConsent.statusCode).toBe(400);
+    const enabled = await app.inject({ method: "PUT", url: "/api/v1/photo-analysis-settings", headers: { cookie }, payload: { revision: 1, automatic: true, consent: true } });
+    expect(enabled.statusCode).toBe(200);
     const createdMeal = await app.inject({
       method: "POST",
       url: "/api/v1/nutrition/meals",

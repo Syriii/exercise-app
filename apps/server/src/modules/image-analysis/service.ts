@@ -8,42 +8,86 @@ import type { TemporaryMediaStore } from "../media/temporary-media-store.js";
 import type { NutritionService } from "../nutrition/service.js";
 import type { MealContributionMode } from "../nutrition/types.js";
 import type { TaskQueue } from "../tasks/task-queue.js";
+import { publicReplacement, type ImageReplacementInput } from "./replacement.js";
 
 export const mealImageQueue = "meal-image-analysis";
 export const mealImageQueueDefinition = { name: mealImageQueue, retryLimit: 0, retryDelaySeconds: 5, retryBackoff: false, expireInSeconds: 180, heartbeatSeconds: 30, deleteAfterSeconds: 86400 } as const;
 
 export class ImageAnalysisService {
+  public settings(userId: string) { return this.options.repository.getSettings(userId); }
+  public async saveSettings(userId: string, revision: number, automatic: boolean, consent: boolean) {
+    const current = await this.settings(userId);
+    if (automatic && !consent && current.consentAt === null) throw new ImageAnalysisError("photo_consent_required", "请先确认照片会发送给识别服务", 400);
+    const result = await this.options.repository.saveSettings(userId, revision, automatic, consent);
+    if (result === "revision_conflict") throw new ImageAnalysisError("analysis_revision_conflict", "识别设置已变化，请刷新后重试", 409);
+    return result;
+  }
+  private async enqueue(userId: string, id: string) {
+    try { await this.options.queue.enqueue(mealImageQueue, id); }
+    catch { await this.options.repository.enqueueFailed(userId, id); }
+  }
+  public async reanalyze(userId: string, analysisId: string, revision: number) {
+    if (!this.options.analyzer) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
+    const original = await this.options.repository.get(userId, analysisId);
+    if (!original) throw new ImageAnalysisError("analysis_not_found", "找不到这张照片", 404);
+    await this.options.nutritionService.getMeal(userId, original.mealId);
+    const usage = await this.options.repository.getUsage(userId);
+    if (usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "请等待已有照片处理后重试", 429);
+    const result = await this.options.repository.reanalyze(userId, analysisId, revision, { model: this.options.analyzer.model, promptVersion: imageAnalysisPromptVersion });
+    if (typeof result === "string") throw new ImageAnalysisError("analysis_revision_conflict", "照片状态已变化或原图已不可用，请刷新后查看", 409);
+    await this.enqueue(userId, result.id);
+    return (await this.options.repository.get(userId, result.id))!;
+  }
+  public async replaceFoods(userId: string, analysisId: string, input: ImageReplacementInput, undo = false) {
+    const analysis = await this.options.repository.get(userId, analysisId);
+    if (!analysis) throw new ImageAnalysisError("analysis_not_found", "找不到识别结果", 404);
+    if (analysis.status !== "succeeded" || !analysis.candidate?.foods?.length) throw new ImageAnalysisError("analysis_not_ready", "还没有完整食物结果", 409);
+    const state = await this.options.nutritionService.imageReplacement(userId, analysisId);
+    if ((!state || state.operationId !== input.operationId) && analysis.revision !== input.analysisRevision) throw new ImageAnalysisError("analysis_revision_conflict", "识别结果已变化，请重新查看", 409);
+    const effectiveInput = undo && state ? { ...input, replaceIds: state.replaceIds } : input;
+    const meal = await this.options.nutritionService.replaceImageFoods(userId, analysis.mealId, analysisId, effectiveInput, analysis.candidate, undo);
+    return { meal, analysis: (await this.list(userId, analysis.mealId)).find(value => value.id === analysisId)! };
+  }
   public constructor(private readonly options: { repository: ImageAnalysisRepository; mediaStore: TemporaryMediaStore; queue: TaskQueue; analyzer: ImageAnalyzer | null; nutritionService: NutritionService; maxUploadBytes: number; maxActiveAnalysesPerAccount?: number; temporaryMediaMaxBytesPerAccount?: number; now?: () => Date }) {}
 
-  public async request(userId: string, mealId: string, declaredContentType: string | undefined, source: NodeJS.ReadableStream) {
-    if (this.options.analyzer === null) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
+  public async request(userId: string, mealId: string, declaredContentType: string | undefined, source: NodeJS.ReadableStream, automatic = true) {
+    if (automatic && this.options.analyzer === null) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
     await this.options.nutritionService.getMeal(userId, mealId).catch(() => { throw new ImageAnalysisError("meal_not_found", "找不到这顿饭", 404); });
     const usage = await this.options.repository.getUsage(userId);
-    if (usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "当前已有多张照片等待分析，请完成后再上传", 429);
+    if (automatic && usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "当前已有多张照片等待分析，请完成后再上传", 429);
     let stored;
+    let attached = false;
     try { stored = await this.options.mediaStore.put(source, { maxBytes: this.options.maxUploadBytes }); }
     catch (error) { if (error instanceof Error && "code" in error && error.code === "media_too_large") throw new ImageAnalysisError("image_too_large", "图片超过应用允许大小", 413); throw error; }
     try {
       if (usage.temporaryMediaBytes + stored.byteSize > (this.options.temporaryMediaMaxBytesPerAccount ?? 256 * 1024 * 1024)) throw new ImageAnalysisError("temporary_media_quota_reached", "临时照片空间已满，请等待处理或删除旧照片", 429);
       const actualContentType = await detectImageType(await readAll(await this.options.mediaStore.open(stored.objectKey), this.options.maxUploadBytes));
       if (actualContentType === null || (declaredContentType !== undefined && declaredContentType !== actualContentType)) throw new ImageAnalysisError("invalid_image", "只接受内容真实匹配的 JPEG、PNG、GIF 或 WebP 图片", 400);
-      const created = await this.options.repository.create(userId, mealId, actualContentType, stored, new Date((this.options.now?.() ?? new Date()).getTime() + 24 * 60 * 60 * 1000), this.options.analyzer.model, imageAnalysisPromptVersion);
-      await this.options.queue.enqueue(mealImageQueue, created.id);
-      return created;
-    } catch (error) { await this.options.mediaStore.delete(stored.objectKey); throw error; }
+      const created = await this.options.repository.create(userId, mealId, actualContentType, stored, new Date((this.options.now?.() ?? new Date()).getTime() + 24 * 60 * 60 * 1000), this.options.analyzer?.model ?? "unconfigured", imageAnalysisPromptVersion, automatic);
+      attached = true;
+      if (automatic) await this.enqueue(userId, created.id);
+      return (await this.options.repository.get(userId, created.id))!;
+    } catch (error) { if (!attached) await this.options.mediaStore.delete(stored.objectKey); throw error; }
   }
 
-  public async list(userId: string, mealId: string) { await this.options.nutritionService.getMeal(userId, mealId).catch(() => { throw new ImageAnalysisError("meal_not_found", "找不到这顿饭", 404); }); return this.options.repository.list(userId, mealId); }
+  public async list(userId: string, mealId: string) {
+    await this.options.nutritionService.getMeal(userId, mealId).catch(() => { throw new ImageAnalysisError("meal_not_found", "找不到这顿饭", 404); });
+    return Promise.all((await this.options.repository.list(userId, mealId)).map(async analysis => ({ ...analysis, replacement: publicReplacement(await this.options.nutritionService.imageReplacement(userId, analysis.id)) })));
+  }
 
   public async process(analysisId: string): Promise<void> {
     if (this.options.analyzer === null) throw new Error("image analyzer unavailable");
     const started = await this.options.repository.beginAttempt(analysisId);
     if (started === "not_found" || started === "not_ready") return;
+    if (!started.work.imageAvailable) { await this.options.repository.fail(analysisId, started.attemptId, "image_unavailable"); return; }
     try {
       const image = await readAll(await this.options.mediaStore.open(started.work.objectKey), this.options.maxUploadBytes);
       const result = await this.options.analyzer.analyze(started.work.contentType, image);
       const completed = await this.options.repository.succeed(analysisId, started.attemptId, result.candidate, result.providerRequestId);
-      if (completed !== "not_running" && !completed.tentativeHandled) {
+      const newer = completed !== "not_running" && !completed.tentativeHandled
+        ? (await this.options.repository.list(started.work.userId, started.work.mealId)).some(other => other.id !== analysisId && other.createdAt >= started.work.createdAt)
+        : false;
+      if (completed !== "not_running" && !completed.tentativeHandled && !newer) {
         await this.options.nutritionService.ensureTentativeModelContribution(
           started.work.userId,
           started.work.mealId,
@@ -63,13 +107,17 @@ export class ImageAnalysisService {
   }
 
   public async retry(userId: string, analysisId: string, revision: number) {
+    if (!this.options.analyzer) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
+    const original = await this.options.repository.get(userId, analysisId);
+    if (!original) throw new ImageAnalysisError("analysis_not_found", "找不到这张照片", 404);
+    await this.options.nutritionService.getMeal(userId, original.mealId);
     const usage = await this.options.repository.getUsage(userId);
     if (usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "当前已有多张照片等待分析，请稍后重试", 429);
-    const result = await this.options.repository.retry(userId, analysisId, revision);
+    const result = await this.options.repository.retry(userId, analysisId, revision, { model: this.options.analyzer.model, promptVersion: imageAnalysisPromptVersion });
     if (result === "not_found") throw new ImageAnalysisError("analysis_not_found", "找不到这次图片分析", 404);
     if (result === "revision_conflict") throw new ImageAnalysisError("analysis_revision_conflict", "分析状态已经变化，请刷新后重试", 409);
-    if (result === "not_failed") throw new ImageAnalysisError("analysis_not_ready", "只有失败的分析可以重试", 409);
-    await this.options.queue.enqueue(mealImageQueue, analysisId); return result;
+    if (result === "not_failed") throw new ImageAnalysisError("analysis_not_ready", "照片正在处理或原图已不可用，请刷新后查看", 409);
+    await this.enqueue(userId, analysisId); return (await this.options.repository.get(userId, analysisId))!;
   }
 
   public async adopt(userId: string, analysisId: string, analysisRevision: number, mealRevision: number, input: { mode: Extract<MealContributionMode, "whole_meal" | "supplement">; label: string; portionAmount: number | null; portionUnit: string | null; basisDescription: string | null; energyKcal: number | null; proteinGrams: number | null; carbohydrateGrams: number | null; fatGrams: number | null; replaceExisting: boolean; deleteOriginal: boolean }) {

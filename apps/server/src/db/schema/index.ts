@@ -71,7 +71,7 @@ export const planningMacroPreference = pgEnum("planning_macro_preference", ["bal
 export const mealContributionMode = pgEnum("meal_contribution_mode", ["item", "whole_meal", "supplement"]);
 export const mealContributionSource = pgEnum("meal_contribution_source", ["manual", "model_adopted"]);
 export const mealContributionReviewStatus = pgEnum("meal_contribution_review_status", ["tentative", "confirmed"]);
-export const mealImageAnalysisStatus = pgEnum("meal_image_analysis_status", ["pending", "running", "succeeded", "failed", "cancelled"]);
+export const mealImageAnalysisStatus = pgEnum("meal_image_analysis_status", ["pending", "running", "succeeded", "failed", "cancelled", "waiting"]);
 
 export const users = pgTable(
   "users",
@@ -82,6 +82,9 @@ export const users = pgTable(
     role: userRole("role").default("user").notNull(),
     status: userStatus("status").default("active").notNull(),
     passwordChangeRequired: boolean("password_change_required").default(false).notNull(),
+    photoAnalysisAutomatic: boolean("photo_analysis_automatic").default(false).notNull(),
+    photoAnalysisConsentAt: timestamp("photo_analysis_consent_at", { withTimezone: true }),
+    photoAnalysisSettingsRevision: integer("photo_analysis_settings_revision").default(1).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("users_normalized_username_uq").on(table.normalizedUsername)],
@@ -1002,6 +1005,7 @@ export const mealImageAnalyses = pgTable(
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
     rawCandidate: jsonb("raw_candidate").$type<Record<string, unknown>>(),
+    replacementState: jsonb("replacement_state").$type<import("../../modules/image-analysis/replacement.js").StoredImageReplacement>(),
     uncertaintyNote: text("uncertainty_note"),
     lastErrorCode: text("last_error_code"),
     adoptedAt: timestamp("adopted_at", { withTimezone: true }),

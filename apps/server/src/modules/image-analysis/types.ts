@@ -1,4 +1,6 @@
-export type ImageAnalysisStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type ImageAnalysisStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "waiting";
+
+export interface PhotoAnalysisSettings { automatic: boolean; consentAt: Date | null; revision: number; }
 export type AnalysisAttemptStatus = "running" | "succeeded" | "failed";
 
 export interface ImageFoodCandidate {

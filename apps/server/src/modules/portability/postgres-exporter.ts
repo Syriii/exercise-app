@@ -52,6 +52,8 @@ export class PostgresUserDataExporter implements UserDataExporter {
     const [account] = await this.database.select({ id: users.id, username: users.username, role: users.role, status: users.status, passwordChangeRequired: users.passwordChangeRequired, createdAt: users.createdAt, updatedAt: users.updatedAt }).from(users).where(eq(users.id, userId)).limit(1);
     if (account === undefined) throw new Error("export_account_not_found");
     const data: Record<string, readonly unknown[]> = {};
+    const [photoSettings] = await this.database.select({ automatic: users.photoAnalysisAutomatic, consentAt: users.photoAnalysisConsentAt }).from(users).where(eq(users.id, userId));
+    data.photo_analysis_settings = photoSettings ? [photoSettings] : [];
     for (const table of userExportRootTables) {
       const result = await this.database.execute<{ value: unknown }>(sql`select (to_jsonb(record) - 'user_id' - 'object_key') as value from ${sql.raw(`"${table}"`)} record where record.user_id = ${userId} order by record.created_at nulls last`);
       data[table] = result.rows.map((row) => row.value);

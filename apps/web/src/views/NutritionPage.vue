@@ -8,6 +8,8 @@ import { planningApi, type DailyPlanningReference } from "../api/planning";
 import AppShell from "../app/AppShell.vue";
 import MealFoodItem from "../features/nutrition/MealFoodItem.vue";
 import FoodPicker from "../features/nutrition/FoodPicker.vue";
+import PhotoAnalysisSettings from "../features/nutrition/PhotoAnalysisSettings.vue";
+import ImageResultReplacement from "../features/nutrition/ImageResultReplacement.vue";
 import { foodCatalogApi } from "../api/food-catalog";
 import { newFoodPickerDraft, type FoodPickerDraft } from "../features/nutrition/food-picker-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
@@ -23,6 +25,12 @@ const loading = ref(true);
 const saving = ref(false);
 const errorMessage = ref("");
 const notice = ref("");
+const automaticPhotos = ref<boolean | null>(null);
+async function imageFoodsSaved(meal: Meal, analysis: MealImageAnalysis) {
+  analysesByMeal[meal.id] = (analysesByMeal[meal.id] ?? []).map(item => item.id === analysis.id ? analysis : item);
+  await selectionsSaved(meal);
+  notice.value = analysis.replacement?.undone ? "已撤销这次替换，原食物已恢复" : "照片食物已保存，未选择替换的内容仍保留";
+}
 const reference = ref<DailyPlanningReference | null>(null);
 const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
@@ -106,6 +114,7 @@ function displayTime(value: string): string { return new Intl.DateTimeFormat("zh
 function nutrientText(value: number | null, unit: string): string { return value === null ? "未知" : `${value} ${unit}`; }
 function contributionForAnalysis(meal: Meal, analysisId: string): MealContribution | undefined { return meal.contributions.find((value) => value.sourceAnalysisId === analysisId); }
 function analysisStatus(value: MealImageAnalysis, meal: Meal): string {
+  if (value.status === "waiting") return "照片已保存，尚未识别";
   const contribution = contributionForAnalysis(meal, value.id);
   if (value.candidate?.foods !== undefined) return contribution ? "照片估算" : "识别完成";
   if (contribution || value.adoptedAt !== null) return "照片估算";
@@ -237,6 +246,7 @@ function closeMealComposer() {
 
 async function createMeal() {
   if (saving.value) return;
+  if (quickMealImage.value && automaticPhotos.value === null) { errorMessage.value = "请先在拍照识别设置中重新读取设置，再上传照片。"; return; }
   saving.value = true;
   errorMessage.value = "";
   const selectedImage = quickMealImage.value;
@@ -313,6 +323,8 @@ async function selectMealImage(mealId: string, event: Event) {
 }
 
 async function uploadMealImage(meal: Meal) {
+  if (uploadingMealId.value !== null) return;
+  if (automaticPhotos.value === null) { errorMessage.value = "请先在拍照识别设置中重新读取设置，再上传照片。"; return; }
   const selected = imageSelections.value[meal.id];
   if (selected === undefined) { errorMessage.value = "请先选择或拍摄一张餐食照片"; return; }
   uploadingMealId.value = meal.id; errorMessage.value = "";
@@ -321,17 +333,18 @@ async function uploadMealImage(meal: Meal) {
     const analysis = await nutritionApi.uploadMealImage(meal.id, selected.file, (percent) => { uploadProgress[meal.id] = percent; });
     analysesByMeal[meal.id] = [analysis, ...(analysesByMeal[meal.id] ?? [])];
     imageSelections.value = { ...imageSelections.value, [meal.id]: undefined };
-    notice.value = "照片已上传；识别完成后会按食物计入，你可以直接修改份量。已有记录不会被覆盖";
+    notice.value = analysis.status === "waiting" ? "照片已保存，尚未发送给识别服务；你可以在这餐中手动发起识别。" : analysis.status === "failed" ? "照片已保存，但识别未能发起；可在原餐食重试，无需重新上传。" : "照片已上传；识别完成后会按食物计入，你可以直接修改份量。已有记录不会被覆盖";
   } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "照片暂时上传不了"; }
   finally { uploadingMealId.value = null; delete uploadProgress[meal.id]; }
 }
 
 async function retryImageAnalysis(mealId: string, analysis: MealImageAnalysis) {
+  if (actingAnalysisId.value !== null || !window.confirm("将这张照片发送给识别服务，估算食物与营养。已有食物和修正不会自动覆盖，是否继续？")) return;
   actingAnalysisId.value = analysis.id; errorMessage.value = "";
   try {
-    const saved = await nutritionApi.retryImageAnalysis(analysis.id, analysis.revision);
-    analysesByMeal[mealId] = (analysesByMeal[mealId] ?? []).map((value) => value.id === saved.id ? saved : value);
-    notice.value = "已重新提交分析";
+    const saved = analysis.status === "succeeded" ? await nutritionApi.reanalyze(analysis.id, analysis.revision) : await nutritionApi.retryImageAnalysis(analysis.id, analysis.revision);
+    await loadImageAnalyses(mealId, selectedDate.value);
+    notice.value = saved.status === "failed" ? "照片仍保留，但识别未能发起，请稍后重试。" : "已提交识别，可以离开页面稍后查看";
   } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时无法重试"; }
   finally { actingAnalysisId.value = null; }
 }
@@ -499,7 +512,7 @@ onBeforeUnmount(stopPolling);
                 <div class="meal-image-panel__heading">
                   <div>
                     <strong :id="`meal-image-${meal.id}`">拍照估算</strong>
-                    <span>照片上传后异步识别，已有手工记录或修正不会被覆盖。</span>
+                    <span>{{ automaticPhotos === null ? '正在读取识别设置；读取完成后可以上传照片。' : automaticPhotos ? '照片上传后自动识别，已有记录不会被覆盖。' : '照片先保存到这餐，需要时再手动发起识别。' }}</span>
                   </div>
                 </div>
                 <div class="image-upload-row">
@@ -508,27 +521,35 @@ onBeforeUnmount(stopPolling);
                     <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" @change="selectMealImage(meal.id, $event)" />
                   </label>
                   <span class="selected-file"><template v-if="imageSelections[meal.id]">{{ imageSelections[meal.id]!.file.name }} · <template v-if="imageSelections[meal.id]!.compressed">已压缩 {{ formatFileSize(imageSelections[meal.id]!.originalBytes) }} → {{ formatFileSize(imageSelections[meal.id]!.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(imageSelections[meal.id]!.uploadBytes) }}</template></template><template v-else>还没有选择照片</template></span>
-                  <button class="action-button" type="button" :disabled="uploadingMealId === meal.id" @click="uploadMealImage(meal)">{{ uploadingMealId === meal.id ? '正在上传…' : '上传并分析' }}</button>
+                  <button class="action-button" type="button" :disabled="uploadingMealId !== null || automaticPhotos === null" @click="uploadMealImage(meal)">{{ uploadingMealId === meal.id ? '正在上传…' : automaticPhotos ? '上传并识别' : '上传照片' }}</button>
                 </div>
                 <div v-if="uploadingMealId === meal.id" class="upload-progress" role="status"><progress max="100" :value="uploadProgress[meal.id] ?? 0"></progress><span>已上传 {{ uploadProgress[meal.id] ?? 0 }}%</span></div>
                 <div v-if="(analysesByMeal[meal.id] ?? []).length" class="image-analysis-list">
                   <article v-for="analysis in analysesByMeal[meal.id] ?? []" :key="analysis.id" class="image-analysis-card">
                     <header>
-                      <div><strong>{{ analysis.candidate?.title ?? '餐食照片' }}</strong><span>{{ analysisStatus(analysis, meal) }}</span></div>
+                      <div><strong>{{ analysis.candidate?.title ?? '餐食照片' }}</strong></div>
                       <span class="status-chip" :data-tone="analysis.status === 'failed' ? 'danger' : analysis.status === 'succeeded' ? 'accent' : undefined">{{ analysisStatus(analysis, meal) }}</span>
                     </header>
                     <p v-if="analysis.status === 'pending' || analysis.status === 'running'" class="field-help">正在分析，可以稍后回来查看。</p>
+                    <div v-else-if="analysis.status === 'waiting' || analysis.status === 'cancelled'">
+                      <p class="field-help">{{ analysis.imageAvailable ? '照片已保存在这餐，尚未发起新的识别。' : '原图已不可用，请重新选择照片；已有记录仍保留。' }}</p>
+                      <button v-if="analysis.imageAvailable" type="button" class="action-button" :disabled="actingAnalysisId !== null" @click="retryImageAnalysis(meal.id, analysis)">识别这张照片</button>
+                    </div>
                     <div v-else-if="analysis.status === 'failed'" class="analysis-failure">
                       <p>{{ imageAnalysisFailureText(analysis.lastErrorCode, analysis.imageAvailable) }}</p>
                       <button v-if="analysis.imageAvailable" class="action-button" type="button" :disabled="actingAnalysisId === analysis.id" @click="retryImageAnalysis(meal.id, analysis)">重新分析</button><p v-else class="field-help">原图已不可用，请重新选择照片；已有食物记录不受影响。</p>
                     </div>
                     <div v-else-if="analysis.candidate?.foods !== undefined" class="analysis-result">
-                      <p v-if="contributionForAnalysis(meal, analysis.id)" class="field-help">已按食物计入下方列表，可直接改份量或移除。照片估算可能有偏差。</p>
+                      <p v-if="!analysis.candidate.foods.length" class="field-help">这次没有识别到可记录的食物，可以手工添加或重新识别；原有记录不变。</p>
+                      <p v-else-if="contributionForAnalysis(meal, analysis.id)" class="field-help">已按食物计入这餐，可直接改份量或移除。照片估算可能有偏差。</p>
                       <p v-else class="field-help">这顿饭已有记录或曾被修改，识别结果没有覆盖你的内容。</p>
                       <details><summary>查看原始识别结果</summary>
                         <ul class="observed-foods"><li v-for="(food, index) in analysis.candidate.foods" :key="index"><strong>{{ food.label }}</strong><span>{{ food.portionAmount ?? '份量未知' }} {{ food.portionUnit ?? '' }}</span></li></ul>
                         <p class="field-help">{{ analysis.candidate.uncertaintyNote }}</p>
                       </details>
+                      <ImageResultReplacement v-if="analysis.candidate.foods.length" :meal="meal" :analysis="analysis" :disabled="saving || actingAnalysisId !== null" @busy="saving = $event" @saved="imageFoodsSaved" />
+                      <button v-if="analysis.imageAvailable" type="button" class="text-action" :disabled="saving || actingAnalysisId !== null" @click="retryImageAnalysis(meal.id, analysis)">重新识别这张照片</button>
+                      <p v-else class="field-help">原图已不可用，不能重新识别；已保存的结果仍可查看和使用。</p>
                     </div>
                     <details v-else-if="analysis.candidate !== null" class="analysis-result"><summary>旧照片结果与修正</summary>
                       <div class="analysis-observations">
@@ -568,6 +589,7 @@ onBeforeUnmount(stopPolling);
         </article>
       </section>
     </div>
+    <PhotoAnalysisSettings @changed="automaticPhotos = $event" />
   </AppShell>
 </template>
 
