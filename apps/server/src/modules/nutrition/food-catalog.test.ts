@@ -11,6 +11,40 @@ const egg = builtinFoods.find((food) => food.id === "usda:173424")!;
 const selection = { foodId: egg.id, version: egg.version, amount: 100 };
 
 describe("unified food catalog", () => {
+  it("retries personal creation atomically without duplicates, cross-account sharing or resurrection", async () => {
+    const repository = new MemoryNutritionRepository();
+    const service = new NutritionService(repository);
+    const input = { ...unknownInput, submissionId: randomUUID() };
+    const [food, retry] = await Promise.all([service.createPersonalFood("owner", input), service.createPersonalFood("owner", input)]);
+    expect(retry).toEqual(food);
+    expect((await service.getFoodCatalog("owner", input.label)).total).toBe(1);
+    await service.setFoodFavorite("owner", food.id, true);
+    expect(await service.createPersonalFood("owner", input)).toMatchObject({ id: food.id, isFavorite: true });
+    expect((await service.createPersonalFood("other", input)).id).not.toBe(food.id);
+    await expect(service.createPersonalFood("owner", { ...input, label: "不同内容" })).rejects.toMatchObject({ statusCode: 409 });
+    const template = (await repository.listFoodTemplates("owner"))[0]!;
+    await repository.deleteFoodTemplate("owner", template.id, template.revision);
+    await expect(service.createPersonalFood("owner", input)).rejects.toMatchObject({ statusCode: 409 });
+    expect((await service.getFoodCatalog("owner", input.label)).total).toBe(0);
+  });
+
+  it("favorites unfavorited packaged food snapshots by stable source identity across meals and cache expiry", async () => {
+    const repository = new MemoryNutritionRepository();
+    const service = new NutritionService(repository, { search: async () => [{ id: "open_food_facts:12345678", provider: "open_food_facts", label: "隔离测试豆奶", brand: null, barcode: "12345678", basisAmount: 100, basisUnit: "g", energyKcal: 60, proteinGrams: 4, carbohydrateGrams: null, fatGrams: null, sourceUrl: "https://world.openfoodfacts.org/product/12345678" }] });
+    const food = (await service.searchFoodCatalog("owner", "隔离测试豆奶")).items[0]!;
+    const meals = [];
+    for (const amount of [100, 250]) {
+      const meal = await service.createMeal("owner", mealInput);
+      meals.push(await service.addFoodSelections("owner", meal.id, 1, randomUUID(), [{ foodId: food.id, version: food.version, amount }]));
+    }
+    const cold = new NutritionService(repository);
+    await Promise.all(meals.map(meal => cold.favoriteMealFood("owner", meal.id, meal.contributions[0]!.id)));
+    const page = await cold.getFoodCatalog("owner", "隔离测试豆奶");
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({ id: food.id, isFavorite: true, basisAmount: 100, energyKcal: 60, version: food.version });
+    expect((await cold.getFoodCatalog("other", "隔离测试豆奶")).total).toBe(0);
+    for (const meal of meals) expect(await cold.getMeal("owner", meal.id)).toEqual(meal);
+  });
   it("browses every available food beyond 50 entries, with stable pagination and whole-list categories", async () => {
     const service = new NutritionService(new MemoryNutritionRepository());
     for (let i = 0; i < 61; i++) await service.createPersonalFood("owner", { ...unknownInput, label: `配菜${i}` });

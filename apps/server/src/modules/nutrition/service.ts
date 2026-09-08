@@ -92,11 +92,20 @@ export class NutritionService {
     } : null);
   }
 
-  public async createPersonalFood(userId: string, input: ContributionRequest & { category: FoodCategory }) {
+  public async createPersonalFood(userId: string, input: ContributionRequest & { category: FoodCategory; submissionId?: string }) {
     if (!Object.hasOwn(foodCategories, input.category) || input.portionAmount === null || input.portionAmount <= 0 || !input.portionUnit?.trim())
       throw new NutritionError("invalid_nutrition_input", "请填写食物分类与正数的基准份量和单位", 400);
-    return personalFood(await this.repository.createFoodTemplate(userId, { ...this.foodTemplateInput(input), isFavorite: false,
-      catalogMetadata: { category: input.category, provider: "personal", sourceName: "个人录入", sourceUrl: null, license: null, originalName: null } }));
+    const definition: FoodTemplateInput = { ...this.foodTemplateInput(input), isFavorite: false,
+      catalogMetadata: { category: input.category, provider: "personal", sourceName: "个人录入", sourceUrl: null, license: null, originalName: null } };
+    // Legacy clients without a submission ID retain their old contract.
+    if (input.submissionId === undefined) return personalFood(await this.repository.createFoodTemplate(userId, definition));
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.submissionId))
+      throw new NutritionError("invalid_nutrition_input", "保存编号无效", 400);
+    const hash = createHash("sha256").update(JSON.stringify(["personal-food", userId, input.submissionId.toLowerCase()])).digest("hex");
+    const id = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+    const saved = await this.repository.createPersonalFoodOnce(userId, id, definition);
+    if (saved === "revision_conflict") throw new NutritionError("food_creation_conflict", "这次保存的内容已变化或食物已删除，请核对原记录；不会重复新建。", 409);
+    return personalFood(saved);
   }
 
   public async favoriteMealFood(userId: string, mealId: string, contributionId: string): Promise<void> {
@@ -107,7 +116,7 @@ export class NutritionService {
       return;
     }
     const basis = item.foodSnapshot;
-    const key = `meal-food:${item.id}`;
+    const key = basis?.provider === "open_food_facts" && /^open_food_facts:\d+$/.test(basis.id) ? basis.id : `meal-food:${item.id}`;
     await this.repository.setFoodFavorite(userId, key, true, {
       label: item.label, portionAmount: basis?.basisAmount ?? item.portionAmount, portionUnit: basis?.basisUnit ?? item.portionUnit,
       basisDescription: basis?.sourceName ?? item.basisDescription,

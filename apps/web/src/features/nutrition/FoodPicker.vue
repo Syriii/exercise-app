@@ -56,16 +56,24 @@ async function save() {
   finally { saving.value = false; emit("busy", false); }
 }
 async function createPersonal() {
-  const input = props.draft.personal;
+  if (saving.value || props.disabled) return;
+  if (props.draft.selected.length >= 20) { error.value = "每次最多选择20种食物，请先保存已选内容。"; return; }
+  props.draft.personalPending ??= { ...props.draft.personal };
+  const input = props.draft.personalPending;
   const number = (value: string) => String(value).trim() === "" ? null : Number(value);
   saving.value = true; error.value = "";
   try {
-    const food = await foodCatalogApi.createPersonal({ mode: "item", label: input.label, category: input.category,
+    const food = await foodCatalogApi.createPersonal({ submissionId: props.draft.personalSubmissionId, mode: "item", label: input.label, category: input.category,
       portionAmount: number(input.amount), portionUnit: input.unit, basisDescription: "个人录入",
       energyKcal: number(input.energy), proteinGrams: number(input.protein), carbohydrateGrams: number(input.carbs), fatGrams: number(input.fat) });
-    select(food); input.label = ""; input.energy = ""; input.protein = ""; input.carbs = ""; input.fat = "";
+    props.draft.personalSubmissionId = submissionId();
+    props.draft.personalPending = null;
+    select(food); props.draft.personal.label = ""; props.draft.personal.energy = ""; props.draft.personal.protein = ""; props.draft.personal.carbs = ""; props.draft.personal.fat = "";
     await load(false, online);
-  } catch (cause) { error.value = cause instanceof ApiError ? cause.message : "个人食物暂时保存不了，填写的内容已保留。"; }
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 409) props.draft.personalPending = null;
+    error.value = cause instanceof ApiError ? cause.message : "尚未确认个人食物的保存结果，内容与保存编号已保留；重试不会重复新建。";
+  }
   finally { saving.value = false; }
 }
 onMounted(() => { if (props.draft.open) void load(); });
@@ -112,7 +120,7 @@ onBeforeUnmount(() => { generation++; });
       </form>
       <details class="catalog-personal"><summary>找不到？补充个人食物</summary>
         <form @submit.prevent="createPersonal">
-          <fieldset :disabled="saving || disabled">
+          <fieldset :disabled="saving || disabled || draft.personalPending !== null">
             <label>个人食物名称<input v-model="draft.personal.label" required maxlength="100" /></label>
             <div class="catalog-search"><label>基准份量<input v-model="draft.personal.amount" type="number" min="0.001" max="100000" step="0.001" required /></label><label>基准单位<input v-model="draft.personal.unit" required maxlength="30" /></label>
               <label>个人食物分类<select v-model="draft.personal.category"><option v-for="(name, key) in page?.categories" :key="key" :value="key">{{ name }}</option></select></label></div>
@@ -121,8 +129,9 @@ onBeforeUnmount(() => { generation++; });
               <label>基准能量 kcal<input v-model="draft.personal.energy" type="number" min="0" step="any" /></label><label>基准蛋白质 g<input v-model="draft.personal.protein" type="number" min="0" step="any" /></label>
               <label>基准碳水 g<input v-model="draft.personal.carbs" type="number" min="0" step="any" /></label><label>基准脂肪 g<input v-model="draft.personal.fat" type="number" min="0" step="any" /></label>
             </div></details>
-            <button class="action-button" type="submit">保存个人食物并选择</button>
           </fieldset>
+          <p v-if="draft.personalPending" class="field-help">上次保存结果尚未确认，请先重试同一份内容；不会重复新建。</p>
+          <button class="action-button" type="submit" :disabled="saving || disabled">{{ draft.personalPending ? '重试上次保存' : '保存个人食物并选择' }}</button>
         </form>
       </details>
     </div>

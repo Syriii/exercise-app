@@ -72,7 +72,24 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
   await picker.getByText("找不到？补充个人食物", { exact: true }).click();
   await picker.getByLabel("个人食物名称").fill("未知配菜");
+  const personalRequests: string[] = [];
+  page.on("request", request => { if (request.url().endsWith("/food-catalog/personal") && request.method() === "POST") personalRequests.push(request.postDataJSON().submissionId); });
+  await page.route("**/api/v1/nutrition/food-catalog/personal", async route => {
+    const result = await route.fetch();
+    expect(result.status()).toBe(201);
+    await route.abort("failed");
+  }, { times: 1 });
   await picker.getByRole("button", { name: "保存个人食物并选择" }).click();
+  await expect(picker.getByRole("alert")).toContainText("不会重复新建");
+  await expect(picker.getByLabel("个人食物名称")).toHaveValue("未知配菜");
+  await expect(picker.getByLabel("个人食物名称")).toBeDisabled();
+  await page.locator('.mobile-dock, .desktop-rail').getByRole("button", { name: /^历史/ }).filter({ visible: true }).click();
+  await page.locator('.mobile-dock, .desktop-rail').getByRole("button", { name: /^饮食/ }).filter({ visible: true }).click();
+  await picker.getByRole("button", { name: "重试上次保存" }).click();
+  expect(personalRequests).toHaveLength(2);
+  expect(personalRequests[0]).toBe(personalRequests[1]);
+  const catalogResponse = await page.request.get("/api/v1/nutrition/food-catalog?query=未知配菜");
+  expect((await catalogResponse.json()).total).toBe(1);
   await expect(picker.getByLabel("未知配菜份量（g）")).toHaveValue("100");
   await picker.getByRole("button", { name: "加入这顿饭（1项）" }).click();
   await expect(meal.locator(".meal-items > li")).toHaveCount(3);

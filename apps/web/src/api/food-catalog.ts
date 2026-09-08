@@ -17,6 +17,6 @@ export const foodCatalogApi = {
   },
   favorite: (foodId: string, isFavorite: boolean) => apiRequest<void>("/api/v1/nutrition/food-catalog/favorite", { method: "PUT", body: JSON.stringify({ foodId, isFavorite }) }),
   favoriteMealFood: (mealId: string, itemId: string) => apiRequest<void>(`/api/v1/nutrition/meals/${mealId}/contributions/${itemId}/favorite`, { method: "POST" }),
-  createPersonal: (input: ContributionInput & { category: FoodCategory }) => apiRequest<CatalogFood>("/api/v1/nutrition/food-catalog/personal", { method: "POST", body: JSON.stringify(input) }),
+  createPersonal: (input: ContributionInput & { category: FoodCategory; submissionId: string }) => apiRequest<CatalogFood>("/api/v1/nutrition/food-catalog/personal", { method: "POST", body: JSON.stringify(input) }),
   addSelections: (meal: Meal, submissionId: string, selections: Array<{ foodId: string; version: string; amount: number }>) => apiRequest<Meal>(`/api/v1/nutrition/meals/${meal.id}/food-selections`, { method: "POST", body: JSON.stringify({ mealRevision: meal.revision, submissionId, selections }) }),
 };

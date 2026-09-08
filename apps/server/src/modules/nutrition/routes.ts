@@ -68,8 +68,8 @@ export async function registerNutritionRoutes(app: FastifyInstance, options: { i
     schema: { params: twoIdParams, response: { 204: { type: "null" } } },
     handler: async (r, reply) => { await options.nutritionService.favoriteMealFood(await userId(r), r.params.mealId, r.params.contributionId); return reply.status(204).send(); },
   });
-  app.post<{ Body: ContributionRequest & { category: FoodCategory } }>("/api/v1/nutrition/food-catalog/personal", {
-    schema: { body: { ...contributionInput, required: [...contributionInput.required, "category"], properties: { ...contributionInput.properties, category: { type: "string", enum: Object.keys(foodCategories) } } }, response: { 201: catalogFoodResponse } },
+  app.post<{ Body: ContributionRequest & { category: FoodCategory; submissionId?: string } }>("/api/v1/nutrition/food-catalog/personal", {
+    schema: { body: { ...contributionInput, required: [...contributionInput.required, "category"], properties: { ...contributionInput.properties, submissionId: { type: "string", format: "uuid" }, category: { type: "string", enum: Object.keys(foodCategories) } } }, response: { 201: catalogFoodResponse } },
     handler: async (r, reply) => reply.status(201).send(await options.nutritionService.createPersonalFood(await userId(r), r.body)),
   });
   app.post<{ Params: { mealId: string }; Body: { mealRevision: number; submissionId: string; selections: FoodSelection[] } }>("/api/v1/nutrition/meals/:mealId/food-selections", {

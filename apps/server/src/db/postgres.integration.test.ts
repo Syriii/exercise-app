@@ -17,6 +17,7 @@ import { PostgresOperationsService } from "../modules/operations/service.js";
 import { PostgresNutritionRepository } from "../modules/nutrition/postgres-repository.js";
 import { NutritionService } from "../modules/nutrition/service.js";
 import { builtinFoods } from "../modules/nutrition/food-catalog.js";
+import { FixedPublicFoodProvider } from "../modules/nutrition/public-food-provider.js";
 import type { ContributionInput } from "../modules/nutrition/repository.js";
 import { PostgresPlanningRepository } from "../modules/planning/postgres-repository.js";
 import { PlanningService } from "../modules/planning/service.js";
@@ -878,6 +879,51 @@ describe("PostgreSQL integration", () => {
       expect((await client.query("select catalog_metadata from personal_food_templates where user_id = $1", [userId])).rowCount).toBe(0);
       expect((await client.query("select food_snapshot from meal_contributions where meal_id = $1", [meal.id])).rowCount).toBe(0);
       expect((await client.query("update personal_food_templates set is_favorite = true where user_id = $1", [userId])).rowCount).toBe(0);
+      await client.query("rollback");
+    } finally { client.release(); }
+  });
+
+  it("deduplicates personal food creation and packaged favorites while rejecting changed and deleted retries", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`food-retry-a-${randomUUID()}`, `food-retry-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const repository = new PostgresNutritionRepository(database.database);
+    const service = new NutritionService(repository, new FixedPublicFoodProvider([
+      { id: "open_food_facts:12345678", provider: "open_food_facts", label: "隔离测试豆奶", brand: null, barcode: "12345678", basisAmount: 100, basisUnit: "g", energyKcal: 60, proteinGrams: 4, carbohydrateGrams: null, fatGrams: null, sourceUrl: "https://world.openfoodfacts.org/product/12345678" },
+    ]));
+    const input = { submissionId: randomUUID(), mode: "item" as const, label: "防重复配菜", category: "vegetables" as const, portionAmount: 100, portionUnit: "g", basisDescription: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null };
+    const [first, retry] = await Promise.all([service.createPersonalFood(owner, input), service.createPersonalFood(owner, input)]);
+    expect(retry).toEqual(first);
+    expect((await service.getFoodCatalog(owner, input.label)).total).toBe(1);
+    expect((await service.createPersonalFood(other, input)).id).not.toBe(first.id);
+    await service.setFoodFavorite(owner, first.id, true);
+    expect(await service.createPersonalFood(owner, input)).toMatchObject({ id: first.id, isFavorite: true });
+    await expect(service.createPersonalFood(owner, { ...input, energyKcal: 10 })).rejects.toMatchObject({ statusCode: 409 });
+    const original = (await repository.listFoodTemplates(owner)).find(food => `personal:${food.id}` === first.id)!;
+    const edited = await repository.updateFoodTemplate(owner, original.id, 1, { ...original, label: "已修正的配菜" });
+    expect(typeof edited).toBe("object");
+    await expect(service.createPersonalFood(owner, input)).rejects.toMatchObject({ statusCode: 409 });
+    await repository.deleteFoodTemplate(owner, original.id, 2);
+    await expect(service.createPersonalFood(owner, input)).rejects.toMatchObject({ statusCode: 409 });
+    expect((await service.getFoodCatalog(owner, input.label)).total).toBe(0);
+    const food = (await service.searchFoodCatalog(owner, "隔离测试豆奶")).items[0]!;
+    const records = [];
+    for (const amount of [100, 250]) {
+      const meal = await service.createMeal(owner, { occurredAt: "2026-09-08T00:00:00Z", localDate: "2026-09-08", timeZone: "UTC", name: "回存常用", note: null });
+      records.push(await service.addFoodSelections(owner, meal.id, 1, randomUUID(), [{ foodId: food.id, version: food.version, amount }]));
+    }
+    const cold = new NutritionService(repository);
+    await Promise.all(records.map(meal => cold.favoriteMealFood(owner, meal.id, meal.contributions[0]!.id)));
+    const favorites = await cold.getFoodCatalog(owner, "隔离测试豆奶");
+    expect(favorites.total).toBe(1);
+    expect(favorites.items[0]).toMatchObject({ id: food.id, version: food.version, basisAmount: 100, energyKcal: 60 });
+    for (const meal of records) expect(await cold.getMeal(owner, meal.id)).toEqual(meal);
+    await expect(cold.favoriteMealFood(other, records[0]!.id, records[0]!.contributions[0]!.id)).rejects.toMatchObject({ statusCode: 404 });
+    const client = await database.pool.connect();
+    try {
+      await client.query("begin"); await client.query("set local role exercise_api");
+      await client.query("select set_config('exercise.user_id', $1, true)", [other]);
+      expect((await client.query("select id from personal_food_templates where user_id=$1", [owner])).rowCount).toBe(0);
+      expect((await client.query("update personal_food_templates set is_favorite=true where user_id=$1", [owner])).rowCount).toBe(0);
       await client.query("rollback");
     } finally { client.release(); }
   });

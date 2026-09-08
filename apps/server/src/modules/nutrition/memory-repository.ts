@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sameSelection } from "./selection-retry.js";
+import { samePersonalFood } from "./personal-food-retry.js";
 
 import type { ContributionInput, DietPlanRepositoryInput, FoodTemplateInput, MealMetadataInput, NutritionRepository } from "./repository.js";
 import type { DietPlan, Meal, MealContribution, MealContributionRevision, MealRevision, PersonalFoodTemplate } from "./types.js";
@@ -16,6 +17,20 @@ export class MemoryNutritionRepository implements NutritionRepository {
   readonly #dietPlans = new Map<string, DietPlan[]>();
   readonly #selectionIds = new Set<string>();
   readonly #selectionBatches = new Map<string, number>();
+  readonly #personalCreationIds = new Set<string>();
+
+  public async createPersonalFoodOnce(userId: string, id: string, input: FoodTemplateInput) {
+    const values = this.#templates.get(userId) ?? [];
+    if (this.#personalCreationIds.has(id)) {
+      const existing = values.find(food => food.id === id);
+      return existing && samePersonalFood(existing, input) ? clone(existing) : "revision_conflict" as const;
+    }
+    const now = new Date();
+    const saved = { ...input, id, revision: 1, createdAt: now, updatedAt: now };
+    this.#personalCreationIds.add(id);
+    this.#templates.set(userId, [...values, saved]);
+    return clone(saved);
+  }
 
   public async setFoodFavorite(userId: string, foodId: string, favorite: boolean, publicFood: FoodTemplateInput | null): Promise<void> {
     const values = this.#templates.get(userId) ?? [];

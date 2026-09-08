@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-
 
 import type { Database } from "../../db/database.js";
 import { sameSelection } from "./selection-retry.js";
+import { samePersonalFood } from "./personal-food-retry.js";
 import {
   mealContributionRevisions,
   mealContributions,
@@ -27,6 +28,18 @@ function templateFromRow(row: typeof personalFoodTemplates.$inferSelect): Person
 
 export class PostgresNutritionRepository implements NutritionRepository {
   public constructor(private readonly database: Database) {}
+
+  public async createPersonalFoodOnce(userId: string, id: string, input: FoodTemplateInput) {
+    return this.database.transaction(async tx => {
+      const [created] = await tx.insert(personalFoodTemplates).values({ id, userId, ...numericValues(input) })
+        .onConflictDoNothing({ target: personalFoodTemplates.id }).returning();
+      if (created) return templateFromRow(created);
+      const [existing] = await tx.select().from(personalFoodTemplates)
+        .where(and(eq(personalFoodTemplates.id, id), eq(personalFoodTemplates.userId, userId))) .for("update");
+      if (!existing || existing.deletedAt !== null || !samePersonalFood(templateFromRow(existing), input)) return "revision_conflict" as const;
+      return templateFromRow(existing);
+    });
+  }
 
   public async setFoodFavorite(userId: string, foodId: string, favorite: boolean, publicFood: FoodTemplateInput | null): Promise<void> {
     if (publicFood !== null) {
