@@ -34,13 +34,12 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await expect(page.getByRole("region", { name: "设置项目" })).toContainText("63 kg");
 
   await page.goto("/nutrition");
-  const dailyReference = page.getByRole("region", { name: "系统参考" });
-  await expect(dailyReference.getByRole("heading", { name: "系统参考" })).toBeVisible();
-  await expect(dailyReference.getByRole("definition").filter({ hasText: /^2275 kcal$/ })).toBeVisible();
-  const remaining = page.getByRole("region", { name: "还可以吃" });
-  await expect(remaining.getByRole("definition").filter({ hasText: /^2275 kcal$/ })).toBeVisible();
-  await expect(remaining.getByText("尚未记录餐食").first()).toBeVisible();
-  await dailyReference.getByText("计算依据", { exact: true }).click();
+  const dailyReference = page.getByRole("region", { name: "当天营养" });
+  await expect(dailyReference.getByText("每日参考 2275 kcal", { exact: true })).toBeVisible();
+  await expect(dailyReference.getByText("已记录 0 kcal", { exact: true })).toBeVisible();
+  await expect(dailyReference.getByText("尚未记录餐食。")).toBeVisible();
+  await expect(page.getByRole("region", { name: "还可以吃" })).toHaveCount(0);
+  await dailyReference.getByText("参考说明与计算依据", { exact: true }).click();
   await expect(page.getByText("方法 daily-reference-2026-08-26.1")).toBeVisible();
   await expect(page.getByText("这是群体方程形成的饮食规划参考，不是个人代谢测量。")).toBeVisible();
 

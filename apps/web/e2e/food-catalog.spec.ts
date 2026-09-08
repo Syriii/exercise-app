@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createMeal } from "./helpers/nutrition";
 
 test("catalog browsing, favorites, multi-selection and lost-response retry preserve one meal", async ({ page }, testInfo) => {
   await page.goto("/register");
@@ -7,10 +8,7 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   await page.getByRole("button", { name: "注册", exact: true }).click();
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/nutrition");
-  await page.getByRole("button", { name: "记一顿", exact: true }).click();
-  await page.getByLabel("餐次名称（可选）").fill("目录早餐");
-  await page.getByRole("button", { name: "建立餐次", exact: true }).click();
-  const meal = page.locator("article.meal-card").filter({ hasText: "目录早餐" });
+  const meal = await createMeal(page, "目录早餐");
   const picker = meal.getByRole("region", { name: "添加食物", exact: true });
   await picker.getByRole("button", { name: "添加食物", exact: true }).click();
   const list = picker.getByRole("list", { name: "食物列表" });

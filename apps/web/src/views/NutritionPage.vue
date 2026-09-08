@@ -3,10 +3,9 @@ import { nextTick, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, w
 import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
-import { nutritionApi, type ContributionInput, type DietPlan, type DietPlanInput, type FoodSearchResult, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary, type PersonalFoodTemplate, type PublicFoodSearchResult } from "../api/nutrition";
+import { nutritionApi, type ContributionInput, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary } from "../api/nutrition";
 import { planningApi, type DailyPlanningReference } from "../api/planning";
 import AppShell from "../app/AppShell.vue";
-import { type AppSection } from "../app/modules";
 import MealFoodItem from "../features/nutrition/MealFoodItem.vue";
 import FoodPicker from "../features/nutrition/FoodPicker.vue";
 import { foodCatalogApi } from "../api/food-catalog";
@@ -15,7 +14,6 @@ import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../fea
 
 interface ContributionForm { mode: MealContributionMode; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; saveAsTemplate: boolean; }
 interface ImageAdoptionForm { mode: "whole_meal" | "supplement"; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; deleteOriginal: boolean; }
-interface DietPlanForm { dateFrom: string; dateTo: string; title: string; note: string; entries: Array<{ localDate: string; mealName: string; foodPlan: string; note: string }>; }
 const emptyContribution = (): ContributionForm => ({ mode: "item", label: "", portionAmount: "", portionUnit: "g", basisDescription: "", energyKcal: "", proteinGrams: "", carbohydrateGrams: "", fatGrams: "", replaceExisting: false, saveAsTemplate: false });
 
 const route = useRoute();
@@ -23,14 +21,11 @@ const router = useRouter();
 const selectedDate = ref(typeof route.query.date === "string" ? route.query.date : localDate(new Date()));
 const loading = ref(true);
 const saving = ref(false);
-const coverageSaving = ref(false);
 const errorMessage = ref("");
 const notice = ref("");
 const reference = ref<DailyPlanningReference | null>(null);
 const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
-const recentMeals = ref<Meal[]>([]);
-const templates = ref<PersonalFoodTemplate[]>([]);
 const foodPickerDrafts = reactive<Record<string, FoodPickerDraft>>({});
 function foodPickerDraft(mealId: string): FoodPickerDraft { return foodPickerDrafts[mealId] ??= newFoodPickerDraft(); }
 async function selectionsSaved(meal: Meal) {
@@ -38,75 +33,87 @@ async function selectionsSaved(meal: Meal) {
   notice.value = "所选食物已保存，份量与营养已同步计算";
   try { await refreshSummary(); } catch { errorMessage.value = "食物已保存，汇总暂时刷新不了，请不要重复添加。"; }
 }
-const dietPlans = ref<DietPlan[]>([]);
-const editingDietPlanId = ref<string | null>(null);
-const dietPlanForm = ref<DietPlanForm | null>(null);
 const creatingMeal = ref(false);
 const mealNameInput = ref<HTMLInputElement | null>(null);
 const quickMealImage = ref<PreparedMealImage | undefined>();
 const editingContributionId = ref<string | null>(null);
 const mealForm = reactive({ name: "", time: currentTime(), note: "" });
 const contributionForms = reactive<Record<string, ContributionForm>>({});
-const selectionBases = reactive<Record<string, ContributionInput>>({});
-const foodSearchQueries = reactive<Record<string, string>>({});
-const foodSearchResults = reactive<Record<string, FoodSearchResult[]>>({});
-const publicFoodSearchResults = reactive<Record<string, PublicFoodSearchResult[]>>({});
-const publicFoodSearchErrors = reactive<Record<string, string>>({});
-const publicFoodPortions = reactive<Record<string, string>>({});
-const recentSelections = reactive<Record<string, string[]>>({});
-const searchingMealId = ref<string | null>(null);
-const quickAddingMealId = ref<string | null>(null);
-const managingTemplates = ref(false);
-const editingTemplateId = ref<string | null>(null);
-const templateForm = ref<ContributionForm | null>(null);
 const analysesByMeal = reactive<Record<string, MealImageAnalysis[]>>({});
 const imageSelections = ref<Record<string, PreparedMealImage | undefined>>({});
 const uploadProgress = reactive<Record<string, number>>({});
 const imageForms = reactive<Record<string, ImageAdoptionForm>>({});
 const uploadingMealId = ref<string | null>(null);
 const actingAnalysisId = ref<string | null>(null);
+
+const composerIntent = ref<"photo" | "food">("photo");
+const openMeals = reactive<Record<string, boolean>>({});
+const photoPanels = reactive<Record<string, boolean>>({});
+const correctionBases = reactive<Record<string, { meal: Meal; item: MealContribution }>>({});
+const metadataDrafts = reactive<Record<string, { base: Meal; date: string; time: string; name: string; note: string }>>({});
+const nutrients = [
+  { key: "energyKcal", label: "能量", unit: "kcal" },
+  { key: "proteinGrams", label: "蛋白质", unit: "g" },
+  { key: "carbohydrateGrams", label: "碳水", unit: "g" },
+  { key: "fatGrams", label: "脂肪", unit: "g" },
+] as const;
+function recordedValue(key: typeof nutrients[number]["key"]) {
+  const value = summary.value?.[key];
+  return value ? value.recorded : null;
+}
+function targetValue(key: typeof nutrients[number]["key"]) {
+  return key === "energyKcal" ? reference.value?.result.targetEnergyKcal ?? null : reference.value?.result[key] ?? null;
+}
+function mealNutrient(meal: Meal, key: typeof nutrients[number]["key"]) {
+  const known = meal.contributions.map(item => item[key]).filter((value): value is number => value !== null);
+  if (!known.length) return "未知";
+  const sum = Math.round(known.reduce((a,b) => a+b, 0) * 1000) / 1000;
+  return `${known.length < meal.contributions.length ? "部分 " : ""}${sum}`;
+}
+function startMetadata(meal: Meal) {
+  metadataDrafts[meal.id] ??= { base: meal, date: meal.localDate, time: displayTime(meal.occurredAt), name: meal.name ?? "", note: meal.note ?? "" };
+}
+async function saveMetadata(meal: Meal) {
+  const draft = metadataDrafts[meal.id]; if (!draft || saving.value) return;
+  saving.value = true; errorMessage.value = "";
+  try {
+    const sameMoment = draft.date === draft.base.localDate && draft.time === displayTime(draft.base.occurredAt);
+    const saved = await nutritionApi.updateMeal(meal.id, draft.base.revision, {
+      occurredAt: sameMoment ? draft.base.occurredAt : new Date(`${draft.date}T${draft.time}:00`).toISOString(),
+      localDate: draft.date, timeZone: sameMoment ? draft.base.timeZone : browserTimeZone(),
+      name: nullableText(draft.name), note: nullableText(draft.note),
+    });
+    delete metadataDrafts[meal.id];
+    meals.value = meals.value.map(item => item.id === meal.id ? saved : item).filter(item => item.localDate === selectedDate.value).sort((a,b) => b.occurredAt.localeCompare(a.occurredAt));
+    notice.value = saved.localDate === selectedDate.value ? "餐食信息已保存" : `餐食已移至 ${saved.localDate}，原日期不再重复计入`;
+    try { await refreshSummary(); } catch { errorMessage.value = "餐食已保存，汇总暂时刷新不了，请不要重复保存。"; }
+  } catch (cause) { errorMessage.value = cause instanceof ApiError ? cause.message : "餐食信息暂时保存不了，填写的内容已保留。"; }
+  finally { saving.value = false; }
+}
+
 let pollTimer: number | undefined;
 let pollInFlight = false;
 let loadGeneration = 0;
 
 function localDate(date: Date): string { const values = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).map((part) => [part.type, part.value])); return `${values.year}-${values.month}-${values.day}`; }
-function shiftLocalDate(value: string, days: number): string { const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + days); return localDate(date); }
 function currentTime(): string { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()); }
 function browserTimeZone(): string { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
 function nullableText(value: string): string | null { const clean = value.trim(); return clean.length === 0 ? null : clean; }
 function nullableNumber(value: string | number): number | null { if (typeof value === "number") return value; const clean = value.trim(); return clean.length === 0 ? null : Number(clean); }
-function openSection(section: AppSection) { void router.push({ name: section }); }
 function formFor(mealId: string): ContributionForm { contributionForms[mealId] ??= emptyContribution(); return contributionForms[mealId]!; }
 function rawContributionInput(form: ContributionForm): ContributionInput { return { mode: form.mode, label: form.label, portionAmount: nullableNumber(form.portionAmount), portionUnit: nullableText(form.portionUnit), basisDescription: nullableText(form.basisDescription), energyKcal: nullableNumber(form.energyKcal), proteinGrams: nullableNumber(form.proteinGrams), carbohydrateGrams: nullableNumber(form.carbohydrateGrams), fatGrams: nullableNumber(form.fatGrams) }; }
-function rememberSelection(mealId: string) { selectionBases[mealId] = rawContributionInput(formFor(mealId)); }
-function contributionInput(form: ContributionForm): ContributionInput {
-  const input = rawContributionInput(form);
-  const mealId = Object.keys(contributionForms).find((id) => contributionForms[id] === form);
-  const basis = mealId === undefined ? undefined : selectionBases[mealId];
-  if (!basis || input.mode !== "item" || basis.portionAmount === null || basis.portionAmount <= 0
-    || input.portionAmount === null || input.label !== basis.label || input.portionUnit !== basis.portionUnit
-    || input.energyKcal !== basis.energyKcal || input.proteinGrams !== basis.proteinGrams
-    || input.carbohydrateGrams !== basis.carbohydrateGrams || input.fatGrams !== basis.fatGrams) return input;
-  const factor = input.portionAmount / basis.portionAmount;
-  const scale = (value: number | null) => value === null ? null : Math.round(value * factor * 1000) / 1000;
-  return { ...input, energyKcal: scale(basis.energyKcal), proteinGrams: scale(basis.proteinGrams), carbohydrateGrams: scale(basis.carbohydrateGrams), fatGrams: scale(basis.fatGrams) };
-}
-function dietPlanInput(form: DietPlanForm): DietPlanInput { return { dateFrom: form.dateFrom, dateTo: form.dateTo, title: form.title, note: nullableText(form.note), entries: form.entries.map((entry) => ({ localDate: nullableText(entry.localDate), mealName: nullableText(entry.mealName), foodPlan: entry.foodPlan, note: nullableText(entry.note) })) }; }
 function displayTime(value: string): string { return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
-function displayRecentMeal(meal: Meal): string { const date = meal.localDate === shiftLocalDate(selectedDate.value, -1) ? "昨天" : new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(`${meal.localDate}T12:00:00`)); return `${date} · ${meal.name ?? '未命名餐次'} · ${displayTime(meal.occurredAt)}`; }
-function modeLabel(mode: MealContributionMode): string { return mode === "whole_meal" ? "整餐总量" : mode === "supplement" ? "补充项" : "食物"; }
 function nutrientText(value: number | null, unit: string): string { return value === null ? "未知" : `${value} ${unit}`; }
-function remainingText(value: number | null, unit: string): string { if (value === null) return "—"; return value >= 0 ? `${value} ${unit}` : `超出 ${Math.abs(value)} ${unit}`; }
 function contributionForAnalysis(meal: Meal, analysisId: string): MealContribution | undefined { return meal.contributions.find((value) => value.sourceAnalysisId === analysisId); }
 function analysisStatus(value: MealImageAnalysis, meal: Meal): string {
   const contribution = contributionForAnalysis(meal, value.id);
   if (value.candidate?.foods !== undefined) return contribution ? "照片估算" : "识别完成";
-  if (contribution?.reviewStatus === "tentative") return "暂定计入";
-  if (value.adoptedAt !== null || contribution?.reviewStatus === "confirmed") return "已确认";
-  return value.status === "pending" ? "排队中" : value.status === "running" ? "分析中" : value.status === "succeeded" ? "候选待处理" : value.status === "failed" ? "分析失败" : "已取消";
+  if (contribution || value.adoptedAt !== null) return "照片估算";
+  return value.status === "pending" ? "排队中" : value.status === "running" ? "分析中" : value.status === "succeeded" ? "识别完成" : value.status === "failed" ? "分析失败" : "已取消";
 }
 function confidenceLabel(value: "low" | "medium" | "high"): string { return value === "high" ? "较高" : value === "medium" ? "一般" : "较低"; }
-function imageAnalysisFailureText(code: string | null): string {
+function imageAnalysisFailureText(code: string | null, imageAvailable: boolean): string {
+  if (!imageAvailable) return "这次识别没有完成；已有食物记录仍保留。";
   if (code === "deepseek_timeout") return "识别等待超时，原图仍在，可以重新分析。";
   if (code === "deepseek_rate_limited" || code === "deepseek_overloaded" || code === "deepseek_server_error" || code === "deepseek_server_unavailable" || code === "deepseek_network_error") return "识别服务暂时繁忙，系统已自动尝试恢复；原图仍在，可以稍后重新分析。";
   if (code === "deepseek_authentication_failed" || code === "deepseek_insufficient_balance") return "识别服务配置当前不可用，原图仍在；你可以先手工记录，管理员处理后再试。";
@@ -119,7 +126,7 @@ function imageFormFor(analysis: MealImageAnalysis, meal: Meal): ImageAdoptionFor
   if (existing !== undefined) return existing;
   const candidate = analysis.candidate;
   const current = contributionForAnalysis(meal, analysis.id);
-  const form: ImageAdoptionForm = { mode: current?.mode === "supplement" ? "supplement" : "whole_meal", label: current?.label ?? candidate?.title ?? "照片估算", portionAmount: current?.portionAmount?.toString() ?? "", portionUnit: current?.portionUnit ?? "", basisDescription: current?.basisDescription ?? candidate?.uncertaintyNote ?? "按照片中可见盛取量估算", energyKcal: current?.energyKcal?.toString() ?? candidate?.energyKcal?.toString() ?? "", proteinGrams: current?.proteinGrams?.toString() ?? candidate?.proteinGrams?.toString() ?? "", carbohydrateGrams: current?.carbohydrateGrams?.toString() ?? candidate?.carbohydrateGrams?.toString() ?? "", fatGrams: current?.fatGrams?.toString() ?? candidate?.fatGrams?.toString() ?? "", replaceExisting: current === undefined && meal.contributions.length > 0, deleteOriginal: true };
+  const form: ImageAdoptionForm = { mode: current?.mode === "supplement" ? "supplement" : "whole_meal", label: current?.label ?? candidate?.title ?? "照片估算", portionAmount: current?.portionAmount?.toString() ?? "", portionUnit: current?.portionUnit ?? "", basisDescription: current?.basisDescription ?? candidate?.uncertaintyNote ?? "按照片中可见盛取量估算", energyKcal: current?.energyKcal?.toString() ?? candidate?.energyKcal?.toString() ?? "", proteinGrams: current?.proteinGrams?.toString() ?? candidate?.proteinGrams?.toString() ?? "", carbohydrateGrams: current?.carbohydrateGrams?.toString() ?? candidate?.carbohydrateGrams?.toString() ?? "", fatGrams: current?.fatGrams?.toString() ?? candidate?.fatGrams?.toString() ?? "", replaceExisting: current === undefined && meal.contributions.length > 0, deleteOriginal: false };
   imageForms[analysis.id] = form;
   return form;
 }
@@ -132,10 +139,6 @@ function resetDateScopedState() {
   reference.value = null;
   summary.value = null;
   meals.value = [];
-  recentMeals.value = [];
-  dietPlans.value = [];
-  editingDietPlanId.value = null;
-  dietPlanForm.value = null;
   creatingMeal.value = false;
   quickMealImage.value = undefined;
   editingContributionId.value = null;
@@ -143,13 +146,6 @@ function resetDateScopedState() {
   mealForm.time = currentTime();
   mealForm.note = "";
   clearRecord(contributionForms);
-  clearRecord(selectionBases);
-  clearRecord(foodSearchQueries);
-  clearRecord(foodSearchResults);
-  clearRecord(publicFoodSearchResults);
-  clearRecord(publicFoodSearchErrors);
-  clearRecord(publicFoodPortions);
-  clearRecord(recentSelections);
   clearRecord(analysesByMeal);
   clearRecord(uploadProgress);
   clearRecord(imageForms);
@@ -197,21 +193,12 @@ async function load(preserveDraft = false) {
   errorMessage.value = ""; notice.value = "";
   if (!preserveDraft) resetDateScopedState();
   const results = await Promise.allSettled([
-      planningApi.getDailyReference(requestedDate, browserTimeZone()), nutritionApi.getDaySummary(requestedDate, browserTimeZone()), nutritionApi.listMeals(requestedDate, requestedDate), nutritionApi.listFoodTemplates(), nutritionApi.listDietPlans(requestedDate, requestedDate), nutritionApi.listMeals(shiftLocalDate(requestedDate, -14), shiftLocalDate(requestedDate, -1)),
+      planningApi.getDailyReference(requestedDate, browserTimeZone()), nutritionApi.getDaySummary(requestedDate, browserTimeZone()), nutritionApi.listMeals(requestedDate, requestedDate),
   ] as const);
   if (generation !== loadGeneration || selectedDate.value !== requestedDate) return;
-  const [referenceResult, summaryResult, mealsResult, templatesResult, dietPlansResult, recentMealsResult] = results;
+  const [referenceResult, summaryResult, mealsResult] = results;
   if (referenceResult.status === "fulfilled") reference.value = referenceResult.value;
   if (summaryResult.status === "fulfilled") summary.value = summaryResult.value;
-  if (templatesResult.status === "fulfilled") templates.value = templatesResult.value;
-  if (dietPlansResult.status === "fulfilled") dietPlans.value = dietPlansResult.value;
-  if (recentMealsResult.status === "fulfilled") {
-    recentMeals.value = recentMealsResult.value
-      .map((meal) => ({ ...meal, contributions: meal.contributions.filter((item) => item.mode === "item") }))
-      .filter((meal) => meal.contributions.length > 0)
-      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
-      .slice(0, 8);
-  }
   if (mealsResult.status === "fulfilled") {
     meals.value = mealsResult.value;
     for (const meal of mealsResult.value) formFor(meal.id);
@@ -231,33 +218,8 @@ async function load(preserveDraft = false) {
 }
 
 async function changeDate() { await router.replace({ name: "nutrition", query: selectedDate.value === localDate(new Date()) ? {} : { date: selectedDate.value } }); await load(); }
-function startDietPlan(plan?: DietPlan) {
-  editingDietPlanId.value = plan?.id ?? null;
-  dietPlanForm.value = plan === undefined
-    ? { dateFrom: selectedDate.value, dateTo: selectedDate.value, title: "", note: "", entries: [] }
-    : { dateFrom: plan.dateFrom, dateTo: plan.dateTo, title: plan.title, note: plan.note ?? "", entries: plan.entries.map((entry) => ({ localDate: entry.localDate ?? "", mealName: entry.mealName ?? "", foodPlan: entry.foodPlan, note: entry.note ?? "" })) };
-}
-function addDietPlanEntry() { dietPlanForm.value?.entries.push({ localDate: "", mealName: "", foodPlan: "", note: "" }); }
-async function saveDietPlan() {
-  const form = dietPlanForm.value; if (form === null) return;
-  saving.value = true; errorMessage.value = "";
-  try {
-    const existing = dietPlans.value.find((value) => value.id === editingDietPlanId.value);
-    const saved = existing === undefined ? await nutritionApi.createDietPlan(dietPlanInput(form)) : await nutritionApi.updateDietPlan(existing.id, existing.revision, dietPlanInput(form));
-    dietPlans.value = existing === undefined ? [saved, ...dietPlans.value] : dietPlans.value.map((value) => value.id === saved.id ? saved : value);
-    dietPlanForm.value = null; editingDietPlanId.value = null; notice.value = existing === undefined ? "饮食安排已保存" : "饮食安排已更新";
-  } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了饮食安排"; }
-  finally { saving.value = false; }
-}
-async function archiveDietPlan(plan: DietPlan) {
-  if (!window.confirm(`归档“${plan.title}”？实际饮食记录不会受影响。`)) return;
-  saving.value = true;
-  try { await nutritionApi.archiveDietPlan(plan.id, plan.revision); dietPlans.value = dietPlans.value.filter((value) => value.id !== plan.id); notice.value = "饮食安排已归档，实际记录没有改变"; }
-  catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时归档不了饮食安排"; }
-  finally { saving.value = false; }
-}
-
-async function openMealComposer() {
+async function openMealComposer(intent: "photo" | "food" = "photo") {
+  composerIntent.value = quickMealImage.value ? "photo" : intent;
   creatingMeal.value = true;
   await nextTick();
   mealNameInput.value?.focus({ preventScroll: true });
@@ -271,7 +233,6 @@ function scrollToMealContent(element: Element | null) {
 
 function closeMealComposer() {
   creatingMeal.value = false;
-  quickMealImage.value = undefined;
 }
 
 async function createMeal() {
@@ -289,6 +250,8 @@ async function createMeal() {
   }
 
   meals.value = [saved, ...meals.value];
+  openMeals[saved.id] = true;
+  photoPanels[saved.id] = selectedImage !== undefined || composerIntent.value === "photo";
   formFor(saved.id);
   creatingMeal.value = false;
   mealForm.name = "";
@@ -397,7 +360,6 @@ async function favoriteFood(meal: Meal, item: MealContribution) {
   saving.value = true; errorMessage.value = "";
   try {
     await foodCatalogApi.favoriteMealFood(meal.id, item.id);
-    templates.value = await nutritionApi.listFoodTemplates();
     notice.value = "已设为常用，下次可以单独添加这项食物";
   } catch (cause) { errorMessage.value = cause instanceof ApiError ? cause.message : "暂时设不了常用，请稍后重试"; }
   finally { saving.value = false; }
@@ -405,170 +367,34 @@ async function favoriteFood(meal: Meal, item: MealContribution) {
 
 async function saveContribution(meal: Meal, existing?: MealContribution) {
   const form = formFor(meal.id); saving.value = true; errorMessage.value = "";
+  const base = correctionBases[meal.id];
+  if (!existing || !base || base.item.id !== existing.id) { saving.value = false; return; }
   try {
-    const input = contributionInput(form);
-    const saved = existing === undefined ? await nutritionApi.addContribution(meal.id, meal.revision, input, form.replaceExisting) : await nutritionApi.updateContribution(meal.id, existing.id, meal.revision, existing.revision, input, form.replaceExisting);
+    const input = rawContributionInput(form);
+    const saved = await nutritionApi.updateContribution(meal.id, existing.id, base.meal.revision, base.item.revision, input, false);
     meals.value = meals.value.map((value) => value.id === saved.id ? saved : value);
-    if (form.saveAsTemplate && form.mode === "item") templates.value = sortTemplates([...templates.value, await nutritionApi.createFoodTemplate(input)]);
-    contributionForms[meal.id] = emptyContribution(); delete selectionBases[meal.id]; editingContributionId.value = null; notice.value = existing === undefined ? "这项食物已计入当天剩余量" : "营养记录已修正，旧值仍可追溯"; await refreshSummary();
+    contributionForms[meal.id] = emptyContribution(); editingContributionId.value = null; delete correctionBases[meal.id]; notice.value = "食物已修正，当天营养已更新";
+    try { await refreshSummary(); } catch { errorMessage.value = "食物已保存，汇总暂时刷新不了，请不要重复保存。"; }
   } catch (error) { console.error("Nutrition contribution save failed", error); errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了这条营养记录"; }
   finally { saving.value = false; }
 }
 
-function editContribution(meal: Meal, value: MealContribution) { contributionForms[meal.id] = { mode: value.mode, label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false }; delete selectionBases[meal.id]; editingContributionId.value = value.id; }
-function useTemplate(mealId: string, templateId: string) { const value = templates.value.find((item) => item.id === templateId); if (value === undefined) return; contributionForms[mealId] = { mode: "item", label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false }; rememberSelection(mealId); editingContributionId.value = null; }
-function sortTemplates(values: PersonalFoodTemplate[]): PersonalFoodTemplate[] { return [...values].sort((left, right) => left.label.localeCompare(right.label, "zh-CN")); }
-function foodSnapshotInput(value: PersonalFoodTemplate | FoodSearchResult | MealContribution): ContributionInput { return { mode: "item", label: value.label, portionAmount: value.portionAmount, portionUnit: value.portionUnit, basisDescription: "sourceAnalysisId" in value && value.source === "model_adopted" ? `照片估算 · ${value.basisDescription ?? "按照片份量估算"}`.slice(0, 200) : value.basisDescription, energyKcal: value.energyKcal, proteinGrams: value.proteinGrams, carbohydrateGrams: value.carbohydrateGrams, fatGrams: value.fatGrams }; }
-function selectionKey(targetMealId: string, sourceMealId: string): string { return `${targetMealId}:${sourceMealId}`; }
-function selectedRecentCount(targetMealId: string, sourceMealId: string): number { return recentSelections[selectionKey(targetMealId, sourceMealId)]?.length ?? 0; }
-function isRecentSelected(targetMealId: string, sourceMealId: string, contributionId: string): boolean { return recentSelections[selectionKey(targetMealId, sourceMealId)]?.includes(contributionId) ?? false; }
-function toggleRecentSelection(targetMealId: string, sourceMealId: string, contributionId: string, checked: boolean) {
-  const key = selectionKey(targetMealId, sourceMealId);
-  const current = recentSelections[key] ?? [];
-  recentSelections[key] = checked ? [...new Set([...current, contributionId])] : current.filter((id) => id !== contributionId);
-}
-async function addFoodSnapshot(targetMealId: string, value: PersonalFoodTemplate | FoodSearchResult | MealContribution): Promise<Meal> {
-  const current = meals.value.find((meal) => meal.id === targetMealId);
-  if (current === undefined) throw new Error("target meal is no longer available");
-  const saved = await nutritionApi.addContribution(current.id, current.revision, foodSnapshotInput(value), false);
-  meals.value = meals.value.map((meal) => meal.id === saved.id ? saved : meal);
-  return saved;
-}
-async function quickAddFood(meal: Meal, value: PersonalFoodTemplate | FoodSearchResult) {
-  if (saving.value) return;
-  saving.value = true; quickAddingMealId.value = meal.id; errorMessage.value = "";
-  try {
-    await addFoodSnapshot(meal.id, value);
-    notice.value = `已把“${value.label}”加入这顿饭；需要时可以继续修正份量`;
-    try { await refreshSummary(); }
-    catch (error) { console.error("Nutrition summary refresh after quick food reuse failed", error); errorMessage.value = "食物已经加入，但当天汇总暂时刷新不了；请不要重复添加，稍后重新打开这一天即可。"; }
-  } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时加入不了这项食物"; }
-  finally { saving.value = false; quickAddingMealId.value = null; }
-}
-async function addRecentFoods(targetMeal: Meal, sourceMeal: Meal) {
-  if (saving.value) return;
-  const key = selectionKey(targetMeal.id, sourceMeal.id);
-  const selectedIds = recentSelections[key] ?? [];
-  const selected = sourceMeal.contributions.filter((item) => selectedIds.includes(item.id));
-  if (selected.length === 0) return;
-  saving.value = true; quickAddingMealId.value = targetMeal.id; errorMessage.value = "";
-  let added = 0;
-  try {
-    for (const item of selected) {
-      await addFoodSnapshot(targetMeal.id, item);
-      added += 1;
-      recentSelections[key] = (recentSelections[key] ?? []).filter((id) => id !== item.id);
-    }
-    notice.value = `已从“${sourceMeal.name ?? '最近一餐'}”加入 ${added} 项，可以继续补充今天不同的食物`;
-  } catch (error) {
-    const detail = error instanceof ApiError ? error.message : "暂时加入不了剩余食物";
-    errorMessage.value = added === 0 ? detail : `已成功加入 ${added} 项；其余项目仍保持选中。${detail}`;
-  } finally {
-    if (added > 0) {
-      try { await refreshSummary(); }
-      catch (error) { console.error("Nutrition summary refresh after recent food reuse failed", error); errorMessage.value ||= "食物已经加入，但当天汇总暂时刷新不了；请不要重复添加。"; }
-    }
-    saving.value = false; quickAddingMealId.value = null;
+function editContribution(meal: Meal, value: MealContribution) {
+  if (editingContributionId.value === value.id) return;
+  if (editingContributionId.value !== null) {
+    errorMessage.value = "请先保存或取消正在修正的食物，再修改其他食物。";
+    return;
   }
+  correctionBases[meal.id] = { meal, item: value };
+  contributionForms[meal.id] = { mode: value.mode, label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false };
+  editingContributionId.value = value.id;
 }
-function startTemplateEdit(value: PersonalFoodTemplate) {
-  editingTemplateId.value = value.id;
-  templateForm.value = { mode: "item", label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false };
-}
-function cancelTemplateEdit() { editingTemplateId.value = null; templateForm.value = null; }
-async function saveFoodTemplate(value: PersonalFoodTemplate) {
-  if (templateForm.value === null || saving.value) return;
-  saving.value = true; errorMessage.value = "";
-  try {
-    const saved = await nutritionApi.updateFoodTemplate(value.id, value.revision, contributionInput(templateForm.value));
-    templates.value = sortTemplates(templates.value.map((item) => item.id === saved.id ? saved : item));
-    cancelTemplateEdit(); notice.value = "常用食物已更新；以前的餐食记录没有改变";
-  } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时更新不了这个常用食物"; }
-  finally { saving.value = false; }
-}
-async function removeFoodTemplate(value: PersonalFoodTemplate) {
-  if (!window.confirm(`删除常用食物“${value.label}”？已经加入历史餐食的记录不会改变。`)) return;
-  saving.value = true; errorMessage.value = "";
-  try {
-    await nutritionApi.deleteFoodTemplate(value.id, value.revision);
-    templates.value = templates.value.filter((item) => item.id !== value.id);
-    for (const mealId of Object.keys(foodSearchResults)) foodSearchResults[mealId] = (foodSearchResults[mealId] ?? []).filter((item) => item.id !== `template:${value.id}`);
-    if (editingTemplateId.value === value.id) cancelTemplateEdit();
-    notice.value = "常用食物已删除；历史餐食保持不变";
-  } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时删除不了这个常用食物"; }
-  finally { saving.value = false; }
-}
-function publicFoodKey(mealId: string, resultId: string): string { return `${mealId}:${resultId}`; }
-function scaledNutrient(value: number | null, factor: number): string { return value === null ? "" : (Math.round(value * factor * 10) / 10).toString(); }
-function usePublicFoodResult(mealId: string, value: PublicFoodSearchResult) {
-  const grams = Number(publicFoodPortions[publicFoodKey(mealId, value.id)] ?? "100");
-  if (!Number.isFinite(grams) || grams <= 0 || grams > 10_000) { errorMessage.value = "实际重量需要填写 0–10000 g 之间的数字"; return; }
-  const factor = grams / value.basisAmount;
-  const displayLabel = (value.brand === null ? value.label : `${value.label}（${value.brand}）`).slice(0, 100);
-  contributionForms[mealId] = {
-    mode: "item",
-    label: displayLabel,
-    portionAmount: grams.toString(),
-    portionUnit: "g",
-    basisDescription: `Open Food Facts · 每 100 g · 条码 ${value.barcode} · 按 ${grams} g 换算；社区数据，请核对包装标签`,
-    energyKcal: scaledNutrient(value.energyKcal, factor),
-    proteinGrams: scaledNutrient(value.proteinGrams, factor),
-    carbohydrateGrams: scaledNutrient(value.carbohydrateGrams, factor),
-    fatGrams: scaledNutrient(value.fatGrams, factor),
-    replaceExisting: false,
-    saveAsTemplate: false,
-  };
-  editingContributionId.value = null;
-  errorMessage.value = "";
-  rememberSelection(mealId);
-  notice.value = `已按 ${grams} g 换算“${value.label}”，请核对包装标签后再计入`;
-}
-async function searchFoods(mealId: string) {
-  if (searchingMealId.value !== null) return;
-  const query = (foodSearchQueries[mealId] ?? "").trim();
-  searchingMealId.value = mealId; errorMessage.value = ""; publicFoodSearchErrors[mealId] = "";
-  const [personalResult, publicResult] = await Promise.allSettled([
-    nutritionApi.searchFoods(query, selectedDate.value),
-    query.length >= 2 ? nutritionApi.searchPublicFoods(query) : Promise.resolve([] as PublicFoodSearchResult[]),
-  ]);
-  if (personalResult.status === "fulfilled") foodSearchResults[mealId] = personalResult.value;
-  else { foodSearchResults[mealId] = []; errorMessage.value = personalResult.reason instanceof ApiError ? personalResult.reason.message : "暂时搜索不了个人记录"; }
-  if (publicResult.status === "fulfilled") {
-    publicFoodSearchResults[mealId] = publicResult.value;
-    for (const result of publicResult.value) publicFoodPortions[publicFoodKey(mealId, result.id)] ??= "100";
-  } else {
-    publicFoodSearchResults[mealId] = [];
-    publicFoodSearchErrors[mealId] = publicResult.reason instanceof ApiError ? publicResult.reason.message : "公开包装食品暂时搜索不了；个人记录和手工录入仍可使用。";
-  }
-  if (query.length > 0 && query.length < 2) publicFoodSearchErrors[mealId] = "至少输入 2 个字符，才会同时搜索公开包装食品。";
-  searchingMealId.value = null;
-}
-function useFoodSearchResult(mealId: string, value: FoodSearchResult) { contributionForms[mealId] = { mode: "item", label: value.label, portionAmount: value.portionAmount?.toString() ?? "", portionUnit: value.portionUnit ?? "", basisDescription: value.basisDescription ?? "", energyKcal: value.energyKcal?.toString() ?? "", proteinGrams: value.proteinGrams?.toString() ?? "", carbohydrateGrams: value.carbohydrateGrams?.toString() ?? "", fatGrams: value.fatGrams?.toString() ?? "", replaceExisting: false, saveAsTemplate: false }; rememberSelection(mealId); editingContributionId.value = null; notice.value = `已带入“${value.label}”，确认份量和营养后再计入`; }
-async function deleteContribution(meal: Meal, value: MealContribution) { if (!window.confirm(`从当前汇总中移除“${value.label}”？旧值仍保留在修订记录中。`)) return; saving.value = true; try { const saved = await nutritionApi.deleteContribution(meal.id, value.id, meal.revision, value.revision); meals.value = meals.value.map((item) => item.id === saved.id ? saved : item); await refreshSummary(); notice.value = "这项内容已从当前汇总移除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时移除不了这项内容"; } finally { saving.value = false; } }
-async function deleteMeal(meal: Meal) { if (!window.confirm("删除整顿饭？它会从当天汇总中排除。")) return; saving.value = true; try { await nutritionApi.deleteMeal(meal.id, meal.revision); meals.value = meals.value.filter((value) => value.id !== meal.id); delete analysesByMeal[meal.id]; await refreshSummary(); notice.value = "这顿饭已从当前汇总中排除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时删除不了这顿饭"; } finally { saving.value = false; } }
+async function deleteContribution(meal: Meal, value: MealContribution) { if (!window.confirm(`从当前汇总中移除“${value.label}”？旧值仍保留在修订记录中。`)) return; saving.value = true; try { const saved = await nutritionApi.deleteContribution(meal.id, value.id, meal.revision, value.revision); meals.value = meals.value.map((item) => item.id === saved.id ? saved : item); if (editingContributionId.value === value.id) { editingContributionId.value = null; delete correctionBases[meal.id]; } await refreshSummary(); notice.value = "这项内容已从当前汇总移除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时移除不了这项内容"; } finally { saving.value = false; } }
+async function deleteMeal(meal: Meal) { if (!window.confirm("删除整顿饭？它会从当天汇总中排除。")) return; saving.value = true; try { await nutritionApi.deleteMeal(meal.id, meal.revision); meals.value = meals.value.filter((value) => value.id !== meal.id); delete analysesByMeal[meal.id]; if (meal.contributions.some(item => item.id === editingContributionId.value)) editingContributionId.value = null; delete correctionBases[meal.id]; delete metadataDrafts[meal.id]; await refreshSummary(); notice.value = "这顿饭已从当前汇总中排除"; } catch (error) { errorMessage.value = error instanceof ApiError ? error.message : "暂时删除不了这顿饭"; } finally { saving.value = false; } }
 async function refreshSummary(expectedDate = selectedDate.value) {
   const refreshed = await nutritionApi.getDaySummary(expectedDate, browserTimeZone());
   if (selectedDate.value === expectedDate) summary.value = refreshed;
 }
-async function setCoverage(event: Event) {
-  const confirmed = (event.target as HTMLInputElement).checked;
-  const expectedDate = selectedDate.value;
-  coverageSaving.value = true;
-  errorMessage.value = "";
-  try {
-    await nutritionApi.setCoverage(expectedDate, confirmed);
-    if (selectedDate.value === expectedDate && summary.value?.localDate === expectedDate) {
-      summary.value = { ...summary.value, coverageConfirmed: confirmed };
-    }
-  } catch (error) {
-    if (selectedDate.value === expectedDate) {
-      errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了全天覆盖状态";
-    }
-  } finally {
-    coverageSaving.value = false;
-  }
-}
-
 async function handleRequestedAction() {
   if (route.name !== "nutrition" || route.query.action !== "new-meal") return;
   await openMealComposer();
@@ -594,64 +420,87 @@ onDeactivated(stopPolling);
 onBeforeUnmount(stopPolling);
 </script>
 
+
 <template>
-  <AppShell page-class="nutrition-page" rail-note="记录每一餐，随时看今天还可以吃多少。">
-        <header class="view-header"><div><h1>饮食</h1><p>记录每一餐，查看当天剩余。</p></div><nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作"><button class="action-button action-button--primary" type="button" @click="openMealComposer">快速记餐</button><label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || coverageSaving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label></nav></header>
-        <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p><p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
-        <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
-        <div v-else class="view-stack">
-          <section v-if="creatingMeal" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
-            <div class="panel-heading"><div><h2 id="quick-meal-title">快速记餐</h2><p>可以直接拍照，也可以先建立餐次后手工填写。</p></div><button class="text-action" type="button" @click="closeMealComposer">取消</button></div>
-            <form class="inline-form meal-create-form" @submit.prevent="createMeal">
-              <label>餐次名称（可选）<input ref="mealNameInput" v-model="mealForm.name" placeholder="例如：午饭" /></label>
-              <label>用餐时间<input v-model="mealForm.time" type="time" required /></label>
-              <label>备注（可选）<input v-model="mealForm.note" placeholder="例如：食堂二楼或少吃了一半" /></label>
-              <label class="quick-meal-photo"><span>餐食照片（可选）</span><input type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" @change="selectQuickMealImage" /><small v-if="quickMealImage">{{ quickMealImage.file.name }} · <template v-if="quickMealImage.compressed">已压缩 {{ formatFileSize(quickMealImage.originalBytes) }} → {{ formatFileSize(quickMealImage.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(quickMealImage.uploadBytes) }}</template></small><small v-else>食堂餐可以在这里直接拍照</small></label>
-              <button class="primary-button" :disabled="saving || uploadingMealId !== null" type="submit">{{ quickMealImage ? '建立餐次并上传' : '建立餐次' }}</button>
+  <AppShell page-class="nutrition-page" rail-note="记录吃了什么，查看已记录的营养。">
+    <header class="view-header">
+      <div><h1>饮食</h1><p>记录吃了什么，查看当天营养。</p></div>
+      <nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作">
+        <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
+      </nav>
+    </header>
+    <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
+    <p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
+    <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
+    <div v-else class="view-stack">
+      <section class="recommendation-panel nutrition-overview" aria-labelledby="nutrition-overview-title">
+        <div class="panel-heading"><h2 id="nutrition-overview-title">当天营养</h2></div>
+        <dl class="metric-list">
+          <div v-for="metric in nutrients" :key="metric.key">
+            <dt>{{ metric.label }}</dt><dd>已记录 {{ nutrientText(recordedValue(metric.key), metric.unit) }}</dd>
+            <span>每日参考 {{ targetValue(metric.key) === null ? '暂不可用' : nutrientText(targetValue(metric.key), metric.unit) }}</span>
+          </div>
+        </dl>
+        <p class="field-help" v-if="summary?.mealCount === 0">尚未记录餐食。</p>
+        <p class="field-help" v-else-if="summary && nutrients.some(metric => !summary![metric.key].complete)">部分食物有未知营养，合计仅包含已知数值。</p>
+        <p v-if="reference?.result.status !== 'ready'" class="field-help">每日参考暂不可用，不影响记餐。</p>
+        <details v-if="reference" class="reference-details"><summary>参考说明与计算依据</summary>
+          <p v-for="message in reference.result.messages" :key="message">{{ message }}</p>
+          <p>方法 {{ reference.methodVersion }}</p><p v-for="limitation in reference.result.limitations" :key="limitation">{{ limitation }}</p>
+        </details>
+      </section>
+      <div class="form-actions nutrition-record-actions" role="group" aria-label="记录餐食">
+        <button class="primary-button" type="button" :disabled="saving" @click="openMealComposer('photo')">拍照记一餐</button>
+        <button class="action-button" type="button" :disabled="saving" @click="openMealComposer('food')">添加食物</button>
+      </div>
+      <section v-if="creatingMeal" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
+        <div class="panel-heading"><div><h2 id="quick-meal-title">快速记餐</h2><p>{{ composerIntent === 'photo' ? '选张照片，时间和名称可以修改。' : '确认用餐时间，再从食物列表选择。' }}</p></div><button class="text-action" type="button" :disabled="saving" @click="closeMealComposer">收起</button></div>
+        <form class="inline-form meal-create-form" @submit.prevent="createMeal">
+          <fieldset :disabled="saving || uploadingMealId !== null">
+            <label>餐次名称（可选）<input ref="mealNameInput" v-model="mealForm.name" placeholder="例如：午饭" /></label>
+            <label>用餐时间<input v-model="mealForm.time" type="time" required /></label>
+            <label>备注（可选）<input v-model="mealForm.note" placeholder="例如：豆浆只喝了一半" /></label>
+            <label v-if="composerIntent === 'photo'" class="quick-meal-photo"><span>餐食照片（可选）</span><input type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" @change="selectQuickMealImage" /><small v-if="quickMealImage">{{ quickMealImage.file.name }} · <template v-if="quickMealImage.compressed">已压缩 {{ formatFileSize(quickMealImage.originalBytes) }} → {{ formatFileSize(quickMealImage.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(quickMealImage.uploadBytes) }}</template></small></label>
+            <button v-if="quickMealImage" class="text-action" type="button" @click="quickMealImage = undefined">移除待上传照片</button>
+            <button class="primary-button" type="submit">{{ quickMealImage ? '建立餐次并上传' : '建立餐次' }}</button>
+          </fieldset>
+        </form>
+      </section>
+      <section class="work-panel meal-log" aria-labelledby="meal-log-title">
+        <div class="panel-heading"><div><h2 id="meal-log-title">这一天吃了什么</h2><p>{{ meals.length === 0 ? '还没有餐食记录。' : `共 ${meals.length} 顿，打开餐食可以修改或补充。` }}</p></div></div>
+        <article v-for="meal in meals" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card">
+          <header><div><strong>{{ meal.name ?? '餐食' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div><button class="text-action" type="button" :aria-expanded="!!openMeals[meal.id]" @click="openMeals[meal.id] = !openMeals[meal.id]">{{ openMeals[meal.id] ? '收起餐食' : '打开餐食' }}</button></header>
+          <p class="meal-summary">{{ meal.contributions.map(item => item.label).join('、') || '还未添加食物' }}</p>
+          <p class="meal-summary">{{ nutrients.map(metric => `${metric.label} ${mealNutrient(meal, metric.key)} ${metric.unit}`).join(' · ') }}</p>
+          <p v-if="(analysesByMeal[meal.id] ?? []).some(analysis => analysis.status === 'pending' || analysis.status === 'running')" class="field-help" role="status">照片识别中，可以稍后回来查看。</p>
+          <div v-show="openMeals[meal.id]" class="meal-content">
+            <div class="row-actions"><button class="text-action" type="button" :disabled="saving" @click="startMetadata(meal)">修改餐食信息</button><button class="text-action" type="button" @click="photoPanels[meal.id] = !photoPanels[meal.id]">{{ photoPanels[meal.id] ? '收起照片' : '照片与识别' }}</button><button class="text-action danger-text" type="button" :disabled="saving" @click="deleteMeal(meal)">删除整顿</button></div>
+            <p v-if="meal.note">{{ meal.note }}</p>
+            <form v-if="metadataDrafts[meal.id]" class="meal-metadata-form" aria-label="修改餐食信息" @submit.prevent="saveMetadata(meal)">
+              <fieldset :disabled="saving">
+                <div class="form-row"><label>餐食日期<input v-model="metadataDrafts[meal.id]!.date" type="date" required /></label><label>餐食时间<input v-model="metadataDrafts[meal.id]!.time" type="time" required /></label></div>
+                <label>餐食名称<input v-model="metadataDrafts[meal.id]!.name" maxlength="100" /></label><label>餐食说明<input v-model="metadataDrafts[meal.id]!.note" maxlength="1000" /></label>
+                <div class="row-actions"><button class="primary-button" type="submit">保存餐食信息</button><button class="text-action" type="button" @click="delete metadataDrafts[meal.id]">取消修改</button></div>
+              </fieldset>
             </form>
-          </section>
-          <section class="recommendation-panel" aria-labelledby="daily-reference-title">
-            <div class="panel-heading"><div><h2 id="daily-reference-title">系统参考</h2><p>{{ selectedDate }} · 按个人档案、目标和日常活动计算</p></div><button class="text-action" type="button" @click="openSection('settings')">档案与策略 →</button></div>
-            <dl class="metric-list"><div><dt>能量</dt><dd>{{ reference?.result.targetEnergyKcal ?? '—' }}<small> kcal</small></dd></div><div><dt>蛋白质</dt><dd>{{ reference?.result.proteinGrams ?? '—' }}<small> g</small></dd></div><div><dt>碳水</dt><dd>{{ reference?.result.carbohydrateGrams ?? '—' }}<small> g</small></dd></div><div><dt>脂肪</dt><dd>{{ reference?.result.fatGrams ?? '—' }}<small> g</small></dd></div></dl>
-            <p v-if="reference?.result.status !== 'ready'" class="field-help">补充出生日期、性别、身高和体重后生成参考。</p>
-            <div v-else class="reference-messages"><p v-for="message in reference.result.messages" :key="message">{{ message }}</p></div>
-            <details v-if="reference" class="reference-details"><summary>计算依据</summary><p>方法 {{ reference.methodVersion }}</p><p v-for="limitation in reference.result.limitations" :key="limitation">{{ limitation }}</p></details>
-          </section>
-          <section class="work-panel diet-plan-panel" aria-labelledby="diet-plan-title">
-            <div class="panel-heading"><div><h2 id="diet-plan-title">我的饮食安排</h2><p>提前写下准备怎么吃，实际摄入仍以餐食记录为准。</p></div><button class="action-button" type="button" @click="dietPlanForm === null ? startDietPlan() : (dietPlanForm = null)">{{ dietPlanForm === null ? '新建安排' : '取消' }}</button></div>
-            <form v-if="dietPlanForm" class="diet-plan-form" @submit.prevent="saveDietPlan">
-              <div class="field-grid"><label><span>名称</span><input v-model="dietPlanForm.title" required maxlength="100" placeholder="例如：这周食堂安排" /></label><label><span>开始日期</span><input v-model="dietPlanForm.dateFrom" type="date" required /></label><label><span>结束日期</span><input v-model="dietPlanForm.dateTo" type="date" required /></label></div>
-              <label><span>整体原则（可选）</span><textarea v-model="dietPlanForm.note" maxlength="1000" placeholder="例如：优先清淡做法，每餐先找蔬菜"></textarea></label>
-              <div v-if="dietPlanForm.entries.length" class="diet-plan-entries"><article v-for="(entry, index) in dietPlanForm.entries" :key="index"><div class="field-grid"><label><span>指定日期（留空表示整个范围）</span><input v-model="entry.localDate" type="date" :min="dietPlanForm.dateFrom" :max="dietPlanForm.dateTo" /></label><label><span>餐次（可选）</span><input v-model="entry.mealName" maxlength="50" placeholder="例如：午饭" /></label></div><label><span>准备怎么吃</span><input v-model="entry.foodPlan" required maxlength="500" placeholder="例如：米饭半份、鸡腿一份、青菜一份" /></label><label><span>备注（可选）</span><input v-model="entry.note" maxlength="300" /></label><button class="text-action danger-text" type="button" @click="dietPlanForm.entries.splice(index, 1)">移除这条</button></article></div>
-              <div class="form-actions"><button class="text-action" type="button" @click="addDietPlanEntry">添加餐次或食物安排 →</button><button class="primary-button" type="submit" :disabled="saving">保存饮食安排</button></div>
+            <ul v-if="meal.contributions.length" class="meal-items">
+              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)" />
+            </ul>
+            <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
+            <form v-if="meal.contributions.some(item => item.id === editingContributionId)" class="contribution-form" aria-label="修正食物" @submit.prevent="saveContribution(meal, meal.contributions.find(item => item.id === editingContributionId))">
+              <fieldset :disabled="saving">
+                <label>食物名称<input v-model="formFor(meal.id).label" required /></label>
+                <p class="field-help">这里只修正名称或已知营养。调整食用量请使用该食物的“改份量”；未知营养留空。</p>
+                <div class="form-row nutrient-inputs"><label>能量 kcal<input v-model="formFor(meal.id).energyKcal" type="number" min="0" step="any" /></label><label>蛋白质 g<input v-model="formFor(meal.id).proteinGrams" type="number" min="0" step="any" /></label><label>碳水 g<input v-model="formFor(meal.id).carbohydrateGrams" type="number" min="0" step="any" /></label><label>脂肪 g<input v-model="formFor(meal.id).fatGrams" type="number" min="0" step="any" /></label></div>
+                <div class="row-actions"><button class="primary-button" type="submit">保存修正</button><button class="text-action" type="button" @click="editingContributionId = null">取消修改</button></div>
+              </fieldset>
             </form>
-            <div v-if="dietPlans.length" class="diet-plan-list"><article v-for="plan in dietPlans" :key="plan.id"><header><div><strong>{{ plan.title }}</strong><span>{{ plan.dateFrom === plan.dateTo ? plan.dateFrom : `${plan.dateFrom} 至 ${plan.dateTo}` }}</span></div><span class="row-actions"><button class="text-action" type="button" @click="startDietPlan(plan)">编辑</button><button class="text-action danger-text" type="button" @click="archiveDietPlan(plan)">归档</button></span></header><p v-if="plan.note">{{ plan.note }}</p><ul v-if="plan.entries.filter((entry) => entry.localDate === null || entry.localDate === selectedDate).length"><li v-for="entry in plan.entries.filter((value) => value.localDate === null || value.localDate === selectedDate)" :key="entry.id"><strong>{{ entry.mealName ?? (entry.localDate === null ? '范围内原则' : '当天安排') }}</strong><span>{{ entry.foodPlan }}</span><small v-if="entry.note">{{ entry.note }}</small></li></ul><small v-else>这份计划覆盖今天，但没有为今天单列餐次；可按整体原则执行。</small></article></div>
-            <p v-else-if="dietPlanForm === null" class="empty-copy">今天没有适用的饮食安排。</p>
-          </section>
-          <section class="balance-panel" aria-labelledby="remaining-title"><div class="panel-heading"><div><h2 id="remaining-title">还可以吃</h2><p>系统参考减去当前记录，负数表示已经超出。</p></div><span class="status-chip">{{ summary?.coverageConfirmed ? '全天已记全' : meals.length === 0 ? '尚未记餐' : '可能未记全' }}</span></div><dl class="metric-list"><div><dt>能量</dt><dd>{{ remainingText(summary?.energyKcal.remaining ?? null, 'kcal') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.energyKcal.recorded ?? null, 'kcal')} · ${summary?.energyKcal.complete ? '数值完整' : '有未知值'}` }}</span></div><div><dt>蛋白质</dt><dd>{{ remainingText(summary?.proteinGrams.remaining ?? null, 'g') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.proteinGrams.recorded ?? null, 'g')} · ${summary?.proteinGrams.complete ? '数值完整' : '有未知值'}` }}</span></div><div><dt>碳水</dt><dd>{{ remainingText(summary?.carbohydrateGrams.remaining ?? null, 'g') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.carbohydrateGrams.recorded ?? null, 'g')} · ${summary?.carbohydrateGrams.complete ? '数值完整' : '有未知值'}` }}</span></div><div><dt>脂肪</dt><dd>{{ remainingText(summary?.fatGrams.remaining ?? null, 'g') }}</dd><span>{{ meals.length === 0 ? '尚未记录餐食' : `已记录 ${nutrientText(summary?.fatGrams.recorded ?? null, 'g')} · ${summary?.fatGrams.complete ? '数值完整' : '有未知值'}` }}</span></div></dl><label class="checkbox-row"><input type="checkbox" :checked="summary?.coverageConfirmed" :disabled="coverageSaving" @change="setCoverage" />今天吃过的内容都已记录</label></section>
-          <section class="work-panel meal-log" aria-labelledby="meal-log-title"><div class="panel-heading"><div><h2 id="meal-log-title">这一天吃了什么</h2><p>{{ meals.length === 0 ? '还没有餐食记录。' : `共 ${meals.length} 顿；每项营养都可以留空未知。` }}</p></div><button class="action-button" type="button" @click="openMealComposer">记一顿</button></div>
-            <section v-if="templates.length" class="food-template-manager" aria-label="管理我的常用食物">
-              <div class="panel-heading"><div><strong>我的常用食物 · {{ templates.length }} 项</strong><p>修改或删除模板不会改变已经记录的餐食。</p></div><button class="text-action" type="button" @click="managingTemplates = !managingTemplates">{{ managingTemplates ? '收起管理' : '管理常用食物' }}</button></div>
-              <ul v-if="managingTemplates" class="template-manager-list">
-                <li v-for="item in templates" :key="item.id">
-                  <form v-if="editingTemplateId === item.id && templateForm" class="template-edit-form" @submit.prevent="saveFoodTemplate(item)">
-                    <div class="form-row"><label>名称<input v-model="templateForm.label" required /></label><label>份量<input v-model="templateForm.portionAmount" type="number" min="0" step="any" /></label><label>单位<input v-model="templateForm.portionUnit" /></label><label>估算基准<input v-model="templateForm.basisDescription" /></label></div>
-                    <div class="form-row nutrient-inputs"><label>能量 kcal<input v-model="templateForm.energyKcal" type="number" min="0" step="any" /></label><label>蛋白质 g<input v-model="templateForm.proteinGrams" type="number" min="0" step="any" /></label><label>碳水 g<input v-model="templateForm.carbohydrateGrams" type="number" min="0" step="any" /></label><label>脂肪 g<input v-model="templateForm.fatGrams" type="number" min="0" step="any" /></label></div>
-                    <span class="row-actions"><button class="primary-button" type="submit" :disabled="saving">保存常用食物</button><button class="text-action" type="button" @click="cancelTemplateEdit">取消</button></span>
-                  </form>
-                  <template v-else><div><strong>{{ item.label }}</strong><span>{{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }} · {{ nutrientText(item.energyKcal, 'kcal') }}</span></div><span class="row-actions"><button class="text-action" type="button" @click="startTemplateEdit(item)">编辑</button><button class="text-action danger-text" type="button" @click="removeFoodTemplate(item)">删除</button></span></template>
-                </li>
-              </ul>
-            </section>
-            <article v-for="meal in meals" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card"><header><div><strong>{{ meal.name ?? '未命名餐次' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div><button class="text-action danger-text" type="button" @click="deleteMeal(meal)">删除整顿</button></header>
-              <!-- 食物选择与复用共用下方的目录。 -->
-              <section class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
+              <section v-show="photoPanels[meal.id]" class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
                 <div class="meal-image-panel__heading">
                   <div>
                     <strong :id="`meal-image-${meal.id}`">拍照估算</strong>
-                    <span>分析结果可以先预览，确认后再计入当天。</span>
+                    <span>照片上传后异步识别，已有手工记录或修正不会被覆盖。</span>
                   </div>
-                  <span class="status-chip">原图采用后可删除</span>
                 </div>
                 <div class="image-upload-row">
                   <label class="file-picker">
@@ -670,8 +519,8 @@ onBeforeUnmount(stopPolling);
                     </header>
                     <p v-if="analysis.status === 'pending' || analysis.status === 'running'" class="field-help">正在分析，可以稍后回来查看。</p>
                     <div v-else-if="analysis.status === 'failed'" class="analysis-failure">
-                      <p>{{ imageAnalysisFailureText(analysis.lastErrorCode) }}</p>
-                      <button class="action-button" type="button" :disabled="actingAnalysisId === analysis.id" @click="retryImageAnalysis(meal.id, analysis)">重新分析</button>
+                      <p>{{ imageAnalysisFailureText(analysis.lastErrorCode, analysis.imageAvailable) }}</p>
+                      <button v-if="analysis.imageAvailable" class="action-button" type="button" :disabled="actingAnalysisId === analysis.id" @click="retryImageAnalysis(meal.id, analysis)">重新分析</button><p v-else class="field-help">原图已不可用，请重新选择照片；已有食物记录不受影响。</p>
                     </div>
                     <div v-else-if="analysis.candidate?.foods !== undefined" class="analysis-result">
                       <p v-if="contributionForAnalysis(meal, analysis.id)" class="field-help">已按食物计入下方列表，可直接改份量或移除。照片估算可能有偏差。</p>
@@ -681,11 +530,9 @@ onBeforeUnmount(stopPolling);
                         <p class="field-help">{{ analysis.candidate.uncertaintyNote }}</p>
                       </details>
                     </div>
-                    <div v-else-if="analysis.candidate !== null" class="analysis-result">
+                    <details v-else-if="analysis.candidate !== null" class="analysis-result"><summary>旧照片结果与修正</summary>
                       <div class="analysis-observations">
                         <span>识别把握：{{ confidenceLabel(analysis.candidate.confidence) }}</span>
-                        <span>模型：{{ analysis.model }}</span>
-                        <span>规则：{{ analysis.promptVersion }}</span>
                       </div>
                       <ul v-if="analysis.candidate.observedFoods.length" class="observed-foods">
                         <li v-for="food in analysis.candidate.observedFoods" :key="`${food.label}-${food.estimatedPortion}`"><strong>{{ food.label }}</strong><span>{{ food.estimatedPortion ?? '份量未知' }}</span><small v-if="food.note">{{ food.note }}</small></li>
@@ -712,24 +559,26 @@ onBeforeUnmount(stopPolling);
                         <p class="field-help">确认前请检查份量和烹调油。留空表示暂时未知。</p>
                       </form>
                       <p v-else class="form-notice">这份结果已按你确认的数值计入。原始估算仍保留用于追溯。</p>
-                    </div>
+                    </details>
                   </article>
                 </div>
               </section>
-              <ul v-if="meal.contributions.length" class="meal-items">
-                <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)" />
-              </ul><p v-else class="empty-copy">还没有填写这顿饭吃了什么。</p>
-              <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
-              <form class="contribution-form" @submit.prevent="saveContribution(meal, meal.contributions.find((item) => item.id === editingContributionId))">
-                <div class="form-row"><label>录入方式<select v-model="formFor(meal.id).mode"><option value="item">单个食物</option><option value="whole_meal">整餐总量</option><option value="supplement">补充未覆盖项</option></select></label><label v-if="templates.length">我的常用项<select value="" @change="useTemplate(meal.id, ($event.target as HTMLSelectElement).value)"><option value="">选择后带入</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.label }}</option></select></label><label>名称<input v-model="formFor(meal.id).label" required placeholder="例如：米饭" /></label></div>
-                <div class="form-row"><label>份量<input v-model="formFor(meal.id).portionAmount" type="number" min="0" step="any" /></label><label>单位<input v-model="formFor(meal.id).portionUnit" placeholder="g / 碗 / 份" /></label><label>估算基准<input v-model="formFor(meal.id).basisDescription" placeholder="例如：食堂一碗" /></label></div>
-                <div class="form-row nutrient-inputs"><label>能量 kcal<input v-model="formFor(meal.id).energyKcal" type="number" min="0" step="any" /></label><label>蛋白质 g<input v-model="formFor(meal.id).proteinGrams" type="number" min="0" step="any" /></label><label>碳水 g<input v-model="formFor(meal.id).carbohydrateGrams" type="number" min="0" step="any" /></label><label>脂肪 g<input v-model="formFor(meal.id).fatGrams" type="number" min="0" step="any" /></label></div>
-                <div class="form-row form-options"><label class="checkbox-row"><input v-model="formFor(meal.id).replaceExisting" type="checkbox" />替代这顿饭当前已有的全部营养内容</label><label v-if="formFor(meal.id).mode === 'item' && editingContributionId === null" class="checkbox-row"><input v-model="formFor(meal.id).saveAsTemplate" type="checkbox" />保存到“我的常用项”</label><button class="primary-button" :disabled="saving" type="submit">{{ editingContributionId ? '保存修正' : '计入这顿饭' }}</button></div>
-                <p v-if="selectionBases[meal.id] && contributionInput(formFor(meal.id)).portionAmount !== selectionBases[meal.id]!.portionAmount" class="field-help">当前份量计入：{{ nutrientText(contributionInput(formFor(meal.id)).energyKcal, 'kcal') }} · 蛋白质 {{ nutrientText(contributionInput(formFor(meal.id)).proteinGrams, 'g') }} · 碳水 {{ nutrientText(contributionInput(formFor(meal.id)).carbohydrateGrams, 'g') }} · 脂肪 {{ nutrientText(contributionInput(formFor(meal.id)).fatGrams, 'g') }}。只改份量会按原基准换算；手动改营养时以手填数值为准。</p>
-                <p class="field-help">食物营养可留空表示未知。整餐总量与逐项食物不能同时计入，切换时请勾选“替代”。</p>
-              </form>
-            </article>
-          </section>
-        </div>
+
+          </div>
+        </article>
+      </section>
+    </div>
   </AppShell>
 </template>
+
+<style scoped>
+.meal-summary { font-size: .9rem; line-height: 1.6; overflow-wrap: anywhere; }
+.meal-content { display: grid; gap: .75rem; }
+.meal-metadata-form, .contribution-form { padding-block: .75rem; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: .75rem; min-width: 0; }
+.nutrition-record-actions { justify-content: flex-start; }
+.nutrition-overview { gap: .65rem; padding: 1rem; }
+.nutrition-overview .metric-list > div { padding-block: .5rem; }
+.nutrition-overview dd { font-size: 1.15rem; }
+.nutrition-overview .metric-list > div > span { font-size: .85rem; }
+</style>

@@ -27,7 +27,7 @@ test("a planning failure stays private and does not erase other page sections", 
   await expect(page.getByRole("alert")).not.toContainText("private-user-id");
 
   await page.goto("/nutrition");
-  await expect(page.getByRole("heading", { name: "我的饮食安排" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "当天营养" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "这一天吃了什么" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("服务器暂时无法处理请求，请稍后重试");
   await expect(page.getByRole("alert")).not.toContainText("daily_planning_references");
@@ -91,45 +91,23 @@ test("a failed date-scoped request never leaves the previous day's meals on scre
   await expect(page.getByText("还没有餐食记录。")).toBeVisible();
 });
 
-test("an old coverage response cannot change the newly selected day", async ({ page }) => {
-  const previousDate = "2099-12-28";
-  const nextDate = "2099-12-29";
-  let releaseCoverage: (() => void) | undefined;
-  let markCoverageStarted: (() => void) | undefined;
-  const coverageGate = new Promise<void>((resolve) => { releaseCoverage = resolve; });
-  const coverageStarted = new Promise<void>((resolve) => { markCoverageStarted = resolve; });
-
+test("nutrition works without the retired diet-plan, coverage and template-manager paths", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("用户名").fill("desktop_admin");
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
-  await expect(page).toHaveURL(/\/today$/);
-
-  await page.route("**/api/v1/nutrition/day-coverage", async (route) => {
-    markCoverageStarted?.();
-    await coverageGate;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ coverageConfirmed: true }),
-    });
+  await expect(page).toHaveURL(/today$/);
+  const obsoleteRequests: string[] = [];
+  page.on("request", request => {
+    if (new RegExp("nutrition/(diet-plans|day-coverage|food-templates)").test(request.url())) obsoleteRequests.push(request.url());
   });
-
-  await page.goto(`/nutrition?date=${previousDate}`);
-  const coverageCheckbox = page.getByLabel("今天吃过的内容都已记录");
-  await expect(coverageCheckbox).not.toBeChecked();
-  await coverageCheckbox.check();
-  await coverageStarted;
-  await expect(page.getByLabel("查看日期")).toBeDisabled();
-
-  await page.evaluate((date) => {
-    window.history.pushState({}, "", `/nutrition?date=${date}`);
-    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
-  }, nextDate);
-  await expect(page.getByLabel("查看日期")).toHaveValue(nextDate);
+  await page.goto("/nutrition?date=2099-12-28");
+  await expect(page.getByRole("heading", { name: "当天营养" })).toBeVisible();
+  await expect(page.getByLabel("今天吃过的内容都已记录")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "管理我的常用食物" })).toHaveCount(0);
+  await page.getByLabel("查看日期").fill("2099-12-29");
+  await page.getByLabel("查看日期").dispatchEvent("change");
+  await expect(page).toHaveURL(/date=2099-12-29/);
   await expect(page.getByText("还没有餐食记录。")).toBeVisible();
-
-  releaseCoverage?.();
-  await expect(page.getByLabel("查看日期")).toBeEnabled();
-  await expect(page.getByLabel("今天吃过的内容都已记录")).not.toBeChecked();
+  expect(obsoleteRequests).toEqual([]);
 });

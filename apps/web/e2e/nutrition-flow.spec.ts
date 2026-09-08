@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { addPersonalFood, createMeal, openPicker } from "./helpers/nutrition";
 
 test.beforeEach(async ({page}) => {
   if (process.env.UX_SCROLL_DIAGNOSTIC !== 'true') return;
@@ -100,28 +101,15 @@ test("a person can reuse matching foods, search public products, and manage comm
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto(`/nutrition?date=${yesterdayDate}`);
-  await page.getByRole("button", { name: "记一顿" }).click();
-  await page.getByLabel("餐次名称（可选）").fill("早餐");
-  await page.getByRole("button", { name: "建立餐次" }).click();
-  const yesterdayMeal = page.locator("article.meal-card").filter({ hasText: "早餐" });
-  const addFood = async (label: string, portion: string, unit: string, energy: string, saveAsCommon: boolean) => {
-    await yesterdayMeal.getByLabel("名称").fill(label);
-    await yesterdayMeal.getByLabel("份量").fill(portion);
-    await yesterdayMeal.getByLabel("单位").fill(unit);
-    await yesterdayMeal.getByLabel("能量 kcal").fill(energy);
-    if (saveAsCommon) await yesterdayMeal.getByLabel("保存到“我的常用项”").check();
-    await yesterdayMeal.getByRole("button", { name: "计入这顿饭" }).click();
-    await expect(yesterdayMeal.locator(".meal-items").getByText(label, { exact: true })).toBeVisible();
-  };
-  await addFood("包子", "1", "个", "230", false);
-  await addFood("鸡蛋", "2", "个", "140", true);
-  await addFood("豆浆", "1", "碗", "90", true);
+  const yesterdayMeal = await createMeal(page, "早餐");
+  await addPersonalFood(yesterdayMeal, "包子", "1", "个", { energy: "230" });
+  await addPersonalFood(yesterdayMeal, "鸡蛋", "2", "个", { energy: "140" });
+  await yesterdayMeal.locator(".meal-items > li").filter({ hasText: "鸡蛋" }).getByRole("button", { name: "设为常用" }).click();
+  await addPersonalFood(yesterdayMeal, "豆浆", "1", "碗", { energy: "90" });
+  await yesterdayMeal.locator(".meal-items > li").filter({ hasText: "豆浆" }).getByRole("button", { name: "设为常用" }).click();
 
   await page.goto("/nutrition");
-  await page.getByRole("button", { name: "记一顿" }).click();
-  await page.getByLabel("餐次名称（可选）").fill("早餐");
-  await page.getByRole("button", { name: "建立餐次" }).click();
-  const todayMeal = page.locator("article.meal-card").filter({ hasText: "早餐" });
+  const todayMeal = await createMeal(page, "早餐");
   const picker = todayMeal.getByRole("region", { name: "添加食物", exact: true });
   await picker.getByRole("button", { name: "添加食物", exact: true }).click();
   await picker.getByRole("button", { name: "选择：鸡蛋", exact: true }).click();
@@ -144,36 +132,21 @@ test("a person can reuse matching foods, search public products, and manage comm
   await picker.getByRole("button", { name: "加入这顿饭（1项）" }).click();
   await expect(todayItems.getByText("原浆豆奶 · 示例品牌", { exact: true })).toBeVisible();
 
-  await todayMeal.getByLabel("名称").fill("夹馍");
-  await todayMeal.getByLabel("份量").fill("1");
-  await todayMeal.getByLabel("单位").fill("个");
-  await todayMeal.getByLabel("能量 kcal").fill("420");
-  await todayMeal.getByRole("button", { name: "计入这顿饭" }).click();
+  await addPersonalFood(todayMeal, "夹馍", "1", "个", { energy: "420" });
   await expect(todayItems.getByText("夹馍", { exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: "记一顿" }).click();
-  await page.getByLabel("餐次名称（可选）").fill("加餐");
-  await page.getByRole("button", { name: "建立餐次" }).click();
-  const snack = page.locator("article.meal-card").filter({ hasText: "加餐" });
+  const snack = await createMeal(page, "加餐");
   const snackPicker = snack.getByRole("region", { name: "添加食物", exact: true });
   await snackPicker.getByRole("button", { name: "添加食物", exact: true }).click();
   await snackPicker.getByRole("button", { name: "选择：豆浆", exact: true }).click();
   await snackPicker.getByRole("button", { name: "加入这顿饭（1项）" }).click();
   await expect(snack.locator(".meal-items").getByText("豆浆", { exact: true })).toBeVisible();
 
-  const manager = page.getByRole("region", { name: "管理我的常用食物" });
-  await manager.getByRole("button", { name: "管理常用食物" }).click();
-  const eggTemplate = manager.locator(".template-manager-list > li").filter({ hasText: "鸡蛋" });
-  await eggTemplate.getByRole("button", { name: "编辑" }).click();
-  const eggEditForm = manager.locator(".template-edit-form");
-  await eggEditForm.getByLabel("名称").fill("水煮蛋");
-  await eggEditForm.getByRole("button", { name: "保存常用食物" }).click();
-  await expect(manager.getByText("水煮蛋", { exact: true })).toBeVisible();
-  const soyTemplate = manager.locator(".template-manager-list > li").filter({ hasText: "豆浆" });
-  page.once("dialog", (dialog) => dialog.accept());
-  await soyTemplate.getByRole("button", { name: "删除" }).click();
-  await expect(manager.locator(".template-manager-list > li").filter({ hasText: "豆浆" })).toHaveCount(0);
+  const commonPicker = await openPicker(snack);
+  await commonPicker.getByRole("button", { name: "取消常用：豆浆", exact: true }).click();
+  await expect(commonPicker.getByRole("button", { name: "设为常用：豆浆", exact: true })).toBeVisible();
   await expect(snack.locator(".meal-items").getByText("豆浆", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "管理我的常用食物" })).toHaveCount(0);
+
 });
 
 test("a person can record, correct, and review a meal without treating unknown nutrients as zero", async ({ page }, testInfo) => {
@@ -198,40 +171,20 @@ test("a person can record, correct, and review a meal without treating unknown n
   await measurements.getByRole("button", { name: "记录这次测量" }).click();
 
   await page.goto("/nutrition");
-  const dietPlan = page.getByRole("region", { name: "我的饮食安排" });
-  await dietPlan.getByRole("button", { name: "新建安排" }).click();
-  await dietPlan.getByLabel("名称").fill("这周食堂安排");
-  await dietPlan.getByLabel("整体原则（可选）").fill("每餐先选蔬菜和蛋白质，再按饥饿程度取主食");
-  await dietPlan.getByRole("button", { name: "添加餐次或食物安排" }).click();
-  await dietPlan.getByLabel("餐次（可选）").fill("午饭");
-  await dietPlan.getByLabel("准备怎么吃").fill("米饭一份、荤菜一份、青菜一份");
-  await dietPlan.getByRole("button", { name: "保存饮食安排" }).click();
-  await expect(page.getByText("饮食安排已保存")).toBeVisible();
-  await expect(dietPlan.getByText("这周食堂安排")).toBeVisible();
-  await expect(dietPlan.getByText("米饭一份、荤菜一份、青菜一份")).toBeVisible();
-
-  await page.getByRole("button", { name: "记一顿" }).click();
-  await page.getByLabel("餐次名称（可选）").fill("午饭");
-  await page.getByRole("button", { name: "建立餐次" }).click();
-  const meal = page.locator("article.meal-card").filter({ hasText: "午饭" });
-  await meal.getByLabel("名称").fill("米饭");
-  await meal.getByLabel("份量").fill("200");
-  await meal.getByLabel("能量 kcal").fill("232");
-  await meal.getByLabel("蛋白质 g").fill("5.2");
-  await meal.getByLabel("碳水 g").fill("51.8");
-  await meal.getByLabel("保存到“我的常用项”").check();
-  await meal.getByRole("button", { name: "计入这顿饭" }).click();
+  await expect(page.getByRole("region", { name: "我的饮食安排" })).toHaveCount(0);
+  const meal = await createMeal(page, "午饭");
+  await addPersonalFood(meal, "米饭", "200", "g", { energy: "232", protein: "5.2", carbs: "51.8" });
+  await meal.locator(".meal-items > li").getByRole("button", { name: "设为常用" }).click();
 
   await expect(page.getByText("已记录 232 kcal")).toBeVisible();
-  await expect(page.getByText("有未知值")).toBeVisible();
-  await expect(meal.getByText("脂肪 未知")).toBeVisible();
-  await expect(meal.getByRole("combobox", { name: /我的常用项/ })).toContainText("米饭");
+  await expect(page.getByText("部分食物有未知营养，合计仅包含已知数值。")).toBeVisible();
+  await expect(meal.locator(".meal-items").getByText(/脂肪 未知/)).toBeVisible();
 
   await meal.getByRole("button", { name: "修正" }).click();
   await meal.getByLabel("能量 kcal").fill("250");
   await meal.getByRole("button", { name: "保存修正" }).click();
   await expect(page.getByText("已记录 250 kcal")).toBeVisible();
-  await expect(page.getByText("营养记录已修正，旧值仍可追溯")).toBeVisible();
+  await expect(page.getByText("食物已修正，当天营养已更新")).toBeVisible();
 
   const foodSearch = meal.getByRole("region", { name: "添加食物", exact: true });
   await foodSearch.getByRole("button", { name: "添加食物", exact: true }).click();

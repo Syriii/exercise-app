@@ -22,7 +22,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await measurements.getByRole("button", { name: "记录这次测量" }).click();
 
   await page.goto("/nutrition");
-  await page.getByRole("button", { name: "快速记餐" }).click();
+  await page.getByRole("button", { name: "拍照记一餐" }).click();
   await page.getByLabel("餐次名称（可选）").fill("食堂午饭");
   await page.getByLabel("餐食照片（可选）").setInputFiles({
     name: "canteen.png",
@@ -63,14 +63,15 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(chicken.getByText(/380 kcal/)).toBeVisible();
   await rice.getByRole("button", { name: "设为常用" }).click();
   await expect(page.getByText("已设为常用，下次可以单独添加这项食物")).toBeVisible();
-  await page.getByRole("button", { name: "快速记餐" }).click();
+  await page.getByRole("button", { name: "拍照记一餐" }).click();
   await page.getByLabel("餐次名称（可选）").fill("复用晚饭");
   await page.getByRole("button", { name: "建立餐次", exact: true }).click();
   const dinner = page.locator("article.meal-card").filter({ hasText: "复用晚饭" });
-  await dinner.getByRole("combobox", { name: "我的常用项", exact: true }).selectOption({ label: "米饭" });
-  const form = dinner.locator(".contribution-form");
-  await form.getByLabel("份量", { exact: true }).fill("50");
-  await form.getByRole("button", { name: "计入这顿饭" }).click();
+  const picker = dinner.getByRole("region", { name: "添加食物", exact: true });
+  await picker.getByRole("button", { name: "添加食物", exact: true }).click();
+  await picker.getByRole("button", { name: "选择：米饭", exact: true }).click();
+  await picker.getByLabel("米饭份量（g）").fill("50");
+  await picker.getByRole("button", { name: "加入这顿饭（1项）", exact: true }).click();
   await expect(dinner.locator(".meal-items > li")).toHaveCount(1);
   await expect(dinner.locator(".meal-items").getByText(/60 kcal/)).toBeVisible();
   await expect(rice.getByText(/120 kcal/)).toBeVisible();
@@ -107,7 +108,7 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
   });
 
   await page.goto("/nutrition");
-  await page.getByRole("button", { name: "快速记餐" }).click();
+  await page.getByRole("button", { name: "拍照记一餐" }).click();
   await page.getByLabel("餐次名称（可选）").fill("上传重试餐");
   await page.getByLabel("餐食照片（可选）").setInputFiles({
     name: "retry.png",

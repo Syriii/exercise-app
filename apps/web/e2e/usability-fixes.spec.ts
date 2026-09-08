@@ -61,7 +61,7 @@ test('food draft survives tab navigation; account actions are discoverable and l
   }});
   expect(profile.ok()).toBeTruthy();
   await navigate(page,'饮食');
-  await page.getByRole('button',{name:'快速记餐',exact:true}).click();
+  await page.getByRole('button',{name:'拍照记一餐',exact:true}).click();
   await page.getByLabel('餐次名称（可选）').fill('待保存早餐');
   await navigate(page,'历史');
   await navigate(page,'饮食');
