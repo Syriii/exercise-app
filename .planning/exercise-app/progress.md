@@ -1,5 +1,17 @@
 # 项目进度记录
 
+## 2026-09-09 Git网络恢复，发布改用固定Git archive
+
+- Git核对任务01a083a5-68cd-7202-a9fe-39cccf01488d，回合01a083a5-7602-7332-8baa-67def390d61c耗时198541ms完成，两个接口完整最终正文可读；一次fetch退出0/1592ms，origin/main e324fd5→eecbd9c15bd576d3b689558282d6e37a18d1bede，4f/d3对象齐全并属于origin历史。无遗留Git进程，HEAD/main/工作区不变。
+- 部署仓库HEAD与origin/main分叉1/14；独有41d472d8仅ux-a-postgres-verification文档，另有ux-ae-release-verification未跟踪文件。保留现场，不直接pull合并/重置。后续从已获取固定4f git archive导出可验证构建目录，不建worktree，无消息源码传输。
+- 新发布准备任务01a083a9-5148-7313-a5f5-1992460fead9（“114 B2b：Git固定版本发布准备”）已派发：只准备archive/完整性清单/新窄脚本和只读预检，旧f7脚本只读参考，明确源目录无.git需要匹配Git树；待全文审阅才进入正式构建等生产阶段。
+- 进行中产物目录/tmp/exercise-b2b-release-prep.uafsaE，源码source-4f72113；Git导出后修正仅临时源码的umask模式差异，清单349项（51目录/298文件/0符号链接）SHA256 216ce20fca24c362fac7ff2645a677c30a7c3f58b2ff02af88636a91b365758b，prep0700/source目录0755。仍在准备脚本，未完成预检或正式构建；这些中间证据不构成发布通过。
+
+## 2026-09-09 改回Git获取，暂停bundle
+
+- 用户先明确确认114归属及本次源码传送，随后要求停止bundle方案，指出应本地push、远端pull；本轮按最新要求使用Git，不将此前审批拦截作为切换通道的理由。
+- 新建原目录任务01a083a5-68cd-7202-a9fe-39cccf01488d（“114：Git网络恢复与分支关系核对”），只查现有Git状态并尝试一次60秒以内的origin/main fetch；允许更新远端跟踪引用，不动main/工作区、不合并或部署，不读取/配置凭据。等待最终结果，不假定历史网络故障仍存在。
+
 ## 2026-09-09 B2b真实PG20/20通过，发布增量发送被审批拦截
 
 - 新任务回合01a0837d-84f2-7370-b379-b9808f57700a耗时543018ms后completed/idle；wait_threads直接返回最终摘要，read_thread完整最终正文可读。固定d3c93e59、20/20、两项新增通过、测试库24后清理至不存在/0连接、integration0、生产仍f7/23且保护正常；详见[固定验收记录](photo-control-postgres-verification-2026-09-09.md)。未重跑，未生产迁移/部署。

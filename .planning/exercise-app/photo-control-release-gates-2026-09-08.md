@@ -2,7 +2,7 @@
 
 ## 本批范围与状态
 
-本地实现与check/build/api:contract、138项单元/API、61项双端E2E通过。固定d3c93e59真实隔离PG20/20于2026-09-09通过，两个读取接口直接取得最终回复，[证据](photo-control-postgres-verification-2026-09-09.md)。仅Web后续4f72113的6项双端及check/build亦通过。当前生产f7cfd13、迁移23；本批尚未发布。发送4f源码增量的自动审批被拒，待用户明确确认发送目标/载荷，未创建发布准备任务。
+本地实现与check/build/api:contract、138项单元/API、61项双端E2E通过。固定d3c93e59真实隔离PG20/20于2026-09-09通过，两个读取接口直接取得最终回复，[证据](photo-control-postgres-verification-2026-09-09.md)。仅Web后续4f72113的6项双端及check/build亦通过。当前生产f7cfd13、迁移23；本批尚未发布。Git网络已恢复，远端fetch成功取得4f；为保留分叉的文档提交，不pull合并，改从已获取的固定Git提交archive导出构建上下文。新发布准备任务已创建，只准备/预检，待审阅。
 
 ## 新迁移（已获单次授权，尚未执行）
 
