@@ -6,6 +6,16 @@
 
 ## 用户要求归档旧任务并在原目录新建测试（2026-09-08）
 
+### 后续复测：第二次归档新建
+
+- 旧原目录任务01a08039-2368-7553-bfdf-8aaca957e0b6在B2b准备回合再次出现completed但正文为空；用户本次转贴完整结果并明确要求再归档新建。已确认归档成功，新建任务01a08174-0403-7d92-9947-348e8bbd883a，标题“114 原目录：归档后回复读取复测”。前后均为同一SSH项目、同一原目录、local环境，不涉及工作树切换。
+- 第一轮回合01a08174-154f-7521-b48e-f72c5b621321，20593ms；只执行pwd且退出0。wait_threads.polls[0].latestAssistantMessage.text与read_thread.turns[0].items[3].text均读到标记REMOTE_REPLY_PROBE_20260908_ARCHIVE_NEW_01、实际目录/newdata/data/xiesh/exercise-app及未变更声明。最终消息ID msg_0a5474cf8d66cf46016aa01dc9fd2887d0a04c3d8d5e29da97。
+- 第二轮回合01a08174-c2b1-7d40-a103-aa90be8782fd，4228ms；纯文本、无命令。携带前轮cursor等待后，两接口均读到新标记REMOTE_REPLY_PROBE_20260908_ARCHIVE_NEW_02，read_thread最终项为items[1]，最终消息ID msg_0a5474cf8d66cf46016aa01de5dc8c87d0a66d9508cec92430。最新cursor为2477c01b-0a94-48bc-8513-4b45ef74abdc:4。
+- 证明本次归档新建后连续两轮可读；不证明归档本身为必要条件、永久修复、长回合/重连后稳定性。未修改客户端，未执行PG/构建/迁移/部署。旧准备产物保留，不重跑业务以修复回传。
+- 官方归档说明仅用于核对任务生命周期，不作为故障根因证据：[Archive a thread](https://learn.chatgpt.com/docs/app-server#archive-a-thread)。
+
+### 前次测试及业务对照
+
 后续实际业务对照：完整脚本读取回合01a0803d-476d-7f40-a490-e5ca7a70f398（135968ms）、Stage 1回合01a08041-4ff6-7bf3-98c4-f73a9679a1d1（477447ms）、Stage 2回合01a08049-599c-7931-b358-58b97e099f05（216726ms），均直接取得最新最终正文与相关完整命令输出。新任务已支持多轮及长回合，不只是最小文本探针成功；尚无重连后证据，不宣称永久修复或工作树是根因。
 
 - 用户明确授权归档旧远端任务并新建任务测试完成后的回复可读性，覆盖此前“不另建回传任务”的限制，仅作为本次诊断。旧任务01a079c5-de63-73a3-bb38-1cae91f63a3e归档成功。
