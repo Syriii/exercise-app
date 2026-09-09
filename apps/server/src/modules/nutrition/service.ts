@@ -170,6 +170,27 @@ export class NutritionService {
     return this.repository.listMeals(userId, from, to);
   }
 
+  public async replaceFoodSelection(userId: string, mealId: string, contributionId: string, mealRevision: number, contributionRevision: number, selection: FoodSelection): Promise<Meal> {
+    const meal = await this.getMeal(userId, mealId);
+    const existing = meal.contributions.find((item) => item.id === contributionId);
+    if (!existing) throw new NutritionError("contribution_not_found", "找不到要替换的食物", 404);
+    if (meal.revision !== mealRevision || existing.revision !== contributionRevision) this.revisionConflict();
+    if (existing.mode !== "item") throw new NutritionError("invalid_nutrition_input", "只能替换单项食物，整餐估算请使用完整结果替换", 400);
+    const food = catalogFoods(await this.repository.listFoodTemplates(userId), this.externalFoods()).find((item) => item.id === selection.foodId);
+    if (!food) throw new NutritionError("food_not_found", "所选食物已不可用，请重新选择", 404);
+    if (food.version !== selection.version) throw new NutritionError("food_catalog_changed", "所选食物已修改，请重新选择该食物", 409);
+    if (!Number.isFinite(selection.amount) || selection.amount <= 0 || selection.amount > 100000 || !food.basisAmount || food.basisAmount <= 0 || !food.basisUnit)
+      throw new NutritionError("invalid_nutrition_input", "请填写替换食物的有效份量与基准", 400);
+    const amount = Math.round(selection.amount * 1000) / 1000;
+    if (amount <= 0) throw new NutritionError("invalid_nutrition_input", "份量最小为0.001", 400);
+    // Keep the item identity and analysis link; revisions retain the original estimate.
+    // Nutrition and units come only from the selected catalog snapshot, never the photo.
+    const input: ContributionInput = { mode: "item", source: "manual", reviewStatus: "confirmed", sourceAnalysisId: existing.sourceAnalysisId,
+      label: food.label, portionAmount: amount, portionUnit: food.basisUnit, basisDescription: food.sourceName,
+      foodSnapshot: foodSnapshot(food), ...this.nutrients(scaleFood(food, amount)) };
+    return this.unwrapMeal(await this.repository.updateContribution(userId, mealId, contributionId, mealRevision, contributionRevision, input, false));
+  }
+
   public async listDietPlans(userId: string, dateFrom: string, dateTo: string, includeArchived = false) {
     this.assertDate(dateFrom); this.assertDate(dateTo);
     if (dateFrom > dateTo) throw new NutritionError("invalid_nutrition_input", "饮食计划开始日期不能晚于结束日期", 400);

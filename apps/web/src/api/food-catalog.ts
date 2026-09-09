@@ -19,4 +19,5 @@ export const foodCatalogApi = {
   favoriteMealFood: (mealId: string, itemId: string) => apiRequest<void>(`/api/v1/nutrition/meals/${mealId}/contributions/${itemId}/favorite`, { method: "POST" }),
   createPersonal: (input: ContributionInput & { category: FoodCategory; submissionId: string }) => apiRequest<CatalogFood>("/api/v1/nutrition/food-catalog/personal", { method: "POST", body: JSON.stringify(input) }),
   addSelections: (meal: Meal, submissionId: string, selections: Array<{ foodId: string; version: string; amount: number }>) => apiRequest<Meal>(`/api/v1/nutrition/meals/${meal.id}/food-selections`, { method: "POST", body: JSON.stringify({ mealRevision: meal.revision, submissionId, selections }) }),
+  replaceSelection: (mealId: string, itemId: string, mealRevision: number, contributionRevision: number, selection: { foodId: string; version: string; amount: number }) => apiRequest<Meal>(`/api/v1/nutrition/meals/${mealId}/contributions/${itemId}/food-selection`, { method: "PUT", body: JSON.stringify({ mealRevision, contributionRevision, ...selection }) }),
 };

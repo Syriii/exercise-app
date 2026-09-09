@@ -89,6 +89,14 @@ export async function registerNutritionRoutes(app: FastifyInstance, options: { i
     handler: async (request) => serializeMeal(await options.nutritionService.changePortion(await userId(request), request.params.mealId, request.params.contributionId, request.body.mealRevision, request.body.contributionRevision, request.body.portionAmount)),
   });
 
+  app.put<{ Params: { mealId: string; contributionId: string }; Body: FoodSelection & { mealRevision: number; contributionRevision: number } }>("/api/v1/nutrition/meals/:mealId/contributions/:contributionId/food-selection", {
+    schema: { params: twoIdParams, body: { type: "object", additionalProperties: false, required: ["mealRevision", "contributionRevision", "foodId", "version", "amount"], properties: {
+      mealRevision: { type: "integer", minimum: 1 }, contributionRevision: { type: "integer", minimum: 1 },
+      foodId: { type: "string", minLength: 1, maxLength: 100 }, version: { type: "string", minLength: 1, maxLength: 100 }, amount: { type: "number", exclusiveMinimum: 0, maximum: 100000 },
+    } }, response: { 200: mealResponse } },
+    handler: async (r) => serializeMeal(await options.nutritionService.replaceFoodSelection(await userId(r), r.params.mealId, r.params.contributionId, r.body.mealRevision, r.body.contributionRevision, r.body)),
+  });
+
   app.get<{ Querystring: { from: string; to: string; includeArchived?: string } }>("/api/v1/nutrition/diet-plans", { schema: { querystring: { type: "object", additionalProperties: false, required: ["from", "to"], properties: { from: { type: "string", format: "date" }, to: { type: "string", format: "date" }, includeArchived: { type: "string", enum: ["true", "false"] } } }, response: { 200: { type: "array", items: dietPlanResponse } } }, handler: async (request) => (await options.nutritionService.listDietPlans(await userId(request), request.query.from, request.query.to, request.query.includeArchived === "true")).map(serializeDietPlan) });
   app.post<{ Body: DietPlanInput }>("/api/v1/nutrition/diet-plans", { schema: { body: dietPlanInput, response: { 201: dietPlanResponse } }, handler: async (request, reply) => reply.status(201).send(serializeDietPlan(await options.nutritionService.createDietPlan(await userId(request), request.body))) });
   app.put<{ Params: { planId: string }; Body: DietPlanInput & { revision: number } }>("/api/v1/nutrition/diet-plans/:planId", { schema: { params: idParams("planId"), body: { ...dietPlanInput, required: ["revision", ...dietPlanInput.required], properties: { revision: { type: "integer", minimum: 1 }, ...dietPlanInput.properties } }, response: { 200: dietPlanResponse } }, handler: async (request) => serializeDietPlan(await options.nutritionService.updateDietPlan(await userId(request), request.params.planId, request.body.revision, request.body)) });

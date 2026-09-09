@@ -11,7 +11,7 @@ import FoodPicker from "../features/nutrition/FoodPicker.vue";
 import PhotoAnalysisSettings from "../features/nutrition/PhotoAnalysisSettings.vue";
 import ImageResultReplacement from "../features/nutrition/ImageResultReplacement.vue";
 import { foodCatalogApi } from "../api/food-catalog";
-import { newFoodPickerDraft, type FoodPickerDraft } from "../features/nutrition/food-picker-draft";
+import { newFoodPickerDraft, type FoodPickerDraft, type FoodReplacementTarget } from "../features/nutrition/food-picker-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
 
 interface ContributionForm { mode: MealContributionMode; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; saveAsTemplate: boolean; }
@@ -41,6 +41,25 @@ const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
 const foodPickerDrafts = reactive<Record<string, FoodPickerDraft>>({});
 function foodPickerDraft(mealId: string): FoodPickerDraft { return foodPickerDrafts[mealId] ??= newFoodPickerDraft(); }
+const foodReplacementDrafts = reactive<Record<string, { target: FoodReplacementTarget; picker: FoodPickerDraft }>>({});
+async function startFoodReplacement(meal: Meal, item: MealContribution) {
+  const current = foodReplacementDrafts[meal.id];
+  if (current && current.target.id !== item.id && !window.confirm("放弃当前尚未保存的替换选择，改为替换这项食物？")) return;
+  if (!current || current.target.id !== item.id) foodReplacementDrafts[meal.id] = {
+    target: { id: item.id, label: item.label, revision: item.revision }, picker: { ...newFoodPickerDraft(), open: true, mealRevision: meal.revision },
+  };
+  await nextTick();
+  document.getElementById(`food-replacement-${meal.id}`)?.scrollIntoView({ block: "nearest" });
+}
+async function foodReplacementSaved(meal: Meal) {
+  delete foodReplacementDrafts[meal.id];
+  await selectionsSaved(meal);
+  notice.value = "这一项食物已替换，其他食物保留，营养已按新基准计算";
+}
+async function foodReplacementRefreshed(meal: Meal) {
+  if (meal.localDate === selectedDate.value) meals.value = meals.value.map(item => item.id === meal.id ? meal : item);
+  try { await refreshSummary(); } catch { errorMessage.value = "餐食已重新读取，汇总暂时刷新不了。"; }
+}
 async function selectionsSaved(meal: Meal) {
   if (meal.localDate === selectedDate.value) meals.value = meals.value.map((value) => value.id === meal.id ? meal : value);
   notice.value = "所选食物已保存，份量与营养已同步计算";
@@ -502,8 +521,9 @@ onBeforeUnmount(stopPolling);
               </fieldset>
             </form>
             <ul v-if="meal.contributions.length" class="meal-items">
-              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)" />
+              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)" />
             </ul>
+            <FoodPicker v-if="foodReplacementDrafts[meal.id]" :id="`food-replacement-${meal.id}`" :key="foodReplacementDrafts[meal.id]!.target.id" :meal="meal" :draft="foodReplacementDrafts[meal.id]!.picker" :replacement="foodReplacementDrafts[meal.id]!.target" :disabled="saving" @busy="saving = $event" @saved="foodReplacementSaved" @refreshed="foodReplacementRefreshed" @cancel="delete foodReplacementDrafts[meal.id]" />
             <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
             <form v-if="meal.contributions.some(item => item.id === editingContributionId)" class="contribution-form" aria-label="修正食物" @submit.prevent="saveContribution(meal, meal.contributions.find(item => item.id === editingContributionId))">
               <fieldset :disabled="saving">

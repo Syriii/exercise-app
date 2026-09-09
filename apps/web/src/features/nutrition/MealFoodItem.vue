@@ -4,7 +4,7 @@ import { ApiError } from "../../api/client";
 import { nutritionApi, type Meal, type MealContribution } from "../../api/nutrition";
 
 const props = defineProps<{ meal: Meal; item: MealContribution; disabled: boolean }>();
-const emit = defineEmits<{ saved: [meal: Meal]; edit: []; remove: []; favorite: [] }>();
+const emit = defineEmits<{ saved: [meal: Meal]; edit: []; replace: []; remove: []; favorite: [] }>();
 const draft = ref<{ meal: Meal; item: MealContribution; amount: string } | null>(null);
 const saving = ref(false);
 const error = ref("");
@@ -38,6 +38,7 @@ async function savePortion() {
     <span class="row-actions">
       <button v-if="item.mode === 'item' && item.portionAmount !== null && item.portionUnit" class="text-action" type="button" :disabled="disabled || saving" @click="startPortion">改份量</button>
       <button class="text-action" type="button" :disabled="disabled || saving" @click="emit('edit')">修正</button>
+      <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('replace')">换食物</button>
       <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('favorite')">设为常用</button>
       <button class="text-action danger-text" type="button" :disabled="disabled || saving" @click="emit('remove')">移除</button>
     </span>

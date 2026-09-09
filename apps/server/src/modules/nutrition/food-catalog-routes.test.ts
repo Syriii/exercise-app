@@ -51,5 +51,15 @@ it("serves one catalog with authenticated favorites, snapshots, pagination and e
     // Fastify strips extra request fields; they cannot override server-side nutrition.
     expect(forged.statusCode).toBe(201);
     expect(forged.json()).toEqual(saved.json());
+    const item = saved.json().contributions[0];
+    const replacementUrl = `/api/v1/nutrition/meals/${meal.id}/contributions/${item.id}/food-selection`;
+    const replacement = { mealRevision: saved.json().revision, contributionRevision: item.revision, foodId: food.id, version: food.version, amount: 50, energyKcal: 9999 };
+    expect((await app.inject({ method: "PUT", url: replacementUrl, payload: replacement })).statusCode).toBe(401);
+    expect((await request("PUT", replacementUrl, replacement, other)).statusCode).toBe(404);
+    expect((await request("PUT", replacementUrl, { ...replacement, amount: 0 })).statusCode).toBe(400);
+    const replaced = await request("PUT", replacementUrl, replacement);
+    expect(replaced.statusCode, replaced.body).toBe(200);
+    expect(replaced.json()).toMatchObject({ contributions: [{ id: item.id, energyKcal: 30, portionAmount: 50, carbohydrateGrams: null, foodSnapshot: { id: food.id, energyKcal: 60 } }] });
+    expect((await request("PUT", replacementUrl, replacement)).statusCode).toBe(409);
   } finally { await app.close(); }
 });

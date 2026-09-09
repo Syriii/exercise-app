@@ -901,6 +901,63 @@ describe("PostgreSQL integration", () => {
     } finally { await restricted.close(); }
   });
 
+  it("replaces one photo food from catalog atomically with immutable basis, rollback, concurrency and RLS", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`single-replace-a-${randomUUID()}`, `single-replace-b-${randomUUID()}`]);
+    const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const service = new NutritionService(new PostgresNutritionRepository(restricted.database));
+    const images = new PostgresImageAnalysisRepository(restricted.database);
+    const egg = builtinFoods.find(food => food.id === "usda:173424")!;
+    try {
+      await context.run(userId, async () => {
+        const initial = await service.createMeal(userId, { occurredAt: "2026-09-09T00:00:00Z", localDate: "2026-09-09", timeZone: "UTC", name: "单项替换", note: null });
+        const analysis = await images.create(userId, initial.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "a".repeat(64) }, new Date(Date.now() + 86_400_000), "fixed-test", "food-items-v2");
+        const attempt = await images.beginAttempt(analysis.id);
+        if (typeof attempt === "string") throw new Error("expected attempt");
+        const candidate = { title: "固定照片", observedFoods: [], foods: [
+          { label: "认错的包子", portionAmount: 1, portionUnit: "个", note: null, energyKcal: 999, proteinGrams: 9, carbohydrateGrams: 9, fatGrams: 9 },
+          { label: "保留豆浆", portionAmount: 1, portionUnit: "碗", note: null, energyKcal: 80, proteinGrams: null, carbohydrateGrams: null, fatGrams: null },
+        ], energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null, confidence: "low" as const, assumptions: [], uncertaintyNote: "测试估算" };
+        await images.succeed(analysis.id, attempt.attemptId, candidate, "single-replace");
+        const meal = await service.getMeal(userId, initial.id), item = meal.contributions.find(value => value.label === "认错的包子")!, other = meal.contributions.find(value => value.label === "保留豆浆")!;
+        const choice = { foodId: egg.id, version: egg.version, amount: 50.00049 };
+        // The parent update fails after the item and history writes; the entire change must roll back.
+        await database.pool.query(`alter table meals add constraint integration_single_food_late_failure check (id <> '${meal.id}'::uuid or revision <= ${meal.revision})`);
+        try {
+          await expect(service.replaceFoodSelection(userId, meal.id, item.id, meal.revision, item.revision, choice)).rejects.toBeDefined();
+          expect(await service.getMeal(userId, meal.id)).toEqual(meal);
+          expect(await service.listContributionRevisions(userId, meal.id)).toHaveLength(0);
+        } finally { await database.pool.query("alter table meals drop constraint integration_single_food_late_failure"); }
+        const concurrent = await Promise.allSettled([1, 2].map(() => service.replaceFoodSelection(userId, meal.id, item.id, meal.revision, item.revision, choice)));
+        expect(concurrent.filter(value => value.status === "fulfilled")).toHaveLength(1);
+        expect(concurrent.filter(value => value.status === "rejected")).toEqual([expect.objectContaining({ reason: expect.objectContaining({ statusCode: 409 }) })]);
+        const saved = await service.getMeal(userId, meal.id), changed = saved.contributions.find(value => value.id === item.id)!;
+        expect(saved.revision).toBe(meal.revision + 1);
+        expect(saved.contributions).toHaveLength(2);
+        expect(changed).toMatchObject({ label: egg.label, portionAmount: 50, portionUnit: "g", energyKcal: 77.5, source: "manual", sourceAnalysisId: analysis.id, foodSnapshot: { id: egg.id, basisAmount: 100, energyKcal: 155 } });
+        expect(saved.contributions.find(value => value.id === other.id)).toEqual(other);
+        expect((await service.listContributionRevisions(userId, meal.id))[0]).toMatchObject({ label: item.label, source: "model_adopted", energyKcal: 999 });
+        expect(await service.ensureTentativeModelContribution(userId, meal.id, analysis.id, candidate)).toEqual(saved);
+        await expect(service.replaceFoodSelection(userId, meal.id, item.id, meal.revision, item.revision, choice)).rejects.toMatchObject({ statusCode: 409 });
+        await context.run(otherId, async () => {
+          await expect(service.replaceFoodSelection(otherId, meal.id, item.id, saved.revision, changed.revision, choice)).rejects.toMatchObject({ statusCode: 404 });
+          await expect(service.replaceFoodSelection(userId, meal.id, item.id, saved.revision, changed.revision, choice)).rejects.toMatchObject({ statusCode: 404 });
+          expect((await restricted.pool.query("select food_snapshot from meal_contributions where meal_id = $1", [meal.id])).rowCount).toBe(0);
+        });
+        const resized = await service.changePortion(userId, meal.id, item.id, saved.revision, changed.revision, 100);
+        expect(resized.contributions.find(value => value.id === item.id)!.energyKcal).toBe(155);
+        const personal = await service.createPersonalFood(userId, { mode: "item", label: "未知营养配菜", category: "vegetables", portionAmount: 1, portionUnit: "碗", basisDescription: null, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null });
+        const unknown = await service.replaceFoodSelection(userId, meal.id, item.id, resized.revision, changed.revision + 1, { foodId: personal.id, version: personal.version, amount: 2 });
+        expect(unknown.contributions.find(value => value.id === item.id)).toMatchObject({ energyKcal: null, portionAmount: 2, portionUnit: "碗", foodSnapshot: { id: personal.id, energyKcal: null } });
+        const exported = await new PostgresUserDataExporter(restricted.database).exportUserData(userId, new Date());
+        expect(exported.data.meal_contributions).toEqual(expect.arrayContaining([expect.objectContaining({ id: item.id, food_snapshot: expect.objectContaining({ id: personal.id }) })]));
+        const removed = await service.deleteContribution(userId, meal.id, item.id, unknown.revision, changed.revision + 2);
+        await expect(service.replaceFoodSelection(userId, meal.id, item.id, removed.revision, changed.revision + 2, choice)).rejects.toMatchObject({ statusCode: 404 });
+        expect(await service.getMeal(userId, meal.id)).toEqual(removed);
+      });
+    } finally { await restricted.close(); }
+  });
+
   it("persists photo consent without submitting old photos and isolates reanalysis and expired originals", async () => {
     const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`photo-control-a-${randomUUID()}`, `photo-control-b-${randomUUID()}`]);
     const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;

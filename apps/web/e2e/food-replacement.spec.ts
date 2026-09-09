@@ -1,0 +1,115 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function photoMeal(page: Page, suffix: string) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`foodreplace_${suffix}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册", exact: true }).click();
+  await expect(page).toHaveURL(/\/today$/);
+  await page.goto("/nutrition");
+  await page.getByText("拍照识别设置", { exact: true }).click();
+  await page.getByLabel("拍照后自动识别", { exact: true }).check();
+  await page.getByLabel("我了解并同意上述照片发送范围").check();
+  await page.getByRole("button", { name: "保存识别设置" }).click();
+  await expect(page.getByText("已保存，仅影响后续上传的照片。")).toBeVisible();
+  await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
+  await page.getByLabel("餐次名称（可选）").fill("替换早餐");
+  await page.getByLabel("餐食照片（可选）").setInputFiles({ name: "fixed.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]) });
+  await page.getByRole("button", { name: "建立餐次并上传" }).click();
+  const meal = page.locator("article.meal-card").filter({ has: page.locator("header strong", { hasText: "替换早餐" }) });
+  await expect(meal.locator(".meal-items > li")).toHaveCount(2);
+  const date = await page.getByLabel("查看日期").inputValue();
+  const meals = await (await page.request.get(`/api/v1/nutrition/meals?from=${date}&to=${date}`)).json();
+  return { meal, data: meals.find((value: { name: string }) => value.name === "替换早餐"), date };
+}
+
+test("single photo food replacement reuses catalog, keeps drafts and reconciles a lost response", async ({ page }, testInfo) => {
+  const { meal, data } = await photoMeal(page, testInfo.project.name[0]!);
+  const chicken = meal.locator(".meal-items > li").filter({ hasText: "鸡腿" });
+  await chicken.getByRole("button", { name: "换食物", exact: true }).click();
+  const picker = meal.getByRole("region", { name: "替换单项食物" });
+  await expect(picker.getByRole("list", { name: "食物列表" }).getByRole("listitem")).toHaveCount(12);
+  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
+  // New basis is grams, not the old photo's one piece.
+  const amount = picker.getByLabel("鸡蛋（水煮全蛋）份量（g）");
+  await expect(amount).toHaveValue("100");
+  await amount.fill("50");
+  await page.locator('.mobile-dock, .desktop-rail').getByRole("button", { name: /^历史/ }).filter({ visible: true }).click();
+  await page.locator('.mobile-dock, .desktop-rail').getByRole("button", { name: /^饮食/ }).filter({ visible: true }).click();
+  await expect(amount).toHaveValue("50");
+  await page.route("**/contributions/*/food-selection", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "test_failure", message: "测试保存失败" }) }), { times: 1 });
+  await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
+  await expect(picker.getByRole("alert")).toContainText("服务器暂时无法处理请求");
+  await expect(amount).toHaveValue("50");
+  await expect(chicken).toContainText("380 kcal");
+  await page.route("**/contributions/*/food-selection", async route => {
+    const response = await route.fetch(); expect(response.status()).toBe(200); await route.abort("failed");
+  }, { times: 1 });
+  await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
+  await expect(picker.getByRole("alert")).toContainText("选择已保留");
+  await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
+  await expect(picker.getByRole("button", { name: "替换这一项", exact: true })).toBeDisabled();
+  await picker.getByRole("button", { name: "重新查看餐食", exact: true }).click();
+  await expect(picker.getByText("当前：鸡蛋（水煮全蛋） · 50 g")).toBeVisible();
+  await expect(amount).toHaveValue("50");
+  await picker.getByRole("button", { name: "取消替换", exact: true }).click();
+  await expect(meal.locator(".meal-items > li")).toHaveCount(2);
+  const egg = meal.locator(".meal-items > li").filter({ hasText: "鸡蛋（水煮全蛋）" });
+  await expect(egg).toContainText("77.5 kcal");
+  await expect(egg).not.toContainText("照片估算");
+  await expect(meal.locator(".meal-items > li").filter({ hasText: "米饭" })).toContainText("240 kcal");
+  await egg.getByRole("button", { name: "改份量" }).click();
+  await egg.getByLabel("鸡蛋（水煮全蛋）份量（g）").fill("100");
+  await egg.getByRole("button", { name: "保存份量" }).click();
+  await expect(egg).toContainText("155 kcal");
+  const revisions = await (await page.request.get(`/api/v1/nutrition/meals/${data.id}/contribution-revisions`)).json();
+  expect(revisions.filter((value: { label: string }) => value.label === "鸡腿")).toHaveLength(1);
+  await egg.scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("single-food-replaced.png") });
+});
+
+test("stale replacement refreshes the server, requires renewed confirmation and cannot restore a removed item", async ({ page }, testInfo) => {
+  const { meal, data } = await photoMeal(page, `conflict_${testInfo.project.name[0]}`);
+  const rice = data.contributions.find((value: { label: string }) => value.label === "米饭");
+  await meal.locator(".meal-items > li").filter({ hasText: "米饭" }).getByRole("button", { name: "换食物", exact: true }).click();
+  const picker = meal.getByRole("region", { name: "替换单项食物" });
+  await picker.getByText("找不到？补充个人食物", { exact: true }).click();
+  await picker.getByLabel("个人食物名称").fill("未知配菜");
+  await picker.getByLabel("基准份量", { exact: true }).fill("1");
+  await picker.getByLabel("基准单位", { exact: true }).fill("碗");
+  await picker.getByRole("button", { name: "保存个人食物并选择" }).click();
+  await picker.getByLabel("未知配菜份量（碗）").fill("2");
+  const response = await page.request.patch(`/api/v1/nutrition/meals/${data.id}/contributions/${rice.id}/portion`, { data: { mealRevision: data.revision, contributionRevision: rice.revision, portionAmount: 150 } });
+  expect(response.status()).toBe(200);
+  await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
+  await expect(picker.getByRole("button", { name: "替换这一项", exact: true })).toBeDisabled();
+  // Browsing again must not hide the only recovery action after a conflict.
+  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await expect(picker.getByLabel("未知配菜份量（碗）")).toHaveValue("2");
+  await picker.getByRole("button", { name: "重新查看餐食", exact: true }).click();
+  await expect(picker.getByText("当前：米饭 · 150 g")).toBeVisible();
+  await picker.getByRole("button", { name: "按当前食物重新确认", exact: true }).click();
+  await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
+  const unknown = meal.locator(".meal-items > li").filter({ hasText: "未知配菜" });
+  await expect(unknown).toContainText("2 碗");
+  await expect(unknown).toContainText("蛋白质 未知");
+  await expect(meal.locator(".meal-items > li")).toHaveCount(2);
+  await unknown.getByRole("button", { name: "换食物", exact: true }).click();
+  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
+  const changed = await (await page.request.get(`/api/v1/nutrition/meals?from=${data.localDate}&to=${data.localDate}`)).json();
+  const current = changed.find((value: { id: string }) => value.id === data.id), item = current.contributions.find((value: { id: string }) => value.id === rice.id);
+  const removed = await page.request.delete(`/api/v1/nutrition/meals/${data.id}/contributions/${item.id}?mealRevision=${current.revision}&contributionRevision=${item.revision}`);
+  expect(removed.status()).toBe(200);
+  await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
+  await expect(picker.getByRole("alert")).toBeVisible();
+  await picker.getByRole("button", { name: "重新查看餐食", exact: true }).click();
+  await expect(picker.getByRole("alert")).toContainText("原食物已被移除");
+  await expect(picker.getByRole("button", { name: "按当前食物重新确认", exact: true })).toHaveCount(0);
+  await expect(picker.getByRole("button", { name: "替换这一项", exact: true })).toBeDisabled();
+  await picker.getByRole("button", { name: "取消替换", exact: true }).click();
+  await expect(meal.locator(".meal-items > li")).toHaveCount(1);
+});

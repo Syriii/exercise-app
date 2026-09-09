@@ -1,6 +1,8 @@
 import type { CatalogFood, FoodCategory } from "../../api/food-catalog";
 import { submissionId } from "../../support/submission-id";
 
+export interface FoodReplacementTarget { id: string; label: string; revision: number; }
+
 export interface FoodPickerDraft {
   open: boolean; query: string; category: FoodCategory | "all";
   selected: Array<{ food: CatalogFood; amount: string }>;

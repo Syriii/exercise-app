@@ -2,12 +2,14 @@
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
 import { ApiError } from "../../api/client";
 import { foodCatalogApi, type CatalogFood, type FoodCatalogPage } from "../../api/food-catalog";
-import type { Meal } from "../../api/nutrition";
+import { nutritionApi, type Meal } from "../../api/nutrition";
 import { submissionId } from "../../support/submission-id";
-import type { FoodPickerDraft } from "./food-picker-draft";
+import type { FoodPickerDraft, FoodReplacementTarget } from "./food-picker-draft";
 
-const props = defineProps<{ meal: Meal; draft: FoodPickerDraft; disabled: boolean }>();
-const emit = defineEmits<{ saved: [meal: Meal]; busy: [busy: boolean] }>();
+const props = defineProps<{ meal: Meal; draft: FoodPickerDraft; disabled: boolean; replacement?: FoodReplacementTarget }>();
+const emit = defineEmits<{ saved: [meal: Meal]; refreshed: [meal: Meal]; cancel: []; busy: [busy: boolean] }>();
+const latestReplacementMeal = ref<Meal | null>(null);
+const replacementConflict = ref(false);
 const page = ref<FoodCatalogPage | null>(null);
 const loading = ref(false), saving = ref(false), error = ref("");
 let generation = 0;
@@ -29,7 +31,30 @@ function select(food: CatalogFood) {
   if (props.draft.selected.some((item) => item.food.id === food.id)) return;
   if (props.draft.selected.length >= 20) { error.value = "每次最多选择20种食物，保存后可以继续添加。"; return; }
   props.draft.mealRevision ??= props.meal.revision;
-  props.draft.selected.push({ food: { ...food }, amount: food.basisAmount?.toString() ?? "" });
+  const selection = { food: { ...food }, amount: food.basisAmount?.toString() ?? "" };
+  if (props.replacement) props.draft.selected = [selection];
+  else props.draft.selected.push(selection);
+}
+async function refreshReplacement() {
+  if (!props.replacement || saving.value || props.disabled) return;
+  saving.value = true; emit("busy", true);
+  replacementConflict.value = true; latestReplacementMeal.value = null;
+  try {
+    const meals = await nutritionApi.listMeals(props.meal.localDate, props.meal.localDate);
+    const meal = meals.find(item => item.id === props.meal.id);
+    if (!meal) throw new Error("meal moved or removed");
+    latestReplacementMeal.value = meal; emit("refreshed", meal);
+    error.value = meal.contributions.some(item => item.id === props.replacement!.id && item.mode === "item")
+      ? "已重新读取餐食，请核对当前食物。选择仍保留，尚未再次替换。" : "原食物已被移除，不能继续替换。请取消后查看这顿饭。";
+  } catch { error.value = "餐食暂时读取不了，选择仍保留。若已改期或删除，请回到相应日期查看。"; }
+  finally { saving.value = false; emit("busy", false); }
+}
+function confirmReplacementBase() {
+  const meal = latestReplacementMeal.value;
+  const item = meal?.contributions.find(value => value.id === props.replacement?.id && value.mode === "item");
+  if (!meal || !item || !props.replacement) return;
+  Object.assign(props.replacement, { label: item.label, revision: item.revision });
+  props.draft.mealRevision = meal.revision; latestReplacementMeal.value = null; replacementConflict.value = false; error.value = "";
 }
 function scaledEnergy(food: CatalogFood, amount: string): string {
   if (food.energyKcal === null || !food.basisAmount || !Number.isFinite(Number(amount)) || String(amount).trim() === "") return "能量未知";
@@ -42,17 +67,24 @@ async function favorite(food: CatalogFood) {
   finally { saving.value = false; }
 }
 async function save() {
-  if (!props.draft.selected.length) return;
+  if (!props.draft.selected.length || saving.value || props.disabled || (props.replacement && replacementConflict.value)) return;
   if (props.draft.selected.some((item) => !String(item.amount).trim() || !Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0 || Number(item.amount) > 100000)) {
     error.value = "请为每项食物填写有效的正数份量。"; return;
   }
   saving.value = true; emit("busy", true); error.value = "";
   try {
-    const saved = await foodCatalogApi.addSelections({ ...props.meal, revision: props.draft.mealRevision ?? props.meal.revision }, props.draft.submissionId,
-      props.draft.selected.map(({ food, amount }) => ({ foodId: food.id, version: food.version, amount: Number(amount) })));
+    const selections = props.draft.selected.map(({ food, amount }) => ({ foodId: food.id, version: food.version, amount: Number(amount) }));
+    const saved = props.replacement
+      ? await foodCatalogApi.replaceSelection(props.meal.id, props.replacement.id, props.draft.mealRevision!, props.replacement.revision, selections[0]!)
+      : await foodCatalogApi.addSelections({ ...props.meal, revision: props.draft.mealRevision ?? props.meal.revision }, props.draft.submissionId, selections);
     props.draft.selected = []; props.draft.submissionId = submissionId(); props.draft.mealRevision = null; props.draft.open = false;
     emit("saved", saved);
-  } catch (cause) { error.value = cause instanceof ApiError ? cause.message : "暂时未能确认保存结果。选择和提交编号已保留，重试不会重复添加。"; }
+  } catch (cause) {
+    if (props.replacement && cause instanceof ApiError && cause.code === "nutrition_revision_conflict") replacementConflict.value = true;
+    error.value = cause instanceof ApiError ? cause.message : props.replacement
+      ? "尚未确认替换结果，选择已保留。可以重试或重新查看餐食，不会重复添加食物。"
+      : "暂时未能确认保存结果。选择和提交编号已保留，重试不会重复添加。";
+  }
   finally { saving.value = false; emit("busy", false); }
 }
 async function createPersonal() {
@@ -83,8 +115,9 @@ onBeforeUnmount(() => { generation++; });
 </script>
 
 <template>
-  <section class="food-picker" aria-label="添加食物">
-    <button class="action-button" type="button" :aria-expanded="draft.open" :disabled="saving || disabled" @click="toggle">{{ draft.open ? '收起食物选择' : '添加食物' }}<template v-if="draft.selected.length"> · 已选 {{ draft.selected.length }} 项</template></button>
+  <section class="food-picker" :aria-label="replacement ? '替换单项食物' : '添加食物'">
+    <template v-if="replacement"><strong>替换：{{ replacement.label }}</strong><p class="field-help">只替换这一项，其他食物保留。请按新食物的单位填写份量，不沿用照片估算的营养。</p><button class="text-action" type="button" :disabled="saving || disabled" @click="emit('cancel')">取消替换</button></template>
+    <button v-else class="action-button" type="button" :aria-expanded="draft.open" :disabled="saving || disabled" @click="toggle">{{ draft.open ? '收起食物选择' : '添加食物' }}<template v-if="draft.selected.length"> · 已选 {{ draft.selected.length }} 项</template></button>
     <div v-if="draft.open" class="food-picker-content">
       <form class="catalog-search" @submit.prevent="load(false, true)">
         <label>搜索食物<input v-model="draft.query" maxlength="100" placeholder="例如：西兰花、鸡蛋、豆奶" :disabled="saving" /></label>
@@ -93,6 +126,12 @@ onBeforeUnmount(() => { generation++; });
       </form>
       <p class="field-help">不输入可浏览全部已接入食物，常用排在前面。搜索至少两个字时也会查询 Open Food Facts，发送搜索词但不发送账号信息。</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+      <p v-if="replacement && replacementConflict && !error" class="field-help">餐食已有变化，请重新查看并确认当前食物，所选内容仍保留。</p>
+      <button v-if="replacement && (error || replacementConflict)" class="text-action" type="button" :disabled="saving || disabled" @click="refreshReplacement">重新查看餐食</button>
+      <div v-if="replacement && latestReplacementMeal" class="field-help">
+        <p v-for="item in latestReplacementMeal.contributions.filter(item => item.id === replacement!.id)" :key="item.id">当前：{{ item.label }} · {{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }}</p>
+        <button v-if="latestReplacementMeal.contributions.some(item => item.id === replacement!.id && item.mode === 'item')" class="text-action" type="button" :disabled="saving || disabled" @click="confirmReplacementBase">按当前食物重新确认</button>
+      </div>
       <p v-if="page?.warning" class="field-help" role="status">{{ page.warning }}</p>
       <p v-if="loading" role="status">正在读取食物…</p>
       <p v-else-if="page && !page.items.length" class="empty-copy">没有匹配的食物。已选内容仍在，也可以补充个人食物。</p>
@@ -115,8 +154,8 @@ onBeforeUnmount(() => { generation++; });
           <label>{{ item.food.label }}份量（{{ item.food.basisUnit ?? '单位未知' }}）<input v-model="item.amount" type="number" min="0.001" max="100000" step="0.001" required :disabled="saving" /></label>
           <span>{{ scaledEnergy(item.food, item.amount) }}</span><button class="text-action" type="button" :disabled="saving" :aria-label="`取消选择：${item.food.label}`" @click="draft.selected.splice(index, 1)">移除</button>
         </div>
-        <p v-if="draft.mealRevision !== null && draft.mealRevision !== meal.revision" class="field-help">这顿饭有其他更新，所选食物仍保留。<button class="text-action" type="button" @click="draft.mealRevision = meal.revision">按当前餐食重试</button></p>
-        <button class="primary-button" type="submit" :disabled="saving || disabled">{{ saving ? '保存中…' : `加入这顿饭（${draft.selected.length}项）` }}</button>
+        <p v-if="!replacement && draft.mealRevision !== null && draft.mealRevision !== meal.revision" class="field-help">这顿饭有其他更新，所选食物仍保留。<button class="text-action" type="button" @click="draft.mealRevision = meal.revision">按当前餐食重试</button></p>
+        <button class="primary-button" type="submit" :disabled="saving || disabled || (!!replacement && replacementConflict)">{{ saving ? '保存中…' : replacement ? '替换这一项' : `加入这顿饭（${draft.selected.length}项）` }}</button>
       </form>
       <details class="catalog-personal"><summary>找不到？补充个人食物</summary>
         <form @submit.prevent="createPersonal">
