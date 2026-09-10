@@ -16,7 +16,7 @@ test("a person can turn an evidence-backed system suggestion into their own plan
   await profile.getByLabel("日常活动水平").selectOption("low_active");
   await profile.getByRole("button", { name: "保存基础资料" }).click();
 
-  await page.goto("/training");
+  await page.goto("/training/plans");
   const suggestionPanel = page.getByRole("region", { name: "帮我排一份" });
   await suggestionPanel.getByRole("button", { name: "填写条件" }).click();
   await suggestionPanel.getByLabel("主要目标").selectOption("hypertrophy");

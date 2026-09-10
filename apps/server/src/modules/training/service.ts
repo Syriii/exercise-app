@@ -1,4 +1,5 @@
 import { TrainingError } from "./errors.js";
+import { createHash } from "node:crypto";
 import { findExerciseGuidance } from "./guidance-catalog.js";
 import type { PlanningService } from "../planning/service.js";
 import type { TrainingRepository } from "./repository.js";
@@ -508,6 +509,46 @@ export class TrainingService {
       throw new TrainingError("training_session_not_found", "没有找到这次训练", 404);
     }
     return session;
+  }
+
+  public async saveRecord(userId: string, id: string, input: import("./types.js").TrainingRecordInput): Promise<TrainingSession> {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuid.test(id) || !Number.isSafeInteger(input.revision) || input.revision < 0
+        || input.items.length < 1 || input.items.length > 50
+        || new Set(input.items.map(item => item.id)).size !== input.items.length
+        || (input.recordedTime !== null && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.recordedTime))) {
+      throw new TrainingError("invalid_training_input", "请核对日期、时间和动作列表", 400);
+    }
+    localDateAt(this.#now(), input.timeZone);
+    const normalized: import("./types.js").TrainingRecordInput = {
+      revision: input.revision, localDate: validLocalDate(input.localDate), timeZone: input.timeZone,
+      recordedTime: input.recordedTime, note: cleanText(input.note, 1000),
+      items: input.items.map(item => {
+        const measurement = item.measurement ?? "mixed";
+        if (!["sets", "activity", "count", "unknown", "mixed"].includes(measurement)
+            || (measurement === "unknown" && item.sets.length !== 0)) throw new TrainingError("invalid_training_input", "计量方式不正确", 400);
+        if (!uuid.test(item.id) || item.sets.length > 100) throw new TrainingError("invalid_training_input", "动作标识或组数无效", 400);
+        const change = normalizeActual({ ...item, status: "completed", performedExerciseName: item.exerciseName });
+        if (!change.performedExerciseName) throw new TrainingError("invalid_training_input", "请填写实际动作名称", 400);
+        for (const set of change.sets) if ((set.reps !== null && set.reps > 2147483647)
+            || (set.durationSeconds !== null && set.durationSeconds > 2147483647)
+            || (set.weightKg !== null && Number(set.weightKg) > 99999.999)
+            || (set.distanceMeters !== null && Number(set.distanceMeters) > 999999999.999)) {
+          throw new TrainingError("invalid_training_input", "训练数量超出可保存范围", 400);
+        }
+        return { id: item.id, measurement, exerciseName: change.performedExerciseName!, actualNote: change.actualNote,
+          sets: change.sets.map(set => ({ ...set,
+            weightKg: set.weightKg === null ? null : String(Number(set.weightKg)),
+            distanceMeters: set.distanceMeters === null ? null : String(Number(set.distanceMeters)) })) };
+      }),
+    };
+    const hash = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+    return requireResult(await this.#repository.saveRecord(userId, id, normalized, hash, this.#now()), "training_session_not_found");
+  }
+
+  public async deleteRecord(userId: string, id: string, revision: number): Promise<void> {
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new TrainingError("invalid_training_input", "记录版本无效", 400);
+    requireResult(await this.#repository.deleteRecord(userId, id, revision, this.#now()), "training_session_not_found");
   }
 
   public async listSessionItemRevisions(userId: string, sessionId: string) {

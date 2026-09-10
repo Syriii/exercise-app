@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
 import ExerciseNameField from "../components/ExerciseNameField.vue";
+import { actionSummary } from "../features/training/record-draft";
 import { nutritionApi, type Meal } from "../api/nutrition";
 import { planningApi, type BodyMeasurement } from "../api/planning";
 import {
@@ -187,6 +188,7 @@ function displayDate(value: string): string {
 }
 
 function sessionTitle(training: TrainingSession): string {
+  if (training.recordingMode === "batch") return "训练记录";
   if (training.sourceScheduleTitle !== null) return training.sourceScheduleTitle;
   if (training.sourceProgramName !== null) return `${training.sourceProgramName} · 第 ${training.sourceWeekNumber} 周 · ${training.sourceTrainingDayName}`;
   return training.sourceTemplateName ?? "空白训练";
@@ -203,6 +205,7 @@ function displayedExercise(item: TrainingSessionItem): string {
 }
 
 function describeItem(item: TrainingSessionItem): string {
+  if (item.measurement && item.status === "completed") return actionSummary(item);
   if (item.status === "pending") return `未处理 · 原计划 ${item.exerciseName}`;
   if (item.status === "skipped") return `已跳过 · 原计划 ${item.exerciseName}`;
   const relationship = item.performedExerciseName === item.exerciseName || item.origin === "extra"
@@ -277,7 +280,7 @@ function openExpenditure(training: TrainingSession) {
     : Math.max(1, Math.min(720, Math.round((new Date(training.endedAt).getTime() - new Date(training.startedAt).getTime()) / 60_000)));
   expenditureForms[training.id] = {
     activityCode: training.expenditureAssessment?.inputSnapshot.activityCode ?? "",
-    durationMinutes: training.expenditureAssessment?.inputSnapshot.durationMinutes?.toString() ?? elapsedMinutes.toString(),
+    durationMinutes: training.expenditureAssessment?.inputSnapshot.durationMinutes?.toString() ?? (training.recordingMode === "batch" ? "" : elapsedMinutes.toString()),
   };
   editingExpenditureSessionId.value = training.id;
 }
@@ -461,9 +464,11 @@ onMounted(() => void load());
                   </button>
                 </div>
                 <p>{{ completedItems(training) }}</p>
-                <small>{{ training.status === 'in_progress' ? '进行中' : training.status === 'completed' ? '已完成' : '提前结束' }} · {{ training.items.length }} 个动作</small>
+                <small v-if="training.recordingMode !== 'batch'">{{ training.status === 'in_progress' ? '进行中' : training.status === 'completed' ? '已完成' : '提前结束' }} · {{ training.items.length }} 个动作</small>
+                <small v-if="training.recordingMode === 'batch'">已记录 · {{ training.items.filter(i => i.status === 'completed').length }} 个动作 · {{ training.recordedTime ?? '时间未记录' }}</small>
+                <button class="text-action" @click="router.push({ name: 'training', query: { edit: training.id } })">修改／删除整条训练</button>
                 <div v-if="expandedSessionId === training.id" class="history-session__details">
-                  <div class="history-detail-actions"><button class="text-action" type="button" @click="openSessionCorrection(training)">修正日期或备注</button><button class="text-action" type="button" @click="openExtraCorrection(training)">补记实际动作</button><button v-if="training.status !== 'in_progress'" class="text-action" type="button" @click="openExpenditure(training)">{{ training.expenditureAssessment === null ? '估算训练消耗' : '重新估算消耗' }}</button></div>
+                  <div class="history-detail-actions"><button class="text-action" type="button" v-if="training.recordingMode !== 'batch'" @click="openSessionCorrection(training)">修正日期或备注</button><button class="text-action" type="button" v-if="training.recordingMode !== 'batch'" @click="openExtraCorrection(training)">补记实际动作</button><button v-if="training.status !== 'in_progress'" class="text-action" type="button" @click="openExpenditure(training)">{{ training.expenditureAssessment === null ? '估算训练消耗' : '重新估算消耗' }}</button></div>
                   <article v-if="training.expenditureAssessment" class="history-item">
                     <div class="history-item__heading"><div><strong>训练消耗估算</strong><small v-if="training.expenditureAssessment.status === 'estimated'">约 {{ training.expenditureAssessment.grossEnergyKcal }} kcal（其中净活动消耗约 {{ training.expenditureAssessment.netEnergyKcal }} kcal）</small><small v-else>当前条件下没有给出数值</small></div></div>
                     <p v-if="training.expenditureAssessment.activityLabel">{{ training.expenditureAssessment.activityLabel }} · {{ training.expenditureAssessment.activityDescription }} · {{ training.expenditureAssessment.inputSnapshot.durationMinutes }} 分钟</p>
@@ -486,10 +491,10 @@ onMounted(() => void load());
                     <summary>查看日期与备注的之前版本</summary>
                     <ol><li v-for="revision in sessionRevisions[training.id]" :key="revision.id"><span>{{ revision.localDate }} · {{ revision.note ?? '当时没有备注' }}</span><time :datetime="revision.createdAt">修订前版本 · 当时时区 {{ revision.timeZone }}</time></li></ol>
                   </details>
-                  <article v-for="item in training.items" :key="item.id" class="history-item">
+                  <article v-for="item in training.items.filter(i => training.recordingMode !== 'batch' || i.status === 'completed')" :key="item.id" class="history-item">
                     <div class="history-item__heading">
                       <div><strong>{{ displayedExercise(item) }}</strong><small>{{ describeItem(item) }}</small></div>
-                      <button class="text-action" type="button" :aria-label="`修正${displayedExercise(item)}`" @click="openCorrection(item)">修正</button>
+                      <button class="text-action" type="button" :aria-label="`修正${displayedExercise(item)}`" v-if="training.recordingMode !== 'batch'" @click="openCorrection(item)">修正</button>
                     </div>
                     <p v-if="item.actualNote">{{ item.actualNote }}</p>
                     <details v-if="revisionsFor(training.id, item.id).length > 0" class="history-revisions">

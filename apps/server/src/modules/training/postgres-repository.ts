@@ -15,6 +15,7 @@ import {
   trainingTemplates,
 } from "../../db/schema/index.js";
 import type { TrainingRepository } from "./repository.js";
+import { recordGate, recordedSession } from "./record.js";
 import type {
   ExtraTrainingItemInput,
   TrainingProgram,
@@ -136,6 +137,9 @@ function toSession(
   sets: readonly SessionSetRow[],
 ): TrainingSession {
   return {
+    recordedTime: row.recordedTime,
+    recordWrite: row.recordWrite,
+    deletedAt: row.deletedAt,
     id: row.id,
     userId: row.userId,
     sourceScheduleId: row.sourceScheduleId,
@@ -157,12 +161,10 @@ function toSession(
     expenditureAssessment: row.expenditureAssessment as TrainingExpenditureAssessment | null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    items: items.map((item) =>
-      toSessionItem(
+    items: items.map((item) => ({ ...toSessionItem(
         item,
         sets.filter((set) => set.sessionItemId === item.id),
-      ),
-    ),
+      ), measurement: row.recordWrite?.modes?.[item.id] ?? null })),
   };
 }
 
@@ -261,6 +263,76 @@ export class PostgresTrainingRepository implements TrainingRepository {
 
   public constructor(database: Database) {
     this.#database = database;
+  }
+
+  public async saveRecord(userId: string, id: string, input: import("./types.js").TrainingRecordInput, hash: string, now: Date) {
+    return this.#database.transaction(async tx => {
+      // Serializes first saves as well as retries; row locks also exclude legacy writers.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId + ":" + id}, 0))`);
+      const [row] = await tx.select().from(trainingSessions)
+        .where(and(eq(trainingSessions.id, id), eq(trainingSessions.userId, userId))).for("update");
+      const scoped = new PostgresTrainingRepository(tx as unknown as Database);
+      const existing = row ? (await scoped.#withSessionItems([row]))[0]! : null;
+      const gate = recordGate(existing, input, hash);
+      if (gate === "missing") return null;
+      if (gate === "conflict") return "revision_conflict" as const;
+      if (gate === "replay") return existing;
+      const next = recordedSession(userId, id, existing, input, hash, now);
+      if (existing === null) {
+        const inserted = await tx.insert(trainingSessions).values({ id, userId, localDate: next.localDate,
+          timeZone: next.timeZone, startedAt: next.startedAt, endedAt: next.endedAt, status: "completed",
+          note: next.note, recordedTime: next.recordedTime, recordWrite: next.recordWrite }).onConflictDoNothing().returning({ id: trainingSessions.id });
+        if (inserted.length === 0) return null;
+      } else {
+        await tx.insert(trainingSessionRevisions).values({ sessionId: id, sessionRevision: existing.revision,
+          localDate: existing.localDate, timeZone: existing.timeZone, note: existing.note,
+          expenditureAssessment: existing.expenditureAssessment as unknown as Record<string, unknown> | null,
+          recordSnapshot: JSON.parse(JSON.stringify(existing)) as Record<string, unknown> });
+        for (const item of existing.items) await tx.insert(trainingSessionItemRevisions).values({
+          sessionId: id, sessionItemId: item.id, sessionRevision: existing.revision,
+          status: item.status, performedExerciseName: item.performedExerciseName, actualNote: item.actualNote,
+          setsSnapshot: item.sets.map(set => ({ ...set })) });
+        // Move all existing ordinals out of the incoming range before reordering.
+        await tx.update(trainingSessionItems).set({ sortOrder: sql`${trainingSessionItems.sortOrder} + 1000000` })
+          .where(eq(trainingSessionItems.sessionId, id));
+      }
+      const existingIds = new Set(existing?.items.map(item => item.id));
+      for (const item of next.items) {
+        const values = { status: item.status, sortOrder: item.sortOrder, performedExerciseName: item.performedExerciseName,
+          actualNote: item.actualNote, updatedAt: now };
+        if (existingIds.has(item.id)) {
+          await tx.update(trainingSessionItems).set(values).where(eq(trainingSessionItems.id, item.id));
+          await tx.delete(trainingSessionSets).where(eq(trainingSessionSets.sessionItemId, item.id));
+        } else {
+          await tx.insert(trainingSessionItems).values({ ...values, id: item.id, sessionId: id,
+            origin: "extra", exerciseName: item.exerciseName });
+        }
+        if (item.sets.length) await tx.insert(trainingSessionSets).values(item.sets.map(set => ({ ...set, sessionItemId: item.id })));
+      }
+      // Intentionally last: a failure here must also roll back all items and history.
+      await tx.update(trainingSessions).set({ status: "completed", revision: next.revision,
+        localDate: next.localDate, timeZone: next.timeZone, recordedTime: next.recordedTime,
+        recordWrite: next.recordWrite, note: next.note, endedAt: next.endedAt, expenditureAssessment: null, updatedAt: now })
+        .where(eq(trainingSessions.id, id));
+      return scoped.findSession(userId, id);
+    });
+  }
+
+  public async deleteRecord(userId: string, id: string, revision: number, now: Date) {
+    return this.#database.transaction(async tx => {
+      const [row] = await tx.select().from(trainingSessions)
+        .where(and(eq(trainingSessions.id, id), eq(trainingSessions.userId, userId))).for("update");
+      if (!row) return null;
+      if (row.deletedAt) return row.revision === revision + 1 ? "deleted" as const : "revision_conflict" as const;
+      if (row.revision !== revision) return "revision_conflict" as const;
+      const scoped = new PostgresTrainingRepository(tx as unknown as Database);
+      const snapshot = (await scoped.#withSessionItems([row]))[0]!;
+      await tx.insert(trainingSessionRevisions).values({ sessionId: id, sessionRevision: row.revision,
+        localDate: row.localDate, timeZone: row.timeZone, note: row.note, expenditureAssessment: row.expenditureAssessment,
+        recordSnapshot: JSON.parse(JSON.stringify(snapshot)) as Record<string, unknown> });
+      await tx.update(trainingSessions).set({ deletedAt: now, revision: revision + 1, expenditureAssessment: null, updatedAt: now }).where(eq(trainingSessions.id, id));
+      return "deleted" as const;
+    });
   }
 
   public async listTemplates(userId: string, includeArchived: boolean): Promise<readonly TrainingTemplate[]> {
@@ -758,7 +830,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
     userId: string,
     filter?: { readonly status?: TrainingSessionStatus; readonly dateFrom?: string; readonly dateTo?: string },
   ): Promise<readonly TrainingSession[]> {
-    const conditions = [eq(trainingSessions.userId, userId)];
+    const conditions = [eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)];
     if (filter?.status !== undefined) conditions.push(eq(trainingSessions.status, filter.status));
     if (filter?.dateFrom !== undefined) conditions.push(gte(trainingSessions.localDate, filter.dateFrom));
     if (filter?.dateTo !== undefined) conditions.push(lte(trainingSessions.localDate, filter.dateTo));
@@ -774,7 +846,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
     const [row] = await this.#database
       .select()
       .from(trainingSessions)
-      .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+      .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
       .limit(1);
     if (row === undefined) return null;
     return (await this.#withSessionItems([row]))[0] ?? null;
@@ -787,7 +859,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
     const [session] = await this.#database
       .select({ id: trainingSessions.id })
       .from(trainingSessions)
-      .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+      .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
       .limit(1);
     if (session === undefined) return [];
     const rows = await this.#database
@@ -805,7 +877,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
     const [session] = await this.#database
       .select({ id: trainingSessions.id })
       .from(trainingSessions)
-      .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+      .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
       .limit(1);
     if (session === undefined) return [];
     const rows = await this.#database
@@ -826,7 +898,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
       const [session] = await transaction
         .select()
         .from(trainingSessions)
-        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
         .for("update")
         .limit(1);
       if (session === undefined) return null;
@@ -859,7 +931,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
       const [session] = await transaction
         .select()
         .from(trainingSessions)
-        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
         .for("update")
         .limit(1);
       if (session === undefined) return null;
@@ -965,7 +1037,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
       const [session] = await transaction
         .select({ revision: trainingSessions.revision })
         .from(trainingSessions)
-        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
         .for("update")
         .limit(1);
       if (session === undefined) return null;
@@ -1033,7 +1105,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
       const [session] = await transaction
         .select({ revision: trainingSessions.revision })
         .from(trainingSessions)
-        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId)))
+        .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt)))
         .for("update")
         .limit(1);
       if (session === undefined) return null;
@@ -1081,7 +1153,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
     if (draft !== undefined) {
       const result = await this.#database.transaction(async (transaction) => {
         const [session] = await transaction.select().from(trainingSessions)
-          .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId))).for("update").limit(1);
+          .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.userId, userId), isNull(trainingSessions.deletedAt))).for("update").limit(1);
         if (!session) return null;
         if (session.revision !== expectedRevision || session.status !== "in_progress") return "revision_conflict" as const;
         const existing = await transaction.select().from(trainingSessionItems).where(eq(trainingSessionItems.sessionId, sessionId));
@@ -1123,7 +1195,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
         and(
           eq(trainingSessions.id, sessionId),
           eq(trainingSessions.userId, userId),
-          eq(trainingSessions.status, "in_progress"),
+          eq(trainingSessions.status, "in_progress"), isNull(trainingSessions.deletedAt),
           eq(trainingSessions.revision, expectedRevision),
         ),
       )

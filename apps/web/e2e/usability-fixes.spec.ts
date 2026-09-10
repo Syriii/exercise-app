@@ -17,40 +17,38 @@ test.beforeEach(async ({ page }, testInfo) => {
 
 test('completion saves all draft actions; a lost response can be retried without duplication', async ({ page }) => {
   await navigate(page,'训练');
-  await page.getByRole('button',{name:'新建方案',exact:true}).click();
-  await page.getByLabel('方案名称').fill('批量测试');
-  await page.getByLabel('动作名称',{exact:true}).fill('深蹲');
-  await page.getByRole('button',{name:'添加动作 →',exact:true}).click();
-  await page.getByLabel('动作名称',{exact:true}).nth(1).fill('卧推');
-  await page.getByRole('button',{name:'保存方案',exact:true}).click();
-  await page.getByRole('button',{name:'用这份开始'}).click();
-  const items = page.locator('.actual-exercise-list > li');
-  await items.nth(0).getByLabel('次数',{exact:true}).fill('10');
-  await items.nth(1).getByLabel('次数',{exact:true}).fill('12');
-  await items.nth(0).getByRole('button',{name:'保存实际数据',exact:true}).click();
-  await expect(page.getByText('深蹲 已记下',{exact:true})).toBeVisible();
-  await expect(items.nth(1).getByLabel('次数',{exact:true})).toHaveValue('12');
+  await page.getByRole('button',{name:'记录训练内容',exact:true}).click();
+  await page.getByText('一次添加多个动作',{exact:true}).click();
+  await page.getByLabel('动作名称，每行一个').fill('深蹲\n卧推\n拉伸');
+  await page.getByRole('button',{name:'加入这些动作'}).click();
+  const items = page.getByRole('region',{name:'动作填写'});
+  await items.nth(0).getByLabel('组数',{exact:true}).fill('3');
+  await items.nth(0).getByLabel('每组次数').fill('10');
+  await items.nth(1).getByLabel('组数',{exact:true}).fill('2');
+  await items.nth(1).getByLabel('每组次数').fill('12');
+  await items.nth(2).getByLabel('记录方式').selectOption('unknown');
   await navigate(page,'历史');
   await navigate(page,'训练');
-  await expect(items.nth(1).getByLabel('次数',{exact:true})).toHaveValue('12');
-  await page.getByLabel('动作名称',{exact:true}).fill('拉伸');
+  await expect(items.nth(1).getByLabel('每组次数')).toHaveValue('12');
+  expect(await (await page.request.get('/api/v1/training/sessions')).json()).toEqual([]);
   let loseResponse = true;
-  await page.route('**/sessions/*/finish', async route => {
-    if (loseResponse) {
+  await page.route('**/training/records/*', async route => {
+    if (route.request().method() === 'PUT' && loseResponse) {
       loseResponse = false;
       const response = await route.fetch();
       expect(response.status()).toBe(200);
       await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'test_lost_response'})});
     } else await route.continue();
   });
-  await page.getByRole('button',{name:'保存并结束',exact:true}).click();
+  await page.getByRole('button',{name:'保存训练记录',exact:true}).click();
   await expect(page.getByRole('alert')).toBeVisible();
-  await expect(items.nth(1).getByLabel('次数',{exact:true})).toHaveValue('12');
-  await page.getByRole('button',{name:'保存并结束',exact:true}).click();
-  await expect(page.getByText('这次训练已保存',{exact:true})).toBeVisible();
+  await expect(items.nth(1).getByLabel('每组次数')).toHaveValue('12');
+  await page.getByRole('button',{name:'保存训练记录',exact:true}).click();
+  await expect(page.getByText('这次训练已保存。',{exact:true})).toBeVisible();
+  expect(await (await page.request.get('/api/v1/training/sessions')).json()).toHaveLength(1);
   await navigate(page,'历史');
   await page.getByRole('button',{name:'查看详情',exact:true}).click();
-  await expect(page.locator('.history-session__details')).toContainText('12 次');
+  await expect(page.locator('.history-session__details')).toContainText('12 / 12 次');
   await expect(page.locator('.history-session__details').getByText('拉伸',{exact:true})).toHaveCount(1);
 });
 

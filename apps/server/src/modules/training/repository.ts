@@ -19,6 +19,8 @@ import type {
 } from "./types.js";
 
 export interface TrainingRepository {
+  saveRecord(userId: string, id: string, input: import("./types.js").TrainingRecordInput, hash: string, now: Date): Promise<TrainingSession | "revision_conflict" | null>;
+  deleteRecord(userId: string, id: string, revision: number, now: Date): Promise<"deleted" | "revision_conflict" | null>;
   listTemplates(userId: string, includeArchived: boolean): Promise<readonly TrainingTemplate[]>;
   findTemplate(userId: string, templateId: string): Promise<TrainingTemplate | null>;
   createTemplate(userId: string, input: TrainingTemplateInput): Promise<TrainingTemplate>;

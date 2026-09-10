@@ -7,7 +7,7 @@ const session = useSessionStore();
 <template>
   <RouterView v-slot="{ Component }">
     <!-- Session memory only; no health drafts or photos enter browser storage. -->
-    <KeepAlive :key="session.draftScopeVersion" :include="['NutritionPage', 'TrainingPage']">
+    <KeepAlive :key="session.draftScopeVersion" :include="['NutritionPage', 'TrainingPage', 'TrainingPlansPage']">
       <component :is="Component" />
     </KeepAlive>
   </RouterView>

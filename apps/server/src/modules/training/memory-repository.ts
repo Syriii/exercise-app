@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { recordGate, recordedSession } from "./record.js";
 
 import type { TrainingRepository } from "./repository.js";
 import type {
@@ -46,6 +47,39 @@ export class MemoryTrainingRepository implements TrainingRepository {
   public readonly sessions = new Map<string, TrainingSession>();
   public readonly itemRevisions: TrainingSessionItemRevision[] = [];
   public readonly sessionRevisions: TrainingSessionRevision[] = [];
+
+  public async saveRecord(userId: string, id: string, input: import("./types.js").TrainingRecordInput, hash: string, timestamp: Date) {
+    const stored = this.sessions.get(id);
+    if (stored && stored.userId !== userId) return null;
+    const existing = stored ?? null;
+    const gate = recordGate(existing, input, hash);
+    if (gate === "missing") return null;
+    if (gate === "conflict") return "revision_conflict" as const;
+    if (gate === "replay") return existing;
+    const next = recordedSession(userId, id, existing, input, hash, timestamp);
+    if (existing) {
+      this.sessionRevisions.push({ id: randomUUID(), sessionId: id, sessionRevision: existing.revision,
+        localDate: existing.localDate, timeZone: existing.timeZone, note: existing.note,
+        expenditureAssessment: existing.expenditureAssessment, createdAt: timestamp, recordSnapshot: structuredClone(existing) });
+      for (const item of existing.items) this.itemRevisions.push({ id: randomUUID(), sessionId: id, sessionItemId: item.id,
+        sessionRevision: existing.revision, status: item.status, performedExerciseName: item.performedExerciseName,
+        actualNote: item.actualNote, sets: structuredClone(item.sets), createdAt: timestamp });
+    }
+    this.sessions.set(id, next);
+    return next;
+  }
+
+  public async deleteRecord(userId: string, id: string, revision: number, timestamp: Date) {
+    const existing = this.sessions.get(id);
+    if (!existing || existing.userId !== userId) return null;
+    if (existing.deletedAt) return existing.revision === revision + 1 ? "deleted" as const : "revision_conflict" as const;
+    if (existing.revision !== revision) return "revision_conflict" as const;
+    this.sessionRevisions.push({ id: randomUUID(), sessionId: id, sessionRevision: existing.revision,
+      localDate: existing.localDate, timeZone: existing.timeZone, note: existing.note,
+      expenditureAssessment: existing.expenditureAssessment, createdAt: timestamp, recordSnapshot: structuredClone(existing) });
+    this.sessions.set(id, { ...existing, deletedAt: timestamp, revision: revision + 1, expenditureAssessment: null, updatedAt: timestamp });
+    return "deleted" as const;
+  }
 
   public async listTemplates(
     userId: string,
@@ -432,6 +466,7 @@ export class MemoryTrainingRepository implements TrainingRepository {
       .filter(
         (session) =>
           session.userId === userId &&
+          !session.deletedAt &&
           (filter?.status === undefined || session.status === filter.status) &&
           (filter?.dateFrom === undefined || session.localDate >= filter.dateFrom) &&
           (filter?.dateTo === undefined || session.localDate <= filter.dateTo),
@@ -441,7 +476,7 @@ export class MemoryTrainingRepository implements TrainingRepository {
 
   public async findSession(userId: string, sessionId: string): Promise<TrainingSession | null> {
     const session = this.sessions.get(sessionId);
-    return session?.userId === userId ? session : null;
+    return session?.userId === userId && !session.deletedAt ? session : null;
   }
 
   public async startSession(input: {
@@ -684,7 +719,7 @@ export class MemoryTrainingRepository implements TrainingRepository {
     draft?: import("./types.js").TrainingCompletionDraft,
   ): Promise<TrainingSession | "revision_conflict" | null> {
     const session = this.sessions.get(sessionId);
-    if (session === undefined || session.userId !== userId) return null;
+    if (session === undefined || session.userId !== userId || session.deletedAt) return null;
     if (session.revision !== expectedRevision || session.status !== "in_progress") return "revision_conflict";
     if (draft?.items.some((change) => !session.items.some((item) => item.id === change.id))) return null;
     if (draft?.extra && [...this.sessions.values()].some((entry) => entry.items.some((item) => item.id === draft.extra!.id))) return "revision_conflict";

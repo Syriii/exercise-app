@@ -10,10 +10,12 @@ import NutritionPage from "../views/NutritionPage.vue";
 import SettingsPage from "../views/SettingsPage.vue";
 import TodayPage from "../views/TodayPage.vue";
 import TrainingPage from "../views/TrainingPage.vue";
+import TrainingPlansPage from "../views/TrainingPlansPage.vue";
 
 const sectionRoutes: RouteRecordRaw[] = [
   { path: "/today", name: "today", component: TodayPage, meta: { section: "today" } },
   { path: "/training", name: "training", component: TrainingPage, meta: { section: "training" } },
+  { path: "/training/plans", name: "training-plans", component: TrainingPlansPage, meta: { section: "training" } },
   { path: "/nutrition", name: "nutrition", component: NutritionPage, meta: { section: "nutrition" } },
   { path: "/history", name: "history", component: HistoryPage, meta: { section: "history" } },
   { path: "/settings/:section?", name: "settings", component: SettingsPage, meta: { section: "settings" } },

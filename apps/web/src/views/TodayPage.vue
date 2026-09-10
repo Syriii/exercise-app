@@ -71,6 +71,7 @@ function maybeShowOtherBrowserNotifications(nutrition: NutritionReminderStatus, 
 }
 
 function sessionTitle(training: TrainingSession): string {
+  if (training.recordingMode === "batch") return training.items.filter(item => item.status === "completed").map(item => item.performedExerciseName ?? item.exerciseName).join("、") || "训练记录";
   if (training.sourceScheduleTitle !== null) return training.sourceScheduleTitle;
   if (training.sourceProgramName !== null) {
     return `${training.sourceProgramName} · 第 ${training.sourceWeekNumber} 周 · ${training.sourceTrainingDayName}`;
@@ -161,8 +162,9 @@ async function startSchedule(schedule: TrainingSchedule) {
   saving.value = true;
   errorMessage.value = "";
   try {
-    await trainingApi.startScheduledSession(schedule.id);
-    await router.push({ name: "training" });
+    await router.push({ name: "training", query: schedule.sourceTemplateId
+      ? { templateId: schedule.sourceTemplateId }
+      : { programId: schedule.sourceProgramId ?? "", unitId: schedule.sourceProgramUnitId ?? "" } });
   } catch (error) {
     reportError(error);
   } finally {

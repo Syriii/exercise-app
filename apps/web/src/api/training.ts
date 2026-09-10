@@ -107,6 +107,7 @@ export interface TrainingSet {
 }
 
 export interface TrainingSessionItem {
+  readonly measurement?: "sets" | "activity" | "count" | "unknown" | "mixed" | null;
   readonly id: string;
   readonly sourceTemplateItemId: string | null;
   readonly origin: "planned" | "extra";
@@ -183,6 +184,8 @@ export interface TrainingSessionRevision {
 }
 
 export interface TrainingSession {
+  readonly recordedTime?: string | null;
+  readonly recordingMode?: "batch" | null;
   readonly id: string;
   readonly sourceScheduleId: string | null;
   readonly sourceScheduleTitle: string | null;
@@ -248,6 +251,9 @@ export interface TrainingSetInput {
 }
 
 export const trainingApi = {
+  getSession: (id: string) => apiRequest<TrainingSession>(`/api/v1/training/sessions/${id}`),
+  saveRecord: (id: string, input: TrainingRecordInput) => apiRequest<TrainingSession>(`/api/v1/training/records/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteRecord: (id: string, revision: number) => apiRequest<void>(`/api/v1/training/records/${id}`, { method: "DELETE", body: JSON.stringify({ revision }) }),
   listExpenditureActivities: () =>
     apiRequest<TrainingExpenditureActivity[]>("/api/v1/training/expenditure-catalog"),
   getGuidance: (exerciseName: string) =>
@@ -406,3 +412,13 @@ export const trainingApi = {
       body: JSON.stringify({ revision, status, draft }),
     }),
 };
+
+export interface TrainingRecordInput {
+  revision: number;
+  localDate: string;
+  timeZone: string;
+  recordedTime: string | null;
+  note: string | null;
+  items: Array<{ id: string; exerciseName: string; actualNote: string | null;
+    measurement?: TrainingSessionItem["measurement"]; sets: TrainingSetInput[] }>;
+}

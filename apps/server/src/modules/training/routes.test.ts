@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import { buildApp } from "../../app.js";
 import { createTestConfig } from "../../testing/test-config.js";
@@ -62,6 +63,61 @@ const templatePayload = {
 };
 
 describe("training routes", () => {
+  it("saves and replaces whole post-workout records, protects retries and deletion across accounts", async () => {
+    const { app, firstCookie, secondCookie } = await createApp();
+    const id = randomUUID();
+    const url = `/api/v1/training/records/${id}`;
+    const set = { reps: 10, weightKg: "0", durationSeconds: null, distanceMeters: null, note: null };
+    const input = { revision: 0, localDate: "2026-09-10", timeZone: "Asia/Shanghai", recordedTime: null, note: null,
+      items: [{ id: randomUUID(), exerciseName: "深蹲", measurement: "sets", actualNote: null, sets: [set, set, { ...set, reps: null }] },
+        { id: randomUUID(), exerciseName: "跑步", measurement: "activity", actualNote: null, sets: [{ ...set, reps: null, weightKg: null, durationSeconds: 1800, distanceMeters: "2500.001" }] },
+        { id: randomUUID(), exerciseName: "拉伸", measurement: "unknown", actualNote: "只记得做过", sets: [] }] };
+    expect((await app.inject({ method: "PUT", url, payload: input })).statusCode).toBe(401);
+    const save = (data: unknown, cookie = firstCookie) => app.inject({ method: "PUT", url, payload: data as object, headers: { cookie } });
+    const created = await save(input);
+    expect(created.statusCode, created.body).toBe(200);
+    const first = created.json();
+    expect(first).toMatchObject({ revision: 1, status: "completed", recordedTime: null, recordingMode: "batch" });
+    expect(first).not.toHaveProperty("recordWrite"); expect(first).not.toHaveProperty("userId");
+    expect(first.items).toHaveLength(3); expect(first.items[0].sets).toHaveLength(3);
+    expect(first.items[0].sets[2].reps).toBeNull(); expect(first.items[2].sets).toEqual([]);
+    expect((await save(input)).json()).toEqual(first);
+    expect((await save({ ...input, note: "changed retry" })).statusCode).toBe(409);
+    expect((await save(input, secondCookie)).statusCode).toBe(404);
+    const editedInput = { ...input, revision: 1, localDate: "2026-09-09", recordedTime: "18:30", note: "补记",
+      items: [{ ...input.items[1], id: first.items[1].id }, { ...input.items[0], id: first.items[0].id, exerciseName: "徒手深蹲", sets: [set] }] };
+    const edited = await save(editedInput); expect(edited.statusCode, edited.body).toBe(200);
+    expect(edited.json()).toMatchObject({ revision: 2, localDate: "2026-09-09", recordedTime: "18:30" });
+    expect(edited.json().items.filter((i: { status: string }) => i.status === "completed")).toHaveLength(2);
+    expect((await save(editedInput)).json()).toEqual(edited.json());
+    const revisions = await app.inject({ method: "GET", url: `/api/v1/training/sessions/${id}/item-revisions`, headers: { cookie: firstCookie } });
+    expect(revisions.json()).toHaveLength(3);
+    const del = (revision: number, cookie = firstCookie) => app.inject({ method: "DELETE", url, payload: { revision }, headers: { cookie } });
+    expect((await del(2, secondCookie)).statusCode).toBe(404);
+    expect((await del(1)).statusCode).toBe(409);
+    expect((await del(2)).statusCode).toBe(204); expect((await del(2)).statusCode).toBe(204);
+    expect((await save(editedInput)).statusCode).toBe(404);
+    expect((await save({ ...editedInput, revision: 0 })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/v1/training/sessions/${id}`, headers: { cookie: firstCookie } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/v1/training/sessions", headers: { cookie: firstCookie } })).json()).toEqual([]);
+    expect((await app.inject({ method: "PUT", url: `/api/v1/training/sessions/${id}`, payload: { revision: 3, localDate: "2026-09-10", note: null }, headers: { cookie: firstCookie } })).statusCode).toBe(404);
+  });
+
+  it("rejects malformed batch quantities atomically without guessing unknown values", async () => {
+    const { app, firstCookie } = await createApp();
+    const input = { revision: 0, localDate: "2026-09-10", timeZone: "Asia/Shanghai", recordedTime: null, note: null,
+      items: [{ id: randomUUID(), exerciseName: "动作", measurement: "sets", actualNote: null, sets: [{ reps: 1, weightKg: "0", durationSeconds: null, distanceMeters: null, note: null }] }] };
+    const id = randomUUID(); const save = (data: object) => app.inject({ method: "PUT", url: `/api/v1/training/records/${id}`, payload: data, headers: { cookie: firstCookie } });
+    for (const patch of [{ localDate: "2026-02-30" }, { timeZone: "bad-zone" }, { recordedTime: "24:00" }, { items: [] }, { items: [input.items[0], input.items[0]] },
+      { items: [{ ...input.items[0], exerciseName: " " }] }, { items: [{ ...input.items[0], measurement: "unknown" }] },
+      { items: [{ ...input.items[0], sets: [{ ...input.items[0]!.sets[0], weightKg: "1.1234" }] }] },
+      { items: [{ ...input.items[0], sets: [{ ...input.items[0]!.sets[0], reps: -1 }] }] }]) {
+      const result = await save({ ...input, ...patch }); expect(result.statusCode, result.body).toBe(400);
+    }
+    expect((await app.inject({ method: "GET", url: "/api/v1/training/sessions", headers: { cookie: firstCookie } })).json()).toEqual([]);
+    expect((await save(input)).statusCode).toBe(200);
+  });
+
   it("serves attributed guidance to a signed-in account", async () => {
     const { app, firstCookie } = await createApp();
     const response = await app.inject({

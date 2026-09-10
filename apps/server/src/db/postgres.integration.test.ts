@@ -383,6 +383,67 @@ describe("PostgreSQL integration", () => {
     ]));
   });
 
+  it("atomically creates edits and deletes batch training records with retry rollback and RLS protection", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`batch-a-${randomUUID()}`, `batch-b-${randomUUID()}`]);
+    const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext();
+    const restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const repository = new PostgresTrainingRepository(restricted.database);
+    const training = new TrainingService({ repository });
+    const id = randomUUID();
+    const input = { revision: 0, localDate: "2026-09-10", timeZone: "Asia/Shanghai", recordedTime: null, note: null,
+      items: [{ id: randomUUID(), exerciseName: "深蹲", measurement: "sets" as const, actualNote: null,
+        sets: [{ reps: 10, weightKg: "40.123", durationSeconds: null, distanceMeters: null, note: null }, { reps: null, weightKg: null, durationSeconds: null, distanceMeters: null, note: "数量未知" }] },
+        { id: randomUUID(), exerciseName: "拉伸", measurement: "unknown" as const, actualNote: null, sets: [] }] };
+    try {
+      await context.run(userId, async () => {
+        const [saved, retried] = await Promise.all([training.saveRecord(userId, id, input), training.saveRecord(userId, id, input)]);
+        expect(saved).toEqual(retried); expect(saved.revision).toBe(1); expect(saved.recordedTime).toBeNull();
+        expect(saved.items[0]!.sets[1]!.reps).toBeNull(); expect(saved.items[1]!.sets).toHaveLength(0);
+        expect(saved.items[0]!.measurement).toBe("sets");
+        await expect(training.saveRecord(userId, id, { ...input, note: "changed retry" })).rejects.toMatchObject({ statusCode: 409 });
+        const edit = { ...input, revision: 1, recordedTime: "19:15", localDate: "2026-09-09", note: "batch-fail",
+          items: [{ ...input.items[1]!, id: saved.items[1]!.id }, { ...input.items[0]!, id: saved.items[0]!.id, exerciseName: "徒手深蹲" }] };
+        await database.pool.query(`alter table training_sessions add constraint integration_batch_late_failure check (id <> '${id}'::uuid or note is distinct from 'batch-fail')`);
+        try {
+          await expect(training.saveRecord(userId, id, edit)).rejects.toBeDefined();
+          expect(await training.getSession(userId, id)).toEqual(saved);
+          expect(await training.listSessionItemRevisions(userId, id)).toHaveLength(0);
+          expect(await training.listSessionRevisions(userId, id)).toHaveLength(0);
+        } finally { await database.pool.query("alter table training_sessions drop constraint integration_batch_late_failure"); }
+        const accepted = { ...edit, note: "补记" };
+        const [edited, retry] = await Promise.all([training.saveRecord(userId, id, accepted), training.saveRecord(userId, id, accepted)]);
+        expect(edited).toEqual(retry); expect(edited.revision).toBe(2);
+        expect(edited.items.map(i => i.id)).toEqual([saved.items[1]!.id, saved.items[0]!.id]);
+        expect(edited.items[1]!.sets[0]!.weightKg).toBe("40.123");
+        expect(await training.listSessionItemRevisions(userId, id)).toHaveLength(2);
+        await expect(training.saveRecord(otherId, id, accepted)).rejects.toMatchObject({ statusCode: 404 });
+        await context.run(otherId, async () => {
+          expect(await repository.findSession(userId, id)).toBeNull();
+          await expect(training.saveRecord(userId, id, accepted)).rejects.toMatchObject({ statusCode: 404 });
+          await expect(training.deleteRecord(userId, id, 2)).rejects.toMatchObject({ statusCode: 404 });
+          const otherExport = await new PostgresUserDataExporter(restricted.database).exportUserData(otherId, new Date());
+          expect(otherExport.data.training_sessions).toHaveLength(0);
+          expect(otherExport.data.training_session_revisions).toHaveLength(0);
+        });
+        const exported = await new PostgresUserDataExporter(restricted.database).exportUserData(userId, new Date());
+        expect(exported.data.training_session_revisions).toEqual(expect.arrayContaining([expect.objectContaining({ session_id: id, record_snapshot: expect.objectContaining({ items: expect.arrayContaining([expect.objectContaining({ exerciseName: "深蹲" })]) }) })]));
+        const competing = await Promise.allSettled([training.saveRecord(userId, id, { ...accepted, revision: 2, note: "并发甲" }), training.saveRecord(userId, id, { ...accepted, revision: 2, note: "并发乙" })]);
+        expect(competing.filter(v => v.status === "fulfilled")).toHaveLength(1);
+        expect(competing.find(v => v.status === "rejected")).toMatchObject({ reason: { statusCode: 409 } });
+        await expect(training.deleteRecord(userId, id, 2)).rejects.toMatchObject({ statusCode: 409 });
+        await training.deleteRecord(userId, id, 3); await training.deleteRecord(userId, id, 3);
+        expect(await training.listSessions(userId)).toHaveLength(0);
+        await expect(training.getSession(userId, id)).rejects.toMatchObject({ statusCode: 404 });
+        await expect(training.saveRecord(userId, id, accepted)).rejects.toMatchObject({ statusCode: 404 });
+        await expect(training.saveRecord(userId, id, input)).rejects.toMatchObject({ statusCode: 404 });
+        await expect(training.updateSessionMetadata(userId, id, 4, { localDate: "2026-09-10", note: null })).rejects.toMatchObject({ statusCode: 404 });
+        const afterDelete = await new PostgresUserDataExporter(restricted.database).exportUserData(userId, new Date());
+        expect(afterDelete.data.training_sessions).toEqual([expect.objectContaining({ id, deleted_at: expect.any(String) })]);
+      });
+    } finally { await restricted.close(); }
+  });
+
   it("atomically saves completion drafts, rolls back late failures, and safely retries", async () => {
     const identity = new IdentityService({
       repository: new PostgresIdentityRepository(database.database),

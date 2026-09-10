@@ -109,6 +109,7 @@ export interface TrainingSet {
 }
 
 export interface TrainingSessionItem {
+  readonly measurement?: "sets" | "activity" | "count" | "unknown" | "mixed" | null;
   readonly id: string;
   readonly sourceTemplateItemId: string | null;
   readonly origin: TrainingSessionItemOrigin;
@@ -179,6 +180,7 @@ export interface TrainingExpenditureAssessment {
 }
 
 export interface TrainingSessionRevision {
+  readonly recordSnapshot?: TrainingSession;
   readonly id: string;
   readonly sessionId: string;
   readonly sessionRevision: number;
@@ -190,6 +192,9 @@ export interface TrainingSessionRevision {
 }
 
 export interface TrainingSession {
+  readonly recordedTime?: string | null;
+  readonly recordWrite?: { readonly hash: string; readonly baseRevision: number; readonly modes?: Record<string, TrainingSessionItem["measurement"]> } | null;
+  readonly deletedAt?: Date | null;
   readonly id: string;
   readonly userId: string;
   readonly sourceScheduleId: string | null;
@@ -282,4 +287,20 @@ export interface ExtraTrainingItemInput {
 export interface TrainingCompletionDraft {
   readonly items: readonly (TrainingSessionItemUpdate & { readonly id: string })[];
   readonly extra: (ExtraTrainingItemInput & { readonly id: string }) | null;
+}
+
+/** A user-confirmed whole record, never a persisted in-progress draft. */
+export interface TrainingRecordInput {
+  readonly revision: number;
+  readonly localDate: string;
+  readonly timeZone: string;
+  readonly recordedTime: string | null;
+  readonly note: string | null;
+  readonly items: readonly {
+    readonly measurement?: TrainingSessionItem["measurement"];
+    readonly id: string;
+    readonly exerciseName: string;
+    readonly actualNote: string | null;
+    readonly sets: readonly TrainingSetInput[];
+  }[];
 }

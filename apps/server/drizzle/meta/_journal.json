@@ -169,6 +169,13 @@
       "when": 1788874421379,
       "tag": "0023_photo_analysis_control",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789030429575,
+      "tag": "0024_training_batch_records",
+      "breakpoints": true
     }
   ]
 }

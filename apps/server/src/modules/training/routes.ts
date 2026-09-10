@@ -164,6 +164,7 @@ const sessionItemResponseSchema = {
   additionalProperties: false,
   required: ["id", "sourceTemplateItemId", "origin", "status", "sortOrder", "exerciseName", "performedExerciseName", "target", "actualNote", "sets"],
   properties: {
+    measurement: { anyOf: [{ type: "null" }, { type: "string", enum: ["sets", "activity", "count", "unknown", "mixed"] }] },
     id: { type: "string", format: "uuid" },
     sourceTemplateItemId: { anyOf: [{ type: "null" }, { type: "string", format: "uuid" }] },
     origin: { type: "string", enum: ["planned", "extra"] },
@@ -248,6 +249,8 @@ const sessionResponseSchema = {
   additionalProperties: false,
   required: ["id", "sourceScheduleId", "sourceScheduleTitle", "sourceTemplateId", "sourceTemplateName", "sourceProgramId", "sourceProgramName", "sourceProgramUnitId", "sourceWeekNumber", "sourceTrainingDayName", "status", "revision", "timeZone", "localDate", "startedAt", "endedAt", "note", "expenditureAssessment", "createdAt", "updatedAt", "items"],
   properties: {
+    recordedTime: nullableString,
+    recordingMode: { anyOf: [{ type: "null" }, { type: "string", enum: ["batch"] }] },
     id: { type: "string", format: "uuid" },
     sourceScheduleId: { anyOf: [{ type: "null" }, { type: "string", format: "uuid" }] },
     sourceScheduleTitle: nullableString,
@@ -422,8 +425,8 @@ function publicTemplate(template: Awaited<ReturnType<TrainingService["createTemp
 }
 
 function publicSession(session: Awaited<ReturnType<TrainingService["getSession"]>>) {
-  const { userId: _userId, ...result } = session;
-  return result;
+  const { userId: _userId, recordWrite, deletedAt: _deletedAt, ...result } = session;
+  return { ...result, recordedTime: session.recordedTime ?? null, recordingMode: recordWrite ? "batch" : null };
 }
 
 function publicProgram(program: Awaited<ReturnType<TrainingService["getProgram"]>>) {
@@ -442,6 +445,28 @@ export async function registerTrainingRoutes(app: FastifyInstance, options: Trai
   async function userId(request: FastifyRequest): Promise<string> {
     return (await identityService.authenticate(request.cookies[sessionCookieName])).id;
   }
+
+  app.put<{ Params: { id: string }; Body: import("./types.js").TrainingRecordInput }>("/api/v1/training/records/:id", {
+    schema: {
+      params: { type: "object", required: ["id"], properties: { id: { type: "string", format: "uuid" } } },
+      body: { type: "object", additionalProperties: false, required: ["revision", "localDate", "timeZone", "recordedTime", "note", "items"],
+        properties: { revision: { type: "integer", minimum: 0 }, localDate: { type: "string", format: "date" },
+          timeZone: { type: "string", minLength: 1, maxLength: 100 }, recordedTime: nullableString, note: nullableString,
+          items: { type: "array", minItems: 1, maxItems: 50, items: { type: "object", additionalProperties: false,
+            required: ["id", "exerciseName", "actualNote", "sets"], properties: { id: { type: "string", format: "uuid" },
+              exerciseName: { type: "string", minLength: 1, maxLength: 100 }, actualNote: nullableString,
+              measurement: { type: "string", enum: ["sets", "activity", "count", "unknown", "mixed"] },
+              sets: { type: "array", maxItems: 100, items: setInputSchema } } } } } },
+      response: { 200: sessionResponseSchema },
+    },
+    handler: async request => publicSession(await trainingService.saveRecord(await userId(request), request.params.id, request.body)),
+  });
+
+  app.delete<{ Params: { id: string }; Body: RevisionBody }>("/api/v1/training/records/:id", {
+    schema: { params: { type: "object", required: ["id"], properties: { id: { type: "string", format: "uuid" } } },
+      body: { type: "object", additionalProperties: false, required: ["revision"], properties: { revision: { type: "integer", minimum: 1 } } } },
+    handler: async (request, reply) => { await trainingService.deleteRecord(await userId(request), request.params.id, request.body.revision); return reply.status(204).send(); },
+  });
 
   app.get<{ Querystring: { exerciseName: string } }>("/api/v1/training/guidance", {
     schema: {

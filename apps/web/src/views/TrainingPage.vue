@@ -1,1100 +1,196 @@
 <script setup lang="ts">
-import { computed, onActivated, reactive, ref } from "vue";
+import { computed, onActivated, onBeforeUnmount, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import AppShell from "../app/AppShell.vue";
+import { ApiError } from "../api/client";
+import { trainingApi, type TrainingSession, type TrainingTemplate, type TrainingProgram, type TrainingSchedule } from "../api/training";
+import RecordActionFields from "../features/training/RecordActionFields.vue";
+import { actionFromPlan, actionSummary, blankAction, emptyRecord, recordFromActual, recordPayload, type RecordDraft } from "../features/training/record-draft";
 import { submissionId } from "../support/submission-id";
 
-import { ApiError } from "../api/client";
-import AppShell from "../app/AppShell.vue";
-import ExerciseNameField from "../components/ExerciseNameField.vue";
-import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
-import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
-import {
-  trainingApi,
-  type ExerciseGuidance,
-  type TrainingProgram,
-  type TrainingProgramUnit,
-  type TrainingSession,
-  type TrainingSessionItem,
-  type TrainingSetInput,
-  type TrainingTemplate,
-  type TrainingTemplateInput,
-} from "../api/training";
-
-interface TemplateItemForm {
-  exerciseName: string;
-  targetSets: string | number;
-  targetRepsMin: string | number;
-  targetRepsMax: string | number;
-  targetWeightKg: string;
-  note: string;
+const router = useRouter(), route = useRoute();
+function today() { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); }
+const date = ref(today()), sessions = ref<TrainingSession[]>([]), templates = ref<TrainingTemplate[]>([]), programs = ref<TrainingProgram[]>([]), schedules = ref<TrainingSchedule[]>([]);
+const draft = ref<RecordDraft | null>(null), saving = ref(false), loading = ref(false), error = ref(""), notice = ref("");
+const names = ref(""), selectedTemplate = ref(""), conflicting = ref(false), latest = ref<TrainingSession | null>(null), deletedConflict = ref(false);
+const visibleRecords = computed(() => sessions.value.filter(s => s.localDate === date.value));
+const previousRecord = computed(() => sessions.value.find(s => s.status !== "in_progress" && s.items.some(i => i.status === "completed")));
+const todayPlans = computed(() => schedules.value.filter(s => s.status === "scheduled"));
+function report(e: unknown) { error.value = e instanceof Error ? e.message : "暂时保存不了，输入已保留。"; }
+function mayReplace() { return draft.value === null || window.confirm("当前还有未保存的训练内容。放弃这些输入并打开另一条记录吗？"); }
+function clearConflict() { conflicting.value = false; latest.value = null; deletedConflict.value = false; }
+function begin() { if (!mayReplace()) return; draft.value = emptyRecord(date.value); names.value = ""; error.value = ""; notice.value = ""; clearConflict(); }
+function addNames() {
+  if (!draft.value) return;
+  const incoming = names.value.split(/[\n、,，]/).map(v => v.trim()).filter(Boolean);
+  if (draft.value.items.length + incoming.length > 50) { error.value = "每条最多记录 50 个动作。"; return; }
+  draft.value.items.push(...incoming.map(blankAction)); names.value = "";
 }
-
-interface SetForm {
-  reps: string | number;
-  weightKg: string;
-  durationSeconds: string | number;
-  distanceMeters: string;
+function addAction() { if (draft.value && draft.value.items.length < 50) draft.value.items.push(blankAction()); }
+function importTemplate() {
+  const source = templates.value.find(t => t.id === selectedTemplate.value);
+  if (!source || !draft.value) return;
+  if (draft.value.items.length + source.items.length > 50) { error.value = "合并后超过 50 个动作，请先移除不需要的内容。"; return; }
+  draft.value.items.push(...source.items.map(actionFromPlan));
+  notice.value = "已复制计划目标，请删掉没做的动作，并核对实际数量；尚未保存为训练记录。";
+  selectedTemplate.value = "";
 }
-
-interface ActualForm {
-  performedExerciseName: string;
-  actualNote: string;
-  sets: SetForm[];
+function copyPrevious() {
+  if (!previousRecord.value || !draft.value) return;
+  const items = recordFromActual(previousRecord.value).items.map(item => ({ ...item, id: submissionId() }));
+  if (draft.value.items.length + items.length > 50) { error.value = "合并后超过 50 个动作。"; return; }
+  draft.value.items.push(...items);
+  notice.value = "已复制上次实际内容。请删改为本次确实做过的动作和数量。";
 }
-
-const templates = ref<TrainingTemplate[]>([]);
-const programs = ref<TrainingProgram[]>([]);
-const suggestions = ref<TrainingSuggestion[]>([]);
-const suggestionFormOpen = ref(false);
-const suggestionForm = reactive<TrainingSuggestionPreferences>({ goal: "general", experience: "beginner", equipment: "full_gym", availableDaysPerWeek: 2, sessionMinutes: 60, hasInjuryOrMedicalLimitation: false });
-const planTab = ref<"templates" | "programs">("templates");
-const activeSession = ref<TrainingSession | null>(null);
-const loading = ref(true);
-const saving = ref(false);
-const errorMessage = ref("");
-const notice = ref("");
-const editorOpen = ref(false);
-const editingTemplate = ref<TrainingTemplate | null>(null);
-const actualForms = reactive<Record<string, ActualForm>>({});
-const savedActualForms: Record<string, string> = {};
-let extraDraftId = submissionId();
-const extraName = ref("");
-const extraNote = ref("");
-const extraSets = reactive<SetForm[]>([{ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" }]);
-const templateForm = reactive({
-  name: "",
-  note: "",
-  items: [emptyTemplateItem()] as TemplateItemForm[],
-});
-const programEditorOpen = ref(false);
-const editingProgram = ref<TrainingProgram | null>(null);
-const selectedProgramId = ref<string | null>(null);
-const programForm = reactive({ name: "", note: "", weekCount: "4" as string | number });
-const unitEditorOpen = ref(false);
-const editingUnit = ref<TrainingProgramUnit | null>(null);
-const unitProgramId = ref<string | null>(null);
-const unitForm = reactive({
-  weekNumber: "1" as string | number,
-  name: "",
-  note: "",
-  sourceTemplateId: "",
-  items: [emptyTemplateItem()] as TemplateItemForm[],
-});
-const scheduleEditorOpen = ref(false);
-const scheduleSource = reactive({
-  templateId: null as string | null,
-  programId: null as string | null,
-  programUnitId: null as string | null,
-});
-const scheduleForm = reactive({ localDate: currentLocalDate(), title: "", note: "" });
-const guidanceOpenItemId = ref<string | null>(null);
-const guidanceByItem = reactive<Record<string, ExerciseGuidance | null>>({});
-
-const completedCount = computed(
-  () => activeSession.value?.items.filter((item) => item.status === "completed").length ?? 0,
-);
-const remainingCount = computed(
-  () => activeSession.value?.items.filter((item) => item.origin === "planned" && item.status === "pending").length ?? 0,
-);
-const activeSessionLabel = computed(() => {
-  const training = activeSession.value;
-  if (training === null) return "";
-  if (training.sourceScheduleTitle !== null) return training.sourceScheduleTitle;
-  if (training.sourceProgramName !== null) {
-    return `${training.sourceProgramName} · 第 ${training.sourceWeekNumber} 周 · ${training.sourceTrainingDayName}`;
-  }
-  return training.sourceTemplateName ?? "空白训练";
-});
-
-function emptyTemplateItem(): TemplateItemForm {
-  return {
-    exerciseName: "",
-    targetSets: "",
-    targetRepsMin: "",
-    targetRepsMax: "",
-    targetWeightKg: "",
-    note: "",
-  };
+async function edit(record: TrainingSession) {
+  if (!mayReplace()) return;
+  try { draft.value = recordFromActual(await trainingApi.getSession(record.id)); names.value = ""; clearConflict(); error.value = "";
+    notice.value = record.status === "in_progress" ? "旧记录中已确认完成的动作已带入；待完成的计划没有当作实际记录。" : ""; }
+  catch (e) { report(e); }
 }
-
-function currentLocalDate(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function weekNumbers(program: TrainingProgram): number[] {
-  return Array.from({ length: program.weekCount }, (_, index) => index + 1);
-}
-
-function unitsForWeek(program: TrainingProgram, weekNumber: number): TrainingProgramUnit[] {
-  return program.units.filter((unit) => unit.weekNumber === weekNumber);
-}
-
-function sourceTemplateName(unit: TrainingProgramUnit): string | null {
-  if (unit.sourceTemplateId === null) return null;
-  return templates.value.find((template) => template.id === unit.sourceTemplateId)?.name ?? "已归档的单次方案";
-}
-
-function guidanceKey(scope: string, parentId: string, itemId: string): string {
-  return `${scope}:${parentId}:${itemId}`;
-}
-
-function openScheduleEditor(options: {
-  title: string;
-  templateId?: string;
-  programId?: string;
-  programUnitId?: string;
-}) {
-  scheduleSource.templateId = options.templateId ?? null;
-  scheduleSource.programId = options.programId ?? null;
-  scheduleSource.programUnitId = options.programUnitId ?? null;
-  scheduleForm.localDate = currentLocalDate();
-  scheduleForm.title = options.title;
-  scheduleForm.note = "";
-  scheduleEditorOpen.value = true;
-}
-
-async function saveSchedule() {
-  saving.value = true;
-  errorMessage.value = "";
+async function save() {
+  if (!draft.value || saving.value || conflicting.value) return;
+  saving.value = true; error.value = "";
   try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    await trainingApi.createSchedule({
-      localDate: scheduleForm.localDate,
-      timeZone,
-      title: scheduleForm.title,
-      note: nullableText(scheduleForm.note),
-      sourceTemplateId: scheduleSource.templateId,
-      sourceProgramId: scheduleSource.programId,
-      sourceProgramUnitId: scheduleSource.programUnitId,
-    });
-    scheduleEditorOpen.value = false;
-    notice.value = `已安排到 ${scheduleForm.localDate}`;
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
+    if (names.value.trim()) { addNames(); if (names.value.trim()) throw new Error("还有未加入的动作，请处理后再保存。"); }
+    const input = recordPayload(draft.value);
+    const saved = await trainingApi.saveRecord(draft.value.id, input);
+    date.value = saved.localDate; draft.value = null; names.value = ""; notice.value = "这次训练已保存。"; clearConflict();
+    await loadData();
+  } catch (e) {
+    report(e);
+    if (e instanceof ApiError && (e.status === 409 || e.status === 404)) { conflicting.value = true; await inspectConflict(); }
+  } finally { saving.value = false; }
 }
-
-function nullableText(value: string): string | null {
-  const cleaned = value.trim();
-  return cleaned.length === 0 ? null : cleaned;
+async function inspectConflict() {
+  if (!draft.value) return;
+  try { latest.value = await trainingApi.getSession(draft.value.id); deletedConflict.value = false; }
+  catch (e) { if (e instanceof ApiError && e.status === 404) { latest.value = null; deletedConflict.value = true; } else report(e); }
 }
-
-function nullableInteger(value: string | number): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const cleaned = value.trim();
-  return cleaned.length === 0 ? null : Number.parseInt(cleaned, 10);
+function useLatest() {
+  if (!latest.value || !window.confirm("放弃当前输入，改用刚读取的最新记录？")) return;
+  draft.value = recordFromActual(latest.value); clearConflict(); error.value = "";
 }
-
-function templatePayload(): TrainingTemplateInput {
-  return {
-    name: templateForm.name,
-    note: nullableText(templateForm.note),
-    items: templateForm.items.map((item) => ({
-      exerciseName: item.exerciseName,
-      targetSets: nullableInteger(item.targetSets),
-      targetRepsMin: nullableInteger(item.targetRepsMin),
-      targetRepsMax: nullableInteger(item.targetRepsMax),
-      targetWeightKg: nullableText(item.targetWeightKg),
-      targetDurationSeconds: null,
-      targetDistanceMeters: null,
-      note: nullableText(item.note),
-    })),
-  };
+function rebase() {
+  if (!draft.value || !latest.value || !window.confirm("已核对下方最新记录？继续后，下次保存将用当前输入替换它；不会自动合并。")) return;
+  draft.value.revision = latest.value.revision; clearConflict(); error.value = ""; notice.value = "已使用最新版本号，请再次检查并保存。";
 }
-
-function setPayload(sets: readonly SetForm[]): TrainingSetInput[] {
-  return sets
-    .filter(
-      (set) =>
-        (typeof set.reps === "number" ? Number.isFinite(set.reps) : set.reps.trim().length > 0) ||
-        set.weightKg.trim().length > 0 ||
-        (typeof set.durationSeconds === "number" ? Number.isFinite(set.durationSeconds) : set.durationSeconds.trim().length > 0) ||
-        set.distanceMeters.trim().length > 0,
-    )
-    .map((set) => ({
-      reps: nullableInteger(set.reps),
-      weightKg: nullableText(set.weightKg),
-      durationSeconds: nullableInteger(set.durationSeconds),
-      distanceMeters: nullableText(set.distanceMeters),
-      note: null,
-    }));
+function saveAsNew() {
+  if (!draft.value || !window.confirm("原记录已删除。将这些输入作为一条新记录保留？")) return;
+  draft.value.id = submissionId(); draft.value.revision = 0;
+  draft.value.items.forEach(item => item.id = submissionId()); clearConflict(); error.value = "";
 }
-
-function describeTarget(item: TrainingSessionItem): string {
-  const parts: string[] = [];
-  if (item.target.targetSets !== null) parts.push(`${item.target.targetSets} 组`);
-  if (item.target.targetRepsMin !== null) {
-    parts.push(
-      item.target.targetRepsMax !== null && item.target.targetRepsMax !== item.target.targetRepsMin
-        ? `${item.target.targetRepsMin}–${item.target.targetRepsMax} 次`
-        : `${item.target.targetRepsMin} 次`,
-    );
-  }
-  if (item.target.targetWeightKg !== null) parts.push(`${Number(item.target.targetWeightKg)} kg`);
-  return parts.length === 0 ? "没有预设训练量" : parts.join(" · ");
+function discard() { if (window.confirm("放弃这次尚未保存的输入？已保存的记录不会删除。")) { draft.value = null; names.value = ""; clearConflict(); error.value = ""; } }
+async function remove(record: Pick<TrainingSession, "id" | "revision" | "localDate">) {
+  if (saving.value || !window.confirm("删除 " + record.localDate + " 的这条训练记录？它将不再计入今天和历史。")) return;
+  saving.value = true; error.value = "";
+  try { await trainingApi.deleteRecord(record.id, record.revision); if (draft.value?.id === record.id) draft.value = null; notice.value = "训练记录已删除。"; await loadData(); }
+  catch (e) { report(e); if (e instanceof ApiError && e.status === 409) { error.value = "记录已被修改，请核对刷新后的内容，再决定是否删除。"; await loadData(); } }
+  finally { saving.value = false; }
 }
-
-function syncActualForms(training: TrainingSession, savedItemId?: string) {
-  for (const item of training.items) {
-    const form = {
-      performedExerciseName: item.performedExerciseName ?? item.exerciseName,
-      actualNote: item.actualNote ?? "",
-      sets:
-        item.sets.length > 0
-          ? item.sets.map((set) => ({
-              reps: set.reps?.toString() ?? "",
-              weightKg: set.weightKg === null ? "" : Number(set.weightKg).toString(),
-              durationSeconds: set.durationSeconds?.toString() ?? "",
-              distanceMeters: set.distanceMeters === null ? "" : Number(set.distanceMeters).toString(),
-            }))
-          : [{ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" }],
-    };
-    const untouched = actualForms[item.id] === undefined || JSON.stringify(actualForms[item.id]) === savedActualForms[item.id];
-    if (untouched || item.id === savedItemId) {
-      actualForms[item.id] = form;
-      savedActualForms[item.id] = JSON.stringify(form);
-    }
-  }
-}
-
-function applySession(training: TrainingSession, savedItemId?: string) {
-  activeSession.value = training.status === "in_progress" ? training : null;
-  if (training.status === "in_progress") syncActualForms(training, savedItemId);
-}
-
-function reportError(error: unknown) {
-  console.error("Training operation failed", error);
-  errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了，请稍后再试";
-}
-
-async function toggleGuidance(key: string, exerciseName: string) {
-  if (guidanceOpenItemId.value === key) {
-    guidanceOpenItemId.value = null;
-    return;
-  }
-  guidanceOpenItemId.value = key;
-  if (guidanceByItem[key] !== undefined) return;
-  try {
-    guidanceByItem[key] = await trainingApi.getGuidance(exerciseName);
-  } catch (error) {
-    reportError(error);
-    guidanceOpenItemId.value = null;
-  }
-}
-
-async function load() {
-  if (saving.value) return;
+let loadSequence = 0;
+async function loadData() {
+  const sequence = ++loadSequence;
   loading.value = true;
-  errorMessage.value = "";
-  const results = await Promise.allSettled([
-      trainingApi.listTemplates(),
-      trainingApi.listPrograms(),
-      trainingApi.listActiveSessions(),
-      trainingSuggestionApi.list(),
-  ] as const);
-  const [templatesResult, programsResult, sessionsResult, suggestionsResult] = results;
-  if (templatesResult.status === "fulfilled") templates.value = templatesResult.value;
-  if (programsResult.status === "fulfilled") programs.value = programsResult.value;
-  if (suggestionsResult.status === "fulfilled") suggestions.value = suggestionsResult.value;
-  if (sessionsResult.status === "fulfilled") {
-    const incoming = sessionsResult.value[0] ?? null;
-    const previous = activeSession.value;
-    const dirty = previous !== null && (previous.items.some(item => JSON.stringify(actualForms[item.id]) !== savedActualForms[item.id])
-      || extraName.value.trim().length > 0 || extraNote.value.trim().length > 0 || setPayload(extraSets).length > 0);
-    if (dirty && (incoming?.id !== previous?.id || incoming?.revision !== previous?.revision)) {
-      errorMessage.value = "这次训练在其他地方有更新；你的输入仍保留，请先核对，不会自动覆盖新记录。";
-    } else {
-      activeSession.value = incoming;
-      if (incoming !== null) syncActualForms(incoming);
-    }
-  }
-  const failed = results.find((result) => result.status === "rejected");
-  if (failed?.status === "rejected") {
-    console.error("Training page loaded partially", failed.reason);
-    const detail = failed.reason instanceof ApiError ? failed.reason.message : "部分训练内容暂时读取不了";
-    errorMessage.value = `${detail}；其他可用内容已保留，可以稍后重试。`;
-  }
+  const results = await Promise.allSettled([trainingApi.listSessions(), trainingApi.listTemplates(), trainingApi.listPrograms(), trainingApi.listSchedules(date.value, date.value)] as const);
+  if (sequence !== loadSequence) return;
+  const [a,b,c,d] = results;
+  if (a.status === "fulfilled") sessions.value = [...a.value].sort((a, b) => b.localDate.localeCompare(a.localDate) || (b.recordedTime ?? "").localeCompare(a.recordedTime ?? "") || b.createdAt.localeCompare(a.createdAt));
+  if (b.status === "fulfilled") templates.value = b.value;
+  if (c.status === "fulfilled") programs.value = c.value;
+  if (d.status === "fulfilled") schedules.value = d.value;
+  else schedules.value = [];
+  const failed = results.find(r => r.status === "rejected");
+  if (failed?.status === "rejected") report(failed.reason);
   loading.value = false;
 }
-
-async function generateSuggestion() {
-  saving.value = true; errorMessage.value = "";
-  try { suggestions.value = [await trainingSuggestionApi.generate(suggestionForm), ...suggestions.value]; suggestionFormOpen.value = false; notice.value = "草案已生成，先看动作是否合适。"; }
-  catch (error) { reportError(error); }
-  finally { saving.value = false; }
-}
-
-async function adoptSuggestion(value: TrainingSuggestion) {
-  saving.value = true; errorMessage.value = "";
-  try { const result = await trainingSuggestionApi.adopt(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result.suggestion : item); templates.value = await trainingApi.listTemplates(); planTab.value = "templates"; notice.value = "已经存到单次方案。"; }
-  catch (error) { reportError(error); }
-  finally { saving.value = false; }
-}
-
-async function dismissSuggestion(value: TrainingSuggestion) {
-  saving.value = true; errorMessage.value = "";
-  try { const result = await trainingSuggestionApi.dismiss(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result : item); notice.value = "这份草案已移除。"; }
-  catch (error) { reportError(error); }
-  finally { saving.value = false; }
-}
-
-function openCreateProgram() {
-  editingProgram.value = null;
-  programForm.name = "";
-  programForm.note = "";
-  programForm.weekCount = "4";
-  programEditorOpen.value = true;
-}
-
-function openEditProgram(program: TrainingProgram) {
-  editingProgram.value = program;
-  programForm.name = program.name;
-  programForm.note = program.note ?? "";
-  programForm.weekCount = program.weekCount;
-  programEditorOpen.value = true;
-}
-
-async function saveProgram() {
-  saving.value = true;
-  errorMessage.value = "";
+let queryBusy = false;
+async function handleQuery() {
+  if (queryBusy || route.name !== "training" || !Object.keys(route.query).length) return;
+  queryBusy = true;
   try {
-    const input = {
-      name: programForm.name,
-      note: nullableText(programForm.note),
-      weekCount: nullableInteger(programForm.weekCount) ?? 1,
-    };
-    if (editingProgram.value === null) {
-      const created = await trainingApi.createProgram(input);
-      selectedProgramId.value = created.id;
-      notice.value = "周期计划已建立，可以开始添加训练日";
-    } else {
-      await trainingApi.updateProgram(editingProgram.value.id, editingProgram.value.revision, input);
-      notice.value = "周期计划已更新";
+    const query = { ...route.query };
+    if (query.templateId) templates.value = await trainingApi.listTemplates();
+    if (query.programId) programs.value = await trainingApi.listPrograms();
+    if (query.edit) { const value = await trainingApi.getSession(String(query.edit)); await edit(value); }
+    else if (query.templateId || query.programId || query.new) {
+      if (mayReplace()) {
+        draft.value = emptyRecord(date.value); names.value = ""; clearConflict();
+        const items = query.templateId ? templates.value.find(t => t.id === query.templateId)?.items
+          : programs.value.find(p => p.id === query.programId)?.units.find(u => u.id === query.unitId)?.items;
+        if (items) { draft.value.items = items.map(actionFromPlan); notice.value = "计划只作为填写参考；请核对实际完成的动作和数量后保存。"; }
+        else if (!query.new) error.value = "来源计划已不存在，可以直接填写本次实际内容。";
+      }
     }
-    programs.value = await trainingApi.listPrograms();
-    programEditorOpen.value = false;
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
+    await router.replace({ name: "training" });
+  } catch(e) { report(e); }
+  finally { queryBusy = false; }
 }
-
-async function archiveProgram(program: TrainingProgram) {
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    await trainingApi.archiveProgram(program.id, program.revision);
-    programs.value = await trainingApi.listPrograms();
-    if (selectedProgramId.value === program.id) selectedProgramId.value = null;
-    notice.value = "周期计划已归档；已经产生的训练记录仍会保留";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
+function referenceSchedule(schedule: TrainingSchedule) {
+  if (schedule.sourceTemplateId) void router.push({ name: "training", query: { templateId: schedule.sourceTemplateId } });
+  else if (schedule.sourceProgramId) void router.push({ name: "training", query: { programId: schedule.sourceProgramId, unitId: schedule.sourceProgramUnitId ?? "" } });
 }
-
-function openAddUnit(program: TrainingProgram) {
-  editingUnit.value = null;
-  unitProgramId.value = program.id;
-  unitForm.weekNumber = 1;
-  unitForm.name = "";
-  unitForm.note = "";
-  unitForm.sourceTemplateId = "";
-  unitForm.items.splice(0, unitForm.items.length, emptyTemplateItem());
-  unitEditorOpen.value = true;
-}
-
-function openEditUnit(program: TrainingProgram, unit: TrainingProgramUnit) {
-  editingUnit.value = unit;
-  unitProgramId.value = program.id;
-  unitForm.weekNumber = unit.weekNumber;
-  unitForm.name = unit.name;
-  unitForm.note = unit.note ?? "";
-  unitForm.sourceTemplateId = unit.sourceTemplateId ?? "";
-  unitForm.items.splice(
-    0,
-    unitForm.items.length,
-    ...unit.items.map((item) => ({
-      exerciseName: item.exerciseName,
-      targetSets: item.targetSets?.toString() ?? "",
-      targetRepsMin: item.targetRepsMin?.toString() ?? "",
-      targetRepsMax: item.targetRepsMax?.toString() ?? "",
-      targetWeightKg: item.targetWeightKg === null ? "" : Number(item.targetWeightKg).toString(),
-      note: item.note ?? "",
-    })),
-  );
-  unitEditorOpen.value = true;
-}
-
-function unitPayload() {
-  return {
-    weekNumber: nullableInteger(unitForm.weekNumber) ?? 1,
-    name: unitForm.name,
-    note: nullableText(unitForm.note),
-    items: unitForm.items.map((item) => ({
-      exerciseName: item.exerciseName,
-      targetSets: nullableInteger(item.targetSets),
-      targetRepsMin: nullableInteger(item.targetRepsMin),
-      targetRepsMax: nullableInteger(item.targetRepsMax),
-      targetWeightKg: nullableText(item.targetWeightKg),
-      targetDurationSeconds: null,
-      targetDistanceMeters: null,
-      note: nullableText(item.note),
-    })),
-  };
-}
-
-async function saveUnit() {
-  const program = programs.value.find((candidate) => candidate.id === unitProgramId.value);
-  if (program === undefined) return;
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    const input = unitPayload();
-    if (editingUnit.value === null) {
-      await trainingApi.addProgramUnit(
-        program.id,
-        program.revision,
-        nullableText(unitForm.sourceTemplateId),
-        unitForm.sourceTemplateId ? { ...input, items: [] } : input,
-      );
-      notice.value = unitForm.sourceTemplateId
-        ? "训练方案已复制到周期中；以后不会自动同步"
-        : "训练日已加入周期";
-    } else {
-      await trainingApi.updateProgramUnit(
-        program.id,
-        editingUnit.value.id,
-        program.revision,
-        input,
-      );
-      notice.value = "周期训练日已更新";
-    }
-    programs.value = await trainingApi.listPrograms();
-    unitEditorOpen.value = false;
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-function sourceUpdated(unit: TrainingProgramUnit): boolean {
-  if (unit.sourceTemplateId === null || unit.sourceTemplateRevision === null) return false;
-  const source = templates.value.find((template) => template.id === unit.sourceTemplateId);
-  return source !== undefined && source.revision > unit.sourceTemplateRevision;
-}
-
-async function reimportUnit(program: TrainingProgram, unit: TrainingProgramUnit) {
-  if (!window.confirm("重新导入会用来源方案的当前内容覆盖这个训练日的本地调整。确定继续吗？")) return;
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    await trainingApi.reimportProgramUnit(program.id, unit.id, program.revision);
-    programs.value = await trainingApi.listPrograms();
-    notice.value = "训练日已按来源方案的当前内容重新导入";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function startProgramUnit(program: TrainingProgram, unit: TrainingProgramUnit) {
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    applySession(await trainingApi.startProgramUnit(program.id, unit.id, timeZone));
-    notice.value = "周期训练日已开始，当前内容已保存为本次快照";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-function openCreateTemplate() {
-  editingTemplate.value = null;
-  templateForm.name = "";
-  templateForm.note = "";
-  templateForm.items.splice(0, templateForm.items.length, emptyTemplateItem());
-  editorOpen.value = true;
-}
-
-function openEditTemplate(template: TrainingTemplate) {
-  editingTemplate.value = template;
-  templateForm.name = template.name;
-  templateForm.note = template.note ?? "";
-  templateForm.items.splice(
-    0,
-    templateForm.items.length,
-    ...template.items.map((item) => ({
-      exerciseName: item.exerciseName,
-      targetSets: item.targetSets?.toString() ?? "",
-      targetRepsMin: item.targetRepsMin?.toString() ?? "",
-      targetRepsMax: item.targetRepsMax?.toString() ?? "",
-      targetWeightKg: item.targetWeightKg === null ? "" : Number(item.targetWeightKg).toString(),
-      note: item.note ?? "",
-    })),
-  );
-  editorOpen.value = true;
-}
-
-async function saveTemplate() {
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    if (editingTemplate.value === null) {
-      await trainingApi.createTemplate(templatePayload());
-      notice.value = "训练方案已保存";
-    } else {
-      await trainingApi.updateTemplate(
-        editingTemplate.value.id,
-        editingTemplate.value.revision,
-        templatePayload(),
-      );
-      notice.value = "训练方案已更新；已保存的训练记录不会改变";
-    }
-    editorOpen.value = false;
-    templates.value = await trainingApi.listTemplates();
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function archiveTemplate(template: TrainingTemplate) {
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    await trainingApi.archiveTemplate(template.id, template.revision);
-    templates.value = await trainingApi.listTemplates();
-    notice.value = "方案已归档，已有训练记录仍会保留";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function copyTemplate(template: TrainingTemplate) {
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    await trainingApi.createTemplate({
-      name: `${template.name.slice(0, 77)} 副本`,
-      note: template.note,
-      items: template.items.map((item) => ({
-        exerciseName: item.exerciseName,
-        targetSets: item.targetSets,
-        targetRepsMin: item.targetRepsMin,
-        targetRepsMax: item.targetRepsMax,
-        targetWeightKg: item.targetWeightKg,
-        targetDurationSeconds: item.targetDurationSeconds,
-        targetDistanceMeters: item.targetDistanceMeters,
-        note: item.note,
-      })),
-    });
-    templates.value = await trainingApi.listTemplates();
-    notice.value = `已复制“${template.name}”，两份方案之后可以分别修改`;
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function startTraining(templateId: string | null) {
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    applySession(await trainingApi.startSession(templateId, timeZone));
-    notice.value = templateId === null ? "空白训练已开始" : "训练已开始，计划内容已保存为本次快照";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function saveItem(item: TrainingSessionItem, status: "completed" | "pending" | "skipped") {
-  if (activeSession.value === null) return;
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    const form = actualForms[item.id] ?? { performedExerciseName: item.exerciseName, actualNote: "", sets: [] };
-    const training = await trainingApi.updateItem(
-      activeSession.value.id,
-      item.id,
-      activeSession.value.revision,
-      status,
-      status === "completed" ? nullableText(form.performedExerciseName) : null,
-      nullableText(form.actualNote),
-      status === "pending" ? [] : setPayload(form.sets),
-    );
-    applySession(training, item.id);
-    notice.value = status === "completed" ? `${item.exerciseName} 已记下` : status === "skipped" ? `${item.exerciseName} 已跳过` : `${item.exerciseName} 已恢复为待完成`;
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-function addSet(itemId: string) {
-  actualForms[itemId]?.sets.push({ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" });
-}
-
-async function addExtra() {
-  if (activeSession.value === null) return;
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    const training = await trainingApi.addExtraItem(
-      activeSession.value.id,
-      activeSession.value.revision,
-      extraName.value,
-      nullableText(extraNote.value),
-      setPayload(extraSets),
-    );
-    applySession(training);
-    extraName.value = "";
-    extraNote.value = "";
-    extraDraftId = submissionId();
-    extraSets.splice(0, extraSets.length, { reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" });
-    notice.value = "额外动作已加入本次训练";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function finishTraining(status: "completed" | "abandoned") {
-  if (activeSession.value === null || saving.value) return;
-  saving.value = true;
-  errorMessage.value = "";
-  try {
-    const changes = activeSession.value.items.filter((item) => actualForms[item.id] !== undefined
-      && JSON.stringify(actualForms[item.id]) !== savedActualForms[item.id]).map((item) => {
-      const form = actualForms[item.id]!;
-      return { id: item.id, status: "completed" as const, performedExerciseName: nullableText(form.performedExerciseName),
-        actualNote: nullableText(form.actualNote), sets: setPayload(form.sets) };
-    });
-    const extraHasData = extraName.value.trim() !== "" || extraNote.value.trim() !== "" || setPayload(extraSets).length > 0;
-    if (extraHasData && extraName.value.trim() === "") {
-      errorMessage.value = "还有未命名的动作，请填写动作名称后再保存；输入已保留。";
-      return;
-    }
-    const finished = await trainingApi.finishSession(
-      activeSession.value.id,
-      activeSession.value.revision,
-      status,
-      { items: changes, extra: extraHasData ? { id: extraDraftId, exerciseName: extraName.value, actualNote: nullableText(extraNote.value), sets: setPayload(extraSets) } : null },
-    );
-    applySession(finished);
-    extraName.value = "";
-    extraNote.value = "";
-    extraSets.splice(0, extraSets.length, { reps: "", weightKg: "", durationSeconds: "", distanceMeters: "" });
-    extraDraftId = submissionId();
-    notice.value = status === "completed" ? "这次训练已保存" : "训练已结束，已经完成的内容仍会保留";
-  } catch (error) {
-    reportError(error);
-  } finally {
-    saving.value = false;
-  }
-}
-
-onActivated(() => void load());
+function beforeUnload(e: BeforeUnloadEvent) { if (draft.value) { e.preventDefault(); e.returnValue = ""; } }
+window.addEventListener("beforeunload", beforeUnload);
+onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
+onActivated(async () => { await loadData(); await handleQuery(); });
+watch(() => route.fullPath, () => void handleQuery());
+watch(date, () => { if (route.name === "training") void loadData(); });
 </script>
 
 <template>
-  <AppShell page-class="training-page" rail-note="选方案，开始练，记下实际完成。" show-footer>
-        <header class="view-header training-view-header">
-          <div>
-            <h1>{{ activeSession === null ? "训练" : "这次训练" }}</h1>
-            <p v-if="activeSession === null">选一份方案，也可以直接开始。</p>
-            <p v-else>{{ activeSessionLabel }} · {{ activeSession.localDate }}</p>
+  <AppShell page-class="training-page" rail-note="计划是参考，记录只写实际做过的内容。" show-footer>
+    <header class="view-header"><div><h1>训练</h1><p>看计划，或一次记下练过的内容。</p></div><button class="action-button" @click="router.push('/training/plans')">查看／管理计划</button></header>
+    <p v-if="error" class="form-error" role="alert">{{ error }}</p><p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
+    <section v-if="draft" class="work-panel" aria-label="训练记录编辑">
+      <form @submit.prevent="save">
+        <fieldset :disabled="saving" class="record-fields">
+          <div class="panel-heading"><h2>{{ draft.revision ? "修改训练记录" : "记录训练内容" }}</h2><span>尚未保存</span></div>
+          <div class="record-meta">
+            <label><span>训练日期</span><input v-model="draft.localDate" type="date" required /></label>
+            <label><span>大致时间（可选）</span><input v-model="draft.time" type="time" /></label>
           </div>
-          <nav v-if="activeSession === null" class="view-header-actions" aria-label="训练快捷操作">
-            <button
-              class="action-button action-button--primary"
-              type="button"
-              :disabled="saving"
-              @click="startTraining(null)"
-            >
-              直接开始训练
-            </button>
-            <button
-              class="action-button"
-              type="button"
-              @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()"
-            >
-              {{ planTab === "templates" ? "新建方案" : "新建周期计划" }}
-            </button>
-          </nav>
-          <span v-else class="status-chip" data-tone="accent">已完成 {{ completedCount }} 项 · 还需练 {{ remainingCount }} 项</span>
-        </header>
-
-        <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
-        <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
-
-        <section v-if="loading" class="work-panel training-empty" aria-live="polite">
-          <strong>正在读取训练内容…</strong>
-        </section>
-
-        <div v-else-if="activeSession === null" class="view-stack">
-          <section class="work-panel training-suggestion-panel" aria-labelledby="training-suggestion-title">
-            <div class="panel-heading">
-              <div><h2 id="training-suggestion-title">帮我排一份</h2><p>填写可用时间和器械，先生成一份草案。</p></div>
-              <button class="action-button" type="button" @click="suggestionFormOpen = !suggestionFormOpen">{{ suggestionFormOpen ? '收起' : '填写条件' }}</button>
-            </div>
-            <form v-if="suggestionFormOpen" class="suggestion-form" @submit.prevent="generateSuggestion">
-              <label><span>主要目标</span><select v-model="suggestionForm.goal"><option value="general">一般力量与健康</option><option value="strength">力量</option><option value="hypertrophy">肌肥大</option><option value="power">功率</option></select></label>
-              <label><span>训练经验</span><select v-model="suggestionForm.experience"><option value="beginner">刚开始或重新开始</option><option value="intermediate">已有稳定训练</option><option value="advanced">经验较多</option></select></label>
-              <label><span>可用器械</span><select v-model="suggestionForm.equipment"><option value="minimal">徒手或少量器械</option><option value="dumbbells">哑铃</option><option value="full_gym">完整健身房</option></select></label>
-              <label><span>每周可练几天</span><input v-model.number="suggestionForm.availableDaysPerWeek" type="number" min="2" max="6" required /></label>
-              <label><span>单次可用分钟</span><input v-model.number="suggestionForm.sessionMinutes" type="number" min="20" max="120" required /></label>
-              <label class="checkbox-row"><input v-model="suggestionForm.hasInjuryOrMedicalLimitation" type="checkbox" />目前有伤病或需要医疗个别评估</label>
-              <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? '生成中…' : '按这些条件生成' }}</button>
-            </form>
-            <article v-for="suggestion in suggestions.filter((item) => item.status === 'active')" :key="suggestion.id" class="suggestion-card">
-              <header><div><strong>{{ suggestion.candidate.title }}</strong><span>{{ suggestion.stale ? '资料变化后生成的旧草案' : `生成于 ${suggestion.inputSnapshot.generatedOn}` }}</span></div><span class="status-chip" :data-tone="suggestion.candidate.status === 'stopped' ? 'danger' : 'accent'">{{ suggestion.candidate.status === 'ready' ? '草案' : '需要自己安排' }}</span></header>
-              <p v-for="message in suggestion.candidate.messages" :key="message">{{ message }}</p>
-              <template v-if="suggestion.candidate.template !== null">
-                <p><strong>建议频率：</strong>每周 {{ suggestion.candidate.weeklyResistanceDays }} 次抗阻训练；具体日期由你安排。</p>
-                <ul class="suggestion-exercises"><li v-for="item in suggestion.candidate.template.items" :key="item.exerciseName"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span>{{ item.targetSets ?? '—' }} 组<span v-if="item.targetRepsMin !== null"> · {{ item.targetRepsMin }}–{{ item.targetRepsMax }} 次</span></span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('suggestion', suggestion.id, item.exerciseName), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('suggestion', suggestion.id, item.exerciseName)]" /></li></ul>
-                <ul class="suggestion-baseline"><li v-for="item in suggestion.candidate.publicHealthBaseline" :key="item">{{ item }}</li></ul>
-              </template>
-              <details><summary>适用范围和依据</summary><p>依据 {{ suggestion.evidenceIds.join('、') }}；生成于 {{ suggestion.inputSnapshot.generatedOn }}。</p><ul><li v-for="item in suggestion.candidate.limitations" :key="item">{{ item }}</li></ul></details>
-              <div class="recommendation-actions"><button v-if="suggestion.candidate.template !== null" class="action-button action-button--primary" type="button" :disabled="saving" @click="adoptSuggestion(suggestion)">存成单次方案</button><button class="text-action" type="button" :disabled="saving" @click="dismissSuggestion(suggestion)">移除草案</button></div>
-            </article>
-          </section>
-
-          <nav class="plan-kind-tabs" aria-label="训练计划类型">
-            <button type="button" :aria-current="planTab === 'templates' ? 'page' : undefined" @click="planTab = 'templates'">
-              <strong>单次方案</strong><span>选一份就开始</span>
-            </button>
-            <button type="button" :aria-current="planTab === 'programs' ? 'page' : undefined" @click="planTab = 'programs'">
-              <strong>周期计划</strong><span>按周组织训练日</span>
-            </button>
-          </nav>
-
-          <div class="schedule-toolbar">
-            <p>也可以只安排一个训练主题。</p>
-            <button class="action-button" type="button" @click="openScheduleEditor({ title: '' })">安排训练主题</button>
-          </div>
-
-          <section v-if="scheduleEditorOpen" class="work-panel schedule-editor" aria-labelledby="schedule-editor-title">
-            <div class="panel-heading">
-              <div><h2 id="schedule-editor-title">安排训练日期</h2><p>这只是当天安排，不会改变原方案。</p></div>
-              <button class="text-action" type="button" @click="scheduleEditorOpen = false">取消</button>
-            </div>
-            <form class="template-form schedule-form" @submit.prevent="saveSchedule">
-              <label><span>日期</span><input v-model="scheduleForm.localDate" required type="date" /></label>
-              <label><span>当天显示名称</span><input v-model="scheduleForm.title" required maxlength="80" placeholder="例如：轻量恢复训练" /></label>
-              <label class="wide-field"><span>备注（可选）</span><input v-model="scheduleForm.note" maxlength="1000" placeholder="时间、场地或当天提醒" /></label>
-              <button class="action-button action-button--primary wide-field schedule-submit" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存安排" }}</button>
-            </form>
-          </section>
-
-          <template v-if="planTab === 'templates'">
-          <section v-if="editorOpen" class="work-panel template-editor" aria-labelledby="template-editor-title">
-            <div class="panel-heading">
-              <div>
-                <h2 id="template-editor-title">{{ editingTemplate === null ? "新建单次训练方案" : "编辑训练方案" }}</h2>
-                <p>开始训练时会复制方案内容，之后互不影响。</p>
-              </div>
-              <button class="text-action" type="button" @click="editorOpen = false">收起</button>
-            </div>
-            <form class="template-form" @submit.prevent="saveTemplate">
-              <label><span>方案名称</span><input v-model="templateForm.name" required maxlength="80" placeholder="例如：胸部 A" /></label>
-              <label><span>方案备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label>
-
-              <div class="template-items">
-                <article v-for="(item, index) in templateForm.items" :key="index" class="template-item-form">
-                  <div class="template-item-form__heading">
-                    <strong>动作 {{ index + 1 }}</strong>
-                    <button v-if="templateForm.items.length > 1" class="text-action" type="button" @click="templateForm.items.splice(index, 1)">移除</button>
-                  </div>
-                  <ExerciseNameField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
-                  <label><span>目标组数</span><input v-model="item.targetSets" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>最低次数</span><input v-model="item.targetRepsMin" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>最高次数</span><input v-model="item.targetRepsMax" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>目标重量 kg</span><input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
-                  <label class="wide-field"><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="节奏、器械或注意事项" /></label>
-                </article>
-              </div>
-
-              <div class="form-actions">
-                <button class="text-action" type="button" @click="templateForm.items.push(emptyTemplateItem())">添加动作 →</button>
-                <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存方案" }}</button>
-              </div>
-            </form>
-          </section>
-
-          <section class="split-heading" aria-labelledby="templates-title">
-            <div><h2 id="templates-title">我的单次训练方案</h2></div>
-            <p>把常练的动作放在一起，下次直接选。</p>
-          </section>
-
-          <section v-if="templates.length === 0" class="work-panel training-empty">
-            <strong>还没有训练方案</strong>
-            <p>创建常用方案，或从空白训练开始。</p>
-            <div class="form-actions">
-              <button class="action-button action-button--primary" type="button" @click="openCreateTemplate">建立第一份方案</button>
-              <button class="action-button" type="button" :disabled="saving" @click="startTraining(null)">直接开始</button>
-            </div>
-          </section>
-
-          <div v-else class="template-grid">
-            <article v-for="template in templates" :key="template.id" class="work-panel template-card">
-              <div class="panel-heading">
-                <div><h2>{{ template.name }}</h2><p>{{ template.note ?? `${template.items.length} 个动作` }}</p></div>
-                <span class="status-chip">{{ template.items.length }} 项</span>
-              </div>
-              <ol class="plain-list template-preview">
-                <li v-for="item in template.items" :key="item.id">
-                  <div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('template', template.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('template', template.id, item.id) ? '收起预览' : '动作预览' }}</button></div>
-                  <ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('template', template.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('template', template.id, item.id)]" />
-                </li>
-              </ol>
-              <div class="form-actions">
-                <button class="action-button action-button--primary" type="button" :disabled="saving" @click="startTraining(template.id)">用这份开始</button>
-                <button class="text-action" type="button" @click="openEditTemplate(template)">编辑</button>
-                <button class="text-action" type="button" :aria-label="`复制${template.name}`" :disabled="saving" @click="copyTemplate(template)">复制</button>
-                <button class="text-action" type="button" :aria-label="`安排${template.name}`" @click="openScheduleEditor({ title: template.name, templateId: template.id })">安排日期</button>
-                <button class="text-action" type="button" :disabled="saving" @click="archiveTemplate(template)">归档</button>
-              </div>
-            </article>
-          </div>
-
-          <button v-if="templates.length > 0" class="action-button blank-start" type="button" :disabled="saving" @click="startTraining(null)">不使用方案，直接开始</button>
-          </template>
-
-          <template v-else>
-            <section v-if="programEditorOpen" class="work-panel template-editor" aria-labelledby="program-editor-title">
-              <div class="panel-heading">
-                <div>
-                  <h2 id="program-editor-title">{{ editingProgram === null ? "新建周期计划" : "编辑周期计划" }}</h2>
-                  <p>周期只负责整理训练日，不会替你规定具体日期。</p>
-                </div>
-                <button class="text-action" type="button" @click="programEditorOpen = false">收起</button>
-              </div>
-              <form class="template-form program-form" @submit.prevent="saveProgram">
-                <label><span>计划名称</span><input v-model="programForm.name" required maxlength="80" placeholder="例如：四周增肌计划" /></label>
-                <label><span>包含几周</span><input v-model="programForm.weekCount" required type="number" inputmode="numeric" min="1" max="52" /></label>
-                <label class="wide-field"><span>备注（可选）</span><input v-model="programForm.note" maxlength="1000" placeholder="训练目标、使用场景或注意事项" /></label>
-                <div class="form-actions wide-field">
-                  <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存周期计划" }}</button>
-                </div>
-              </form>
-            </section>
-
-            <section class="split-heading" aria-labelledby="programs-title">
-              <div><h2 id="programs-title">我的周期计划</h2></div>
-              <p>按周编排训练，每周都可以不同。</p>
-            </section>
-
-            <section v-if="programs.length === 0" class="work-panel training-empty">
-              <strong>还没有周期计划</strong>
-              <p>需要多周变化时再创建。</p>
-              <button class="action-button action-button--primary" type="button" @click="openCreateProgram">建立第一个周期计划</button>
-            </section>
-
-            <section v-for="program in programs" :key="program.id" class="work-panel program-card">
-              <div class="panel-heading">
-                <div>
-                  <h2>{{ program.name }}</h2>
-                  <p>{{ program.note ?? `${program.weekCount} 周 · ${program.units.length} 个训练日` }}</p>
-                </div>
-                <span class="status-chip">{{ program.weekCount }} 周</span>
-              </div>
-              <div class="form-actions">
-                <button class="action-button" type="button" @click="selectedProgramId = selectedProgramId === program.id ? null : program.id">
-                  {{ selectedProgramId === program.id ? "收起" : "查看训练日" }}
-                </button>
-                <button class="text-action" type="button" @click="openEditProgram(program)">编辑计划</button>
-                <button class="text-action" type="button" :disabled="saving" @click="archiveProgram(program)">归档</button>
-              </div>
-
-              <div v-if="selectedProgramId === program.id" class="program-detail">
-                <div class="program-detail__heading">
-                  <div><strong>周期内容</strong><p>可以从空白添加，也可以复制一份单次方案。</p></div>
-                  <button class="action-button action-button--primary" type="button" @click="openAddUnit(program)">添加训练日</button>
-                </div>
-
-                <form v-if="unitEditorOpen && unitProgramId === program.id" class="template-form program-unit-editor" @submit.prevent="saveUnit">
-                  <div class="panel-heading wide-field">
-                    <div><h3>{{ editingUnit === null ? "添加训练日" : "编辑训练日" }}</h3></div>
-                    <button class="text-action" type="button" @click="unitEditorOpen = false">取消</button>
-                  </div>
-                  <label>
-                    <span>放在第几周</span>
-                    <input v-model="unitForm.weekNumber" required type="number" inputmode="numeric" min="1" :max="program.weekCount" />
-                  </label>
-                  <label v-if="editingUnit === null">
-                    <span>从单次方案复制（可选）</span>
-                    <select v-model="unitForm.sourceTemplateId">
-                      <option value="">从空白添加</option>
-                      <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.name }}</option>
-                    </select>
-                  </label>
-                  <p v-if="editingUnit === null && unitForm.sourceTemplateId" class="source-copy-note wide-field">
-                    会复制当前方案。来源方案以后发生变化时，这里保持不变。
-                  </p>
-                  <template v-if="editingUnit !== null || !unitForm.sourceTemplateId">
-                    <label class="wide-field"><span>训练日名称</span><input v-model="unitForm.name" required maxlength="80" placeholder="例如：胸部训练 A" /></label>
-                    <label class="wide-field"><span>备注（可选）</span><input v-model="unitForm.note" maxlength="1000" placeholder="当天的安排或注意事项" /></label>
-                    <div class="template-items wide-field">
-                      <article v-for="(item, index) in unitForm.items" :key="index" class="template-item-form">
-                        <div class="template-item-form__heading">
-                          <strong>动作 {{ index + 1 }}</strong>
-                          <button v-if="unitForm.items.length > 1" class="text-action" type="button" @click="unitForm.items.splice(index, 1)">移除</button>
-                        </div>
-                        <ExerciseNameField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
-                        <label><span>目标组数</span><input v-model="item.targetSets" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
-                        <label><span>最低次数</span><input v-model="item.targetRepsMin" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
-                        <label><span>最高次数</span><input v-model="item.targetRepsMax" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
-                        <label><span>目标重量 kg</span><input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
-                        <label class="wide-field"><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="可不填" /></label>
-                      </article>
-                    </div>
-                    <button class="text-action wide-field unit-add-action" type="button" @click="unitForm.items.push(emptyTemplateItem())">添加动作 →</button>
-                  </template>
-                  <div class="form-actions wide-field">
-                    <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存训练日" }}</button>
-                  </div>
-                </form>
-
-                <div class="program-weeks">
-                  <section v-for="weekNumber in weekNumbers(program)" :key="weekNumber" class="program-week">
-                    <header><strong>第 {{ weekNumber }} 周</strong><span>{{ unitsForWeek(program, weekNumber).length }} 个训练日</span></header>
-                    <p v-if="unitsForWeek(program, weekNumber).length === 0" class="program-week__empty">这一周还没有安排。</p>
-                    <article v-for="unit in unitsForWeek(program, weekNumber)" :key="unit.id" class="program-unit-card">
-                      <div>
-                        <span v-if="unit.started" class="exercise-state">已有训练记录</span>
-                        <h3>{{ unit.name }}</h3>
-                        <p>{{ unit.items.length }} 个动作<span v-if="sourceTemplateName(unit)"> · 复制自 {{ sourceTemplateName(unit) }}</span></p>
-                      </div>
-                      <ol class="plain-list template-preview">
-                        <li v-for="item in unit.items" :key="item.id"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('unit', unit.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('unit', unit.id, item.id) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('unit', unit.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('unit', unit.id, item.id)]" /></li>
-                      </ol>
-                      <p v-if="sourceUpdated(unit) && !unit.started" class="source-update-note">来源方案有更新。当前内容不会自动改变。</p>
-                      <div class="form-actions">
-                        <button class="action-button action-button--primary" type="button" :disabled="saving" @click="startProgramUnit(program, unit)">{{ unit.started ? "再练一次" : "开始这天" }}</button>
-                        <button class="text-action" type="button" :aria-label="`安排${program.name}第${unit.weekNumber}周${unit.name}`" @click="openScheduleEditor({ title: unit.name, programId: program.id, programUnitId: unit.id })">安排日期</button>
-                        <button v-if="!unit.started" class="text-action" type="button" @click="openEditUnit(program, unit)">编辑</button>
-                        <button v-if="sourceUpdated(unit) && !unit.started" class="text-action" type="button" :disabled="saving" @click="reimportUnit(program, unit)">重新导入</button>
-                      </div>
-                    </article>
-                  </section>
-                </div>
-              </div>
-            </section>
-          </template>
-        </div>
-
-        <fieldset v-else class="view-stack training-draft-fields" :disabled="saving" :aria-busy="saving">
-          <section class="work-panel active-training" aria-labelledby="active-training-title">
-            <div class="panel-heading">
-              <div>
-                <h2 id="active-training-title">计划动作</h2>
-                <p>完成后勾选，需要时补充组数、重量或备注。</p>
-              </div>
-            </div>
-
-            <ol v-if="activeSession.items.some((item) => item.origin === 'planned')" class="actual-exercise-list">
-              <li v-for="item in activeSession.items.filter((entry) => entry.origin === 'planned')" :key="item.id" :class="`is-${item.status}`">
-                <div class="actual-exercise-heading">
-                  <div>
-                    <span class="exercise-state">{{ item.status === "completed" ? "已完成" : item.status === "skipped" ? "已跳过" : "待完成" }}</span>
-                    <h3>{{ item.exerciseName }}</h3>
-                    <p>{{ describeTarget(item) }}</p>
-                  </div>
-                  <div class="item-status-actions">
-                    <button class="text-action" type="button" @click="toggleGuidance(item.id, item.exerciseName)">{{ guidanceOpenItemId === item.id ? "收起预览" : "动作预览" }}</button>
-                    <button class="action-button" type="button" :disabled="saving" @click="saveItem(item, item.status === 'completed' ? 'pending' : 'completed')">
-                      {{ item.status === "completed" ? "取消完成" : "完成" }}
-                    </button>
-                    <button v-if="item.status !== 'skipped'" class="text-action" type="button" :disabled="saving" @click="saveItem(item, 'skipped')">跳过</button>
-                  </div>
-                </div>
-
-                <ExerciseGuidanceCard v-if="guidanceOpenItemId === item.id" :exercise-name="item.exerciseName" :guidance="guidanceByItem[item.id]" />
-
-                <div v-if="actualForms[item.id]" class="actual-data-form">
-                  <ExerciseNameField v-model="actualForms[item.id]!.performedExerciseName" class="wide-field" label="实际动作" required :placeholder="item.exerciseName" />
-                  <div v-for="(set, setIndex) in actualForms[item.id]!.sets" :key="setIndex" class="set-row">
-                    <strong>第 {{ setIndex + 1 }} 组</strong>
-                    <label><span>次数</span><input v-model="set.reps" type="number" min="0" inputmode="numeric" placeholder="未记录" /></label>
-                    <label><span>重量 kg</span><input v-model="set.weightKg" inputmode="decimal" placeholder="未记录" /></label>
-                    <label><span>时长（秒）</span><input v-model="set.durationSeconds" type="number" min="0" inputmode="numeric" placeholder="未记录" /></label>
-                    <label><span>距离（米）</span><input v-model="set.distanceMeters" inputmode="decimal" placeholder="未记录" /></label>
-                  </div>
-                  <label class="wide-field"><span>实际备注</span><input v-model="actualForms[item.id]!.actualNote" maxlength="1000" placeholder="体感、调整或其他记录" /></label>
-                  <div class="form-actions">
-                    <button class="text-action" type="button" @click="addSet(item.id)">再加一组 →</button>
-                    <button class="text-action" type="button" :disabled="saving" @click="saveItem(item, 'completed')">保存实际数据</button>
-                  </div>
-                </div>
-              </li>
-            </ol>
-            <p v-else>这次从空白开始，直接在下面添加实际动作。</p>
-          </section>
-
-          <section class="work-panel extra-training" aria-labelledby="extra-title">
-            <div class="panel-heading">
-              <div><h2 id="extra-title">额外动作</h2><p>只加入本次训练，不修改原方案。</p></div>
-              <span class="status-chip">实际记录</span>
-            </div>
-
-            <ul v-if="activeSession.items.some((item) => item.origin === 'extra')" class="recorded-extra-list">
-              <li v-for="item in activeSession.items.filter((entry) => entry.origin === 'extra')" :key="item.id">
-                <strong>{{ item.exerciseName }}</strong><span>{{ item.sets.length > 0 ? `${item.sets.length} 组` : "已记录" }}</span>
-              </li>
-            </ul>
-
-            <form class="extra-form" @submit.prevent="addExtra">
-              <ExerciseNameField v-model="extraName" class="wide-field" label="动作名称" required placeholder="例如：平板支撑或 plank" />
-              <div v-for="(set, index) in extraSets" :key="index" class="set-row">
-                <strong>第 {{ index + 1 }} 组</strong>
-                <label><span>次数</span><input v-model="set.reps" type="number" min="0" inputmode="numeric" placeholder="未记录" /></label>
-                <label><span>重量 kg</span><input v-model="set.weightKg" inputmode="decimal" placeholder="未记录" /></label>
-                <label><span>时长（秒）</span><input v-model="set.durationSeconds" type="number" min="0" inputmode="numeric" placeholder="未记录" /></label>
-                <label><span>距离（米）</span><input v-model="set.distanceMeters" inputmode="decimal" placeholder="未记录" /></label>
-              </div>
-              <label class="wide-field"><span>实际备注</span><input v-model="extraNote" maxlength="1000" placeholder="可不填" /></label>
-              <div class="form-actions">
-                <button class="text-action" type="button" @click="extraSets.push({ reps: '', weightKg: '', durationSeconds: '', distanceMeters: '' })">再加一组 →</button>
-                <button class="action-button" type="submit" :disabled="saving">加入本次训练</button>
-              </div>
-            </form>
-          </section>
-
-          <section class="training-finish-bar" aria-label="结束训练">
-            <div><strong>训练结束了吗？</strong><p>没完成的动作会保留原状态，已经做过的内容不会丢。</p></div>
-            <div class="form-actions">
-              <button class="text-action" type="button" :disabled="saving" @click="finishTraining('abandoned')">提前结束</button>
-              <button class="action-button action-button--primary" type="button" :disabled="saving" @click="finishTraining('completed')">保存并结束</button>
-            </div>
-          </section>
+          <p class="data-note">填写实际做过的内容，数量不清楚可以留空。切换页面会保留输入；刷新或关闭应用不会保存草稿。</p>
+          <details><summary>参考计划或上次内容</summary><div class="record-source"><label><span>选择计划</span><select v-model="selectedTemplate"><option value="">请选择</option><option v-for="plan in templates" :key="plan.id" :value="plan.id">{{ plan.name }}</option></select></label><button type="button" class="action-button" :disabled="!selectedTemplate" @click="importTemplate">加入参考内容</button><button type="button" class="action-button" :disabled="!previousRecord" @click="copyPrevious">使用上次实际内容</button></div><p>参考内容不是本次完成量。请移除未做的动作并核对数量。</p></details>
+          <RecordActionFields v-for="(item, index) in draft.items" :key="item.id" v-model="draft.items[index]!" @remove="draft.items.splice(index, 1)" />
+          <button type="button" class="action-button" :disabled="draft.items.length >= 50" @click="addAction">添加动作</button>
+          <details><summary>一次添加多个动作</summary><label><span>动作名称，每行一个</span><textarea v-model="names" rows="3" placeholder="深蹲&#10;俯卧撑&#10;跑步" /></label><button type="button" class="action-button" @click="addNames">加入这些动作</button></details>
+          <label><span>本次备注（可选）</span><textarea v-model="draft.note" rows="2" maxlength="1000" /></label>
+          <div class="form-actions"><button class="action-button action-button--primary" type="submit" :disabled="conflicting">{{ saving ? "保存中…" : "保存训练记录" }}</button><button class="text-action" type="button" @click="discard">放弃未保存内容</button></div>
+          <button v-if="draft.revision > 0" type="button" class="text-action" @click="remove({ id: draft.id, revision: draft.revision, localDate: draft.localDate })">删除这条已存记录</button>
         </fieldset>
+      </form>
+      <section v-if="conflicting" class="record-conflict" aria-label="记录冲突">
+        <h3>先核对最新记录</h3><p>你的输入仍保留，未覆盖其他修改。</p>
+        <template v-if="latest"><p>{{ latest.localDate }} · {{ latest.recordedTime ?? '时间未记录' }} · {{ latest.note }}</p><ul><li v-for="item in latest.items.filter(i => i.status === 'completed')" :key="item.id">{{ item.performedExerciseName ?? item.exerciseName }}：{{ actionSummary(item) }}</li></ul><div class="form-actions"><button class="action-button" @click="useLatest">改用最新内容</button><button class="action-button" @click="rebase">已核对，用我的内容替换</button></div></template>
+        <template v-else-if="deletedConflict"><p>原记录已被删除，不能覆盖或恢复原记录。</p><button class="action-button" @click="saveAsNew">作为新记录保留输入</button></template>
+        <button v-else class="action-button" @click="inspectConflict">重试读取最新记录</button>
+      </section>
+    </section>
+    <template v-else>
+      <section class="work-panel"><div class="panel-heading"><h2>{{ date === today() ? "今天的训练" : "训练记录" }}</h2><label><span class="sr-only">查看日期</span><input v-model="date" type="date" aria-label="查看日期" /></label></div>
+        <div v-if="todayPlans.length" class="record-plans"><article v-for="plan in todayPlans" :key="plan.id"><strong>{{ plan.title }}</strong><button class="text-action" @click="referenceSchedule(plan)">参考计划记录</button></article></div>
+        <p v-if="!visibleRecords.length && !loading">这一天还没有训练记录。练完后，一次记下来就好。</p>
+        <button class="action-button action-button--primary" @click="begin">记录训练内容</button>
+      </section>
+      <p v-if="loading" role="status">正在读取训练内容…</p>
+      <article v-for="record in visibleRecords" :key="record.id" class="work-panel saved-training" aria-label="已存训练记录">
+        <div class="panel-heading"><h2>{{ record.status === 'in_progress' ? '旧版未完成记录' : '已记录的训练' }}</h2><span>{{ record.recordedTime ?? '时间未记录' }}</span></div>
+        <ul><li v-for="item in record.items.filter(i => i.status === 'completed')" :key="item.id"><strong>{{ item.performedExerciseName ?? item.exerciseName }}</strong><span>{{ actionSummary(item) }}</span><p v-if="item.actualNote">{{ item.actualNote }}</p></li></ul>
+        <p v-if="!record.items.some(i => i.status === 'completed')">尚无已确认完成的动作。</p><p v-if="record.note">{{ record.note }}</p>
+        <div class="form-actions"><button class="action-button" :disabled="saving" @click="edit(record)">修改整条记录</button><button class="text-action" :disabled="saving" @click="remove(record)">删除记录</button></div>
+      </article>
+    </template>
   </AppShell>
 </template>
-
 <style scoped>
-.training-draft-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.record-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: var(--space-md); }
+.record-meta, .record-source { display: flex; gap: var(--space-sm); flex-wrap: wrap; align-items: end; }
+label { display: grid; gap: var(--space-xs); min-width: 0; } input, textarea, select { max-width: 100%; min-width: 0; } textarea { width: 100%; }
+input, textarea, select { min-height: 2.75rem; padding: var(--space-xs) var(--space-sm); border: 1px solid var(--color-rule-strong); border-radius: var(--radius-sm); background: var(--color-paper); }
+.record-source { margin-block: var(--space-md); } .record-source label { flex: 1; min-width: min(100%, 10rem); }
+.saved-training { margin-top: var(--space-md); } .saved-training li { margin-block: var(--space-sm); overflow-wrap: anywhere; } .saved-training li span { display: block; }
+.record-plans article { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-sm); margin-block: var(--space-md); }
+.record-conflict { border-top: 1px solid var(--color-rule); margin-top: var(--space-md); padding-top: var(--space-md); }
+.panel-heading { flex-wrap: wrap; } summary { cursor: pointer; padding-block: var(--space-xs); }
 </style>

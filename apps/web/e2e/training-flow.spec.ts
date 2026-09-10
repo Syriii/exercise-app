@@ -1,186 +1,171 @@
-import { expect, test } from "@playwright/test";
-
-test("a person can start a blank workout from the first training screen", async ({ page }, testInfo) => {
-  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
+import { expect, test, type Page } from "@playwright/test";
+async function register(page: Page, suffix: string) {
   await page.goto("/register");
-  await page.getByLabel("用户名").fill(`training_blank_${projectKey}_${Date.now()}`);
+  await page.getByLabel("用户名").fill("batch_" + suffix + "_" + Date.now());
   await page.getByLabel("密码").fill("a browser-only secure password");
-  await page.getByRole("button", { name: "注册" }).click();
+  await page.getByRole("button", { name: "注册", exact: true }).click();
   await expect(page).toHaveURL(/\/today$/);
-
-  await page.goto("/training");
-  await page.getByRole("button", { name: "直接开始训练" }).click();
-  await expect(page.getByRole("heading", { name: "这次训练" })).toBeVisible();
-  await expect(page.getByText("空白训练已开始")).toBeVisible();
-  await page.getByRole("button", { name: "保存并结束" }).click();
-  await expect(page.getByRole("heading", { name: "训练", exact: true })).toBeVisible();
-});
-
-test("a person can turn a reusable plan into an actual workout", async ({ page }, testInfo) => {
-  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
-  await page.goto("/register");
-  await page.getByLabel("用户名").fill(`training_${projectKey}_${Date.now()}`);
-  await page.getByLabel("密码").fill("a browser-only secure password");
-  await page.getByRole("button", { name: "注册" }).click();
-  await expect(page).toHaveURL(/\/today$/);
-
-  await page.goto("/training");
-  await page.getByRole("button", { name: "新建方案" }).click();
-  await page.getByLabel("方案名称").fill("全身简易");
-  await page.getByLabel("动作名称").fill("深蹲");
+}
+async function plan(page: Page, name = "全身简易") {
+  await page.goto("/training/plans");
+  await page.getByRole("button", { name: "新建方案", exact: true }).click();
+  await page.getByLabel("方案名称").fill(name);
+  await page.getByLabel("动作名称", { exact: true }).fill("深蹲");
   await page.getByLabel("目标组数").fill("3");
-  await page.getByLabel("最低次数").fill("8");
-  await page.getByLabel("最高次数").fill("12");
-  await page.getByRole("button", { name: "保存方案" }).click();
+  await page.getByLabel("最低次数").fill("10");
+  await page.getByLabel("最高次数").fill("10");
+  await page.getByRole("button", { name: "保存方案", exact: true }).click();
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+}
+test.beforeEach(async ({ page }, info) => register(page, info.project.name[0]!));
 
-  await expect(page.getByRole("heading", { name: "全身简易" })).toBeVisible();
-  const templateCard = page.getByRole("article").filter({ hasText: "全身简易" }).first();
-  await templateCard.getByRole("button", { name: "动作预览" }).click();
-  await expect(templateCard.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
-  await templateCard.getByRole("button", { name: "收起预览" }).click();
-  await page.getByRole("button", { name: "用这份开始" }).click();
-  await expect(page.getByRole("heading", { name: "这次训练" })).toBeVisible();
-
-  await page.getByRole("button", { name: "动作预览" }).click();
-  await expect(page.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
-  await page.getByRole("button", { name: "收起预览" }).click();
-
-  await page.getByLabel("次数").first().fill("10");
-  await page.getByLabel("重量 kg").first().fill("60");
-  await page.getByRole("button", { name: "保存实际数据" }).click();
-  await expect(page.getByText("深蹲 已记下")).toBeVisible();
-
-  await page.getByLabel("动作名称").fill("平板支撑");
-  await page.getByLabel("实际备注").last().fill("训练收尾");
-  await page.getByRole("button", { name: "加入本次训练" }).click();
-  await expect(page.getByText("额外动作已加入本次训练")).toBeVisible();
-  await expect(page.getByText("平板支撑")).toBeVisible();
-
-  await page.getByRole("button", { name: "保存并结束" }).click();
-  await expect(page.getByRole("heading", { name: "训练", exact: true })).toBeVisible();
-  await expect(page.getByText("这次训练已保存")).toBeVisible();
+test("a person records multiple actual actions without creating a live workout", async ({ page }, info) => {
+  await page.goto("/training");
+  await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
+  await page.getByText("一次添加多个动作", { exact: true }).click();
+  await page.getByLabel("动作名称，每行一个").fill("深蹲\n跑步\n拉伸");
+  await page.getByRole("button", { name: "加入这些动作" }).click();
+  const actions = page.getByRole("region", { name: "动作填写" });
+  await actions.nth(0).getByLabel("组数", { exact: true }).fill("3");
+  await actions.nth(0).getByLabel("每组次数").fill("10");
+  await actions.nth(0).getByLabel("重量 kg（可选）").fill("40");
+  await actions.nth(0).getByRole("button", { name: "各组不同，展开调整" }).click();
+  await actions.nth(0).getByLabel("次数", { exact: true }).nth(2).fill("8");
+  await actions.nth(1).getByLabel("记录方式").selectOption("activity");
+  await actions.nth(1).getByLabel("时长（秒）").fill("1800");
+  await actions.nth(1).getByLabel("距离（米）").fill("3000");
+  await actions.nth(2).getByLabel("记录方式").selectOption("unknown");
+  expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
+  await page.locator('.app-main').evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+  await page.screenshot({ path: info.outputPath("batch-editor.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
+  const records = page.getByRole("article", { name: "已存训练记录" });
+  await expect(records).toHaveCount(1);
+  await expect(records).toContainText("3 组");
+  await expect(records).toContainText("10 / 10 / 8 次");
+  await expect(records).toContainText("1800 秒");
+  await expect(records).toContainText("数量未记录");
+  await expect(records).toContainText("时间未记录");
 });
 
-test("a person can copy a single plan into a cycle and start that training day", async ({ page }, testInfo) => {
-  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
-  await page.goto("/register");
-  await page.getByLabel("用户名").fill(`cycle_${projectKey}_${Date.now()}`);
-  await page.getByLabel("密码").fill("a browser-only secure password");
-  await page.getByRole("button", { name: "注册" }).click();
-  await expect(page).toHaveURL(/\/today$/);
+test("a reusable plan is copied into a draft and can be changed without modifying the plan", async ({ page }) => {
+  await plan(page);
+  const card = page.getByRole("article").filter({ hasText: "全身简易" }).first();
+  await card.getByRole("button", { name: "动作预览" }).click();
+  await expect(card.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
+  await page.getByRole("button", { name: "参考这份记录" }).click();
+  await expect(page.getByLabel("组数", { exact: true })).toHaveValue("3");
+  await page.getByRole('region', { name: '动作填写' }).getByRole('button', { name: '动作预览' }).click();
+  await expect(page.getByRole('region', { name: '深蹲动作预览' })).toContainText('内容草案');
+  expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
+  await page.getByLabel("每组次数").fill("8");
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  const extra = page.getByRole("region", { name: "动作填写" }).last();
+  await extra.getByLabel("动作名称", { exact: true }).fill("平板支撑");
+  await extra.getByLabel("记录方式").selectOption("activity");
+  await extra.getByLabel("时长（秒）").fill("60");
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
+  const plans = await (await page.request.get("/api/v1/training/templates")).json();
+  expect(plans[0].items[0].targetRepsMin).toBe(10);
+  await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
+  await page.getByText("参考计划或上次内容", { exact: true }).click();
+  await page.getByRole("button", { name: "使用上次实际内容" }).click();
+  await expect(page.getByLabel("每组次数")).toHaveValue("8");
+  expect(await (await page.request.get("/api/v1/training/sessions")).json()).toHaveLength(1);
+});
 
-  await page.goto("/training");
-  await page.getByRole("button", { name: "新建方案" }).click();
-  await page.getByLabel("方案名称").fill("胸部 A");
-  await page.getByLabel("动作名称").fill("杠铃卧推");
-  await page.getByLabel("目标组数").fill("4");
-  await page.getByRole("button", { name: "保存方案" }).click();
-  await expect(page.getByRole("heading", { name: "胸部 A" })).toBeVisible();
+test("a person copies a plan into a cycle and references its day without marking it started", async ({ page }) => {
+  await plan(page, "胸部 A");
   await page.getByRole("button", { name: "复制胸部 A" }).click();
   await expect(page.getByRole("heading", { name: "胸部 A 副本" })).toBeVisible();
-  await expect(page.getByText("已复制“胸部 A”，两份方案之后可以分别修改")).toBeVisible();
-
   await page.getByRole("button", { name: /周期计划/ }).first().click();
-  await page.getByRole("button", { name: "新建周期计划" }).click();
-  await page.getByLabel("计划名称").fill("四周增肌");
+  await page.getByRole("button", { name: "新建周期计划", exact: true }).click();
+  await page.getByLabel("计划名称").fill("四周训练");
   await page.getByLabel("包含几周").fill("4");
-  await page.getByRole("button", { name: "保存周期计划" }).click();
-
-  await expect(page.getByRole("heading", { name: "四周增肌" })).toBeVisible();
+  await page.getByRole("button", { name: "保存周期计划", exact: true }).click();
   await page.getByRole("button", { name: "添加训练日" }).click();
   await page.getByLabel("放在第几周").fill("2");
   await page.getByLabel("从单次方案复制（可选）").selectOption({ label: "胸部 A" });
-  await page.getByRole("button", { name: "保存训练日" }).click();
-
-  await expect(page.getByText("杠铃卧推")).toBeVisible();
-  await page.getByRole("button", { name: "开始这天" }).click();
-  await expect(page.getByText("四周增肌 · 第 2 周 · 胸部 A")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "杠铃卧推" })).toBeVisible();
-
-  await page.getByRole("button", { name: "保存并结束" }).click();
-  await expect(page.getByText("这次训练已保存")).toBeVisible();
+  await page.getByRole("button", { name: "保存训练日", exact: true }).click();
+  await page.getByRole("button", { name: "参考这天记录", exact: true }).click();
+  await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
 });
 
-test("a person can schedule today's workout and find the actual record in history", async ({ page }, testInfo) => {
-  const projectKey = testInfo.project.name === "mobile-chromium" ? "m" : "d";
-  await page.goto("/register");
-  await page.getByLabel("用户名").fill(`scheduled_${projectKey}_${Date.now()}`);
-  await page.getByLabel("密码").fill("a browser-only secure password");
-  await page.getByRole("button", { name: "注册" }).click();
-  await expect(page).toHaveURL(/\/today$/);
-
-  await page.goto("/training");
-  await page.getByRole("button", { name: "新建方案" }).click();
-  await page.getByLabel("方案名称").fill("今天的力量训练");
-  await page.getByLabel("动作名称").fill("硬拉");
-  await page.getByLabel("目标组数").fill("3");
-  await page.getByRole("button", { name: "保存方案" }).click();
-  await expect(page.getByRole("heading", { name: "今天的力量训练" })).toBeVisible();
-
+test("a scheduled plan opens the same editor and history edits and deletes the whole record", async ({ page }) => {
+  await plan(page, "今天的力量训练");
   await page.getByRole("button", { name: "安排今天的力量训练" }).click();
-  const scheduleEditor = page.getByRole("region", { name: "安排训练日期" });
-  await expect(page.getByRole("heading", { name: "安排训练日期" })).toBeVisible();
-  const scheduledDate = await scheduleEditor.locator('input[type="date"]').inputValue();
   await page.getByRole("button", { name: "保存安排" }).click();
-  await expect(page.getByText(/已安排到/)).toBeVisible();
-
-  await page.goto("/settings/reminders");
-  const reminderSettings = page.getByRole("region", { name: "训练提醒" });
-  await reminderSettings.getByRole("checkbox").check();
-  await reminderSettings.getByLabel("提醒时间").fill("00:00");
-  await reminderSettings.getByRole("button", { name: "保存训练提醒" }).click();
-  await expect(page.getByText(/训练提醒已开启/)).toBeVisible();
-
+  await expect(page.getByRole("status")).toContainText("已安排到");
   await page.goto("/today");
-  await expect(page.getByRole("heading", { name: "还有 1 项训练安排未开始" })).toBeVisible();
-  await page.getByRole("button", { name: "一小时后再提醒" }).click();
-  await expect(page.getByRole("region", { name: "已暂缓的训练提醒" })).toContainText("再次提醒训练");
-  const todayTraining = page.getByRole("region", { name: "今天还要练" });
-  await expect(todayTraining.locator("strong").filter({ hasText: "今天的力量训练" })).toBeVisible();
-  await todayTraining.getByRole("button", { name: "开始训练", exact: true }).click();
-  await expect(page).toHaveURL(/\/training$/);
-  await expect(page.getByText(/今天的力量训练/)).toBeVisible();
-
-  await page.getByLabel("实际动作").fill("罗马尼亚硬拉");
-  await page.getByLabel("次数").first().fill("5");
-  await page.getByLabel("重量 kg").first().fill("80");
-  await page.getByRole("button", { name: "保存实际数据" }).click();
-  await expect(page.getByText("硬拉 已记下")).toBeVisible();
-  await page.getByRole("button", { name: "保存并结束" }).click();
-  await expect(page.getByText("这次训练已保存")).toBeVisible();
-
+  await page.getByRole("region", { name: "今天还要练" }).getByRole("button", { name: "开始训练", exact: true }).click();
+  await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
+  await page.getByLabel("大致时间（可选）").fill("18:30");
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
   await page.goto("/history");
-  await expect(page.getByText("今天的力量训练", { exact: true })).toBeVisible();
-  await expect(page.getByText("罗马尼亚硬拉", { exact: true })).toBeVisible();
-  await expect(page.getByText(/已完成 · 1 个动作/)).toBeVisible();
+  await expect(page.getByText(/已记录 · 1 个动作 · 18:30/)).toBeVisible();
+  await page.getByRole("button", { name: "修改／删除整条训练" }).click();
+  await page.getByLabel("训练日期").fill("2026-09-01");
+  await page.getByLabel("本次备注（可选）").fill("更正日期");
+  await page.getByLabel("每组次数").fill("12");
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByRole("article", { name: "已存训练记录" })).toContainText("12 / 12 / 12 次");
+  await page.getByRole("button", { name: "修改整条记录" }).click();
+  page.once("dialog", d => d.accept());
+  await page.getByRole("button", { name: "删除这条已存记录" }).click();
+  await expect(page.getByText("训练记录已删除。", { exact: true })).toBeVisible();
+  expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
+});
 
-  await page.getByRole("button", { name: "查看详情" }).click();
-  await expect(page.getByText(/替代 硬拉 · 5 次 · 80 kg/)).toBeVisible();
-  await page.getByRole("button", { name: "修正罗马尼亚硬拉" }).click();
-  const correction = page.locator("form.history-correction");
-  await correction.getByLabel("重量 kg").fill("85");
-  await correction.getByRole("button", { name: "保存修正" }).click();
-  await expect(page.getByText("训练记录已修正，原方案没有改变")).toBeVisible();
-  await expect(page.getByText(/替代 硬拉 · 5 次 · 85 kg/)).toBeVisible();
-  await page.getByText(/查看之前的 2 个版本/).click();
-  await expect(page.getByText(/当时记录为 罗马尼亚硬拉，1 组/)).toBeVisible();
+test("old unfinished records import only confirmed actual actions and keep correction history", async ({ page }) => {
+  const target = { targetSets: 3, targetRepsMin: 10, targetRepsMax: 10, targetWeightKg: null, targetDurationSeconds: null, targetDistanceMeters: null, note: null };
+  const template = await (await page.request.post('/api/v1/training/templates', { data: { name: '旧计划', note: null, items: [{ ...target, exerciseName: '深蹲' }, { ...target, exerciseName: '卧推' }] } })).json();
+  const old = await (await page.request.post('/api/v1/training/sessions', { data: { templateId: template.id, timeZone: 'Asia/Shanghai' } })).json();
+  expect((await page.request.put(`/api/v1/training/sessions/${old.id}/items/${old.items[0].id}`, { data: { revision: old.revision, status: 'completed', performedExerciseName: '徒手深蹲', actualNote: '旧记录', sets: [{ reps: 8, weightKg: null, durationSeconds: null, distanceMeters: null, note: null }] } })).ok()).toBeTruthy();
+  await page.goto('/history');
+  await page.getByRole('button', { name: '修改／删除整条训练' }).click();
+  await expect(page.getByRole('region', { name: '动作填写' })).toHaveCount(1);
+  await expect(page.getByLabel('动作名称', { exact: true })).toHaveValue('徒手深蹲');
+  await expect(page.getByLabel('组数', { exact: true })).toHaveValue('1');
+  await page.getByLabel('每组次数').fill('9');
+  await page.getByRole('button', { name: '保存训练记录', exact: true }).click();
+  await expect(page.getByText('这次训练已保存。', { exact: true })).toBeVisible();
+  const saved = await (await page.request.get(`/api/v1/training/sessions/${old.id}`)).json();
+  expect(saved.items.filter((i: any) => i.status === 'completed')).toHaveLength(1);
+  expect(saved.items.find((i: any) => i.exerciseName === '卧推').status).toBe('skipped');
+  const revisions = await (await page.request.get(`/api/v1/training/sessions/${old.id}/item-revisions`)).json();
+  expect(revisions.some((i: any) => i.sets[0]?.reps === 8)).toBe(true);
+});
 
-  await page.getByRole("button", { name: "修正日期或备注" }).click();
-  const previousDate = new Date(`${scheduledDate}T12:00:00`);
-  previousDate.setDate(previousDate.getDate() - 1);
-  const correctedDate = previousDate.toISOString().slice(0, 10);
-  await page.getByLabel("归属日期").fill(correctedDate);
-  await page.getByLabel("整次训练备注（可选）").fill("跨日后补充");
-  await page.getByRole("button", { name: "保存日期修正" }).click();
-  await expect(page.getByText(/训练归属日期或备注已修正/)).toBeVisible();
-  await page.getByText("查看日期与备注的之前版本").click();
-  await expect(page.getByText(new RegExp(`${scheduledDate} · 当时没有备注`))).toBeVisible();
-
-  await page.getByRole("button", { name: "补记实际动作" }).click();
-  const extraCorrection = page.locator("form.history-extra-correction");
-  await extraCorrection.getByLabel("遗漏的实际动作").fill("农夫行走");
-  await extraCorrection.getByLabel("距离（米）").fill("200");
-  await extraCorrection.getByRole("button", { name: "保存补记动作" }).click();
-  await expect(page.getByText("遗漏的实际动作已补记到这次训练")).toBeVisible();
-  await expect(page.getByText("农夫行走", { exact: true })).toBeVisible();
+test("concurrent edits require review and a deleted record is not resurrected", async ({ page }) => {
+  await page.goto("/training");
+  await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await page.getByLabel("动作名称", { exact: true }).fill("拉伸");
+  await page.getByLabel("记录方式").selectOption("unknown");
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "修改整条记录" }).click();
+  await page.getByLabel("本次备注（可选）").fill("本机输入");
+  const saved = (await (await page.request.get("/api/v1/training/sessions")).json())[0];
+  const url = "/api/v1/training/records/" + saved.id;
+  const remote = { revision: saved.revision, localDate: saved.localDate, timeZone: saved.timeZone, recordedTime: "20:00", note: "另一处修改", items: saved.items.map((i: any) => ({ id: i.id, exerciseName: i.performedExerciseName, actualNote: null, measurement: "unknown", sets: [] })) };
+  expect((await page.request.put(url, { data: remote })).ok()).toBeTruthy();
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByRole("region", { name: "记录冲突" })).toContainText("另一处修改");
+  await expect(page.getByLabel("本次备注（可选）")).toHaveValue("本机输入");
+  page.once("dialog", d => d.accept());
+  await page.getByRole("button", { name: "已核对，用我的内容替换" }).click();
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "修改整条记录" }).click();
+  expect((await page.request.delete(url, { data: { revision: 3 } })).ok()).toBeTruthy();
+  await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
+  await expect(page.getByRole("region", { name: "记录冲突" })).toContainText("原记录已被删除");
+  expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
 });
