@@ -16,6 +16,7 @@ import {
 } from "../../db/schema/index.js";
 import type { TrainingRepository } from "./repository.js";
 import { recordGate, recordedSession } from "./record.js";
+import { resolvePlanLinks, scheduleSnapshot } from "./schedule.js";
 import type {
   ExtraTrainingItemInput,
   TrainingProgram,
@@ -75,6 +76,7 @@ function toTemplate(row: TemplateRow, items: readonly TemplateItemRow[]): Traini
 
 function toSessionItem(row: SessionItemRow, sets: readonly SessionSetRow[]): TrainingSessionItem {
   return {
+    planLink: row.planLink,
     id: row.id,
     sourceTemplateItemId: row.sourceTemplateItemId,
     origin: row.origin,
@@ -221,6 +223,8 @@ function toProgram(
 
 function toSchedule(row: ScheduleRow, startedSessionId: string | null): TrainingSchedule {
   return {
+    items: row.items,
+    history: row.history,
     id: row.id,
     userId: row.userId,
     localDate: row.localDate,
@@ -234,7 +238,7 @@ function toSchedule(row: ScheduleRow, startedSessionId: string | null): Training
     sourceProgramUnitId: row.sourceProgramUnitId,
     sourceWeekNumber: row.sourceWeekNumber,
     sourceTrainingDayName: row.sourceTrainingDayName,
-    status: startedSessionId !== null ? "started" : row.cancelledAt === null ? "scheduled" : "cancelled",
+    status: row.cancelledAt !== null ? "cancelled" : startedSessionId !== null ? "started" : "scheduled",
     revision: row.revision,
     cancelledAt: row.cancelledAt,
     startedSessionId,
@@ -277,7 +281,12 @@ export class PostgresTrainingRepository implements TrainingRepository {
       if (gate === "missing") return null;
       if (gate === "conflict") return "revision_conflict" as const;
       if (gate === "replay") return existing;
-      const next = recordedSession(userId, id, existing, input, hash, now);
+      const scheduleIds = [...new Set(input.items.flatMap(item => item.planLink ? [item.planLink.scheduleId] : []))].sort();
+      const schedules = scheduleIds.length ? await tx.select().from(trainingSchedules)
+        .where(and(eq(trainingSchedules.userId, userId), inArray(trainingSchedules.id, scheduleIds)))
+        .orderBy(asc(trainingSchedules.id)).for("share") : [];
+      const links = resolvePlanLinks(input, existing, schedules.map(row => toSchedule(row, null)));
+      const next = recordedSession(userId, id, existing, input, hash, now, links);
       if (existing === null) {
         const inserted = await tx.insert(trainingSessions).values({ id, userId, localDate: next.localDate,
           timeZone: next.timeZone, startedAt: next.startedAt, endedAt: next.endedAt, status: "completed",
@@ -298,7 +307,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
       }
       const existingIds = new Set(existing?.items.map(item => item.id));
       for (const item of next.items) {
-        const values = { status: item.status, sortOrder: item.sortOrder, performedExerciseName: item.performedExerciseName,
+        const values = { planLink: item.planLink ?? null, status: item.status, sortOrder: item.sortOrder, performedExerciseName: item.performedExerciseName,
           actualNote: item.actualNote, updatedAt: now };
         if (existingIds.has(item.id)) {
           await tx.update(trainingSessionItems).set(values).where(eq(trainingSessionItems.id, item.id));
@@ -348,13 +357,13 @@ export class PostgresTrainingRepository implements TrainingRepository {
   }
 
   public async findTemplate(userId: string, templateId: string): Promise<TrainingTemplate | null> {
-    const [row] = await this.#database
-      .select()
-      .from(trainingTemplates)
-      .where(and(eq(trainingTemplates.id, templateId), eq(trainingTemplates.userId, userId)))
-      .limit(1);
-    if (row === undefined) return null;
-    return (await this.#withTemplateItems([row]))[0] ?? null;
+    return this.#database.transaction(async tx => {
+      const [row] = await tx.select().from(trainingTemplates)
+        .where(and(eq(trainingTemplates.id, templateId), eq(trainingTemplates.userId, userId))).for("share").limit(1);
+      if (!row) return null;
+      // Parent writers use the same lock: a date copy cannot mix old metadata with new actions.
+      return (await new PostgresTrainingRepository(tx as unknown as Database).#withTemplateItems([row]))[0] ?? null;
+    });
   }
 
   public async createTemplate(userId: string, input: TrainingTemplateInput): Promise<TrainingTemplate> {
@@ -472,13 +481,12 @@ export class PostgresTrainingRepository implements TrainingRepository {
   }
 
   public async findProgram(userId: string, programId: string): Promise<TrainingProgram | null> {
-    const [row] = await this.#database
-      .select()
-      .from(trainingPrograms)
-      .where(and(eq(trainingPrograms.id, programId), eq(trainingPrograms.userId, userId)))
-      .limit(1);
-    if (row === undefined) return null;
-    return (await this.#withProgramUnits([row]))[0] ?? null;
+    return this.#database.transaction(async tx => {
+      const [row] = await tx.select().from(trainingPrograms)
+        .where(and(eq(trainingPrograms.id, programId), eq(trainingPrograms.userId, userId))).for("share").limit(1);
+      if (!row) return null;
+      return (await new PostgresTrainingRepository(tx as unknown as Database).#withProgramUnits([row]))[0] ?? null;
+    });
   }
 
   public async createProgram(userId: string, input: TrainingProgramInput): Promise<TrainingProgram> {
@@ -613,12 +621,6 @@ export class PostgresTrainingRepository implements TrainingRepository {
         .where(and(eq(trainingProgramUnits.id, unitId), eq(trainingProgramUnits.programId, programId)))
         .limit(1);
       if (unit === undefined) return null;
-      const [started] = await transaction
-        .select({ id: trainingSessions.id })
-        .from(trainingSessions)
-        .where(eq(trainingSessions.sourceProgramUnitId, unitId))
-        .limit(1);
-      if (started !== undefined) return "unit_started" as const;
       let sortOrder = unit.sortOrder;
       if (unit.weekNumber !== input.weekNumber) {
         const [{ nextOrder } = { nextOrder: 0 }] = await transaction
@@ -650,7 +652,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
         .where(eq(trainingPrograms.id, programId));
       return "updated" as const;
     });
-    if (result === null || result === "revision_conflict" || result === "unit_started") return result;
+    if (result === null || result === "revision_conflict") return result;
     return this.findProgram(userId, programId);
   }
 
@@ -677,12 +679,6 @@ export class PostgresTrainingRepository implements TrainingRepository {
         .where(and(eq(trainingProgramUnits.id, unitId), eq(trainingProgramUnits.programId, programId)))
         .limit(1);
       if (unit === undefined) return null;
-      const [started] = await transaction
-        .select({ id: trainingSessions.id })
-        .from(trainingSessions)
-        .where(eq(trainingSessions.sourceProgramUnitId, unitId))
-        .limit(1);
-      if (started !== undefined) return "unit_started" as const;
       await transaction
         .update(trainingProgramUnits)
         .set({
@@ -710,7 +706,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
         .where(eq(trainingPrograms.id, programId));
       return "updated" as const;
     });
-    if (result === null || result === "revision_conflict" || result === "unit_started") return result;
+    if (result === null || result === "revision_conflict") return result;
     return this.findProgram(userId, programId);
   }
 
@@ -743,6 +739,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
   public async createSchedule(
     userId: string,
     input: TrainingScheduleInput & {
+      readonly items: readonly import("./types.js").TrainingScheduleItem[];
       readonly sourceTemplateName: string | null;
       readonly sourceProgramName: string | null;
       readonly sourceWeekNumber: number | null;
@@ -764,6 +761,7 @@ export class PostgresTrainingRepository implements TrainingRepository {
     scheduleId: string,
     expectedRevision: number,
     input: TrainingScheduleInput & {
+      readonly items: readonly import("./types.js").TrainingScheduleItem[];
       readonly sourceTemplateName: string | null;
       readonly sourceProgramName: string | null;
       readonly sourceWeekNumber: number | null;
@@ -772,22 +770,18 @@ export class PostgresTrainingRepository implements TrainingRepository {
   ): Promise<TrainingSchedule | "revision_conflict" | "schedule_unavailable" | null> {
     const result = await this.#database.transaction(async (transaction) => {
       const [existing] = await transaction
-        .select({ revision: trainingSchedules.revision, cancelledAt: trainingSchedules.cancelledAt })
+        .select()
         .from(trainingSchedules)
         .where(and(eq(trainingSchedules.id, scheduleId), eq(trainingSchedules.userId, userId)))
         .for("update")
         .limit(1);
       if (existing === undefined) return null;
       if (existing.revision !== expectedRevision) return "revision_conflict" as const;
-      const [started] = await transaction
-        .select({ id: trainingSessions.id })
-        .from(trainingSessions)
-        .where(eq(trainingSessions.sourceScheduleId, scheduleId))
-        .limit(1);
-      if (existing.cancelledAt !== null || started !== undefined) return "schedule_unavailable" as const;
+      if (existing.cancelledAt !== null) return "schedule_unavailable" as const;
       await transaction
         .update(trainingSchedules)
-        .set({ ...input, revision: sql`${trainingSchedules.revision} + 1`, updatedAt: new Date() })
+        .set({ ...input, history: [...(existing.history ?? []), scheduleSnapshot(toSchedule(existing, null))],
+          revision: sql`${trainingSchedules.revision} + 1`, updatedAt: new Date() })
         .where(eq(trainingSchedules.id, scheduleId));
       return "updated" as const;
     });
@@ -803,22 +797,18 @@ export class PostgresTrainingRepository implements TrainingRepository {
   ): Promise<TrainingSchedule | "revision_conflict" | "schedule_unavailable" | null> {
     const result = await this.#database.transaction(async (transaction) => {
       const [existing] = await transaction
-        .select({ revision: trainingSchedules.revision, cancelledAt: trainingSchedules.cancelledAt })
+        .select()
         .from(trainingSchedules)
         .where(and(eq(trainingSchedules.id, scheduleId), eq(trainingSchedules.userId, userId)))
         .for("update")
         .limit(1);
       if (existing === undefined) return null;
       if (existing.revision !== expectedRevision) return "revision_conflict" as const;
-      const [started] = await transaction
-        .select({ id: trainingSessions.id })
-        .from(trainingSessions)
-        .where(eq(trainingSessions.sourceScheduleId, scheduleId))
-        .limit(1);
-      if (existing.cancelledAt !== null || started !== undefined) return "schedule_unavailable" as const;
+      if (existing.cancelledAt !== null) return "schedule_unavailable" as const;
       await transaction
         .update(trainingSchedules)
-        .set({ cancelledAt, revision: sql`${trainingSchedules.revision} + 1`, updatedAt: new Date() })
+        .set({ cancelledAt, history: [...(existing.history ?? []), scheduleSnapshot(toSchedule(existing, null))],
+          revision: sql`${trainingSchedules.revision} + 1`, updatedAt: new Date() })
         .where(eq(trainingSchedules.id, scheduleId));
       return "updated" as const;
     });
@@ -903,7 +893,9 @@ export class PostgresTrainingRepository implements TrainingRepository {
         .limit(1);
       if (session === undefined) return null;
       if (session.revision !== expectedRevision) return "revision_conflict" as const;
+      const oldRecord = (await new PostgresTrainingRepository(transaction as unknown as Database).#withSessionItems([session]))[0]!;
       await transaction.insert(trainingSessionRevisions).values({
+        recordSnapshot: JSON.parse(JSON.stringify(oldRecord)) as Record<string, unknown>,
         sessionId,
         sessionRevision: session.revision,
         localDate: session.localDate,
@@ -911,6 +903,8 @@ export class PostgresTrainingRepository implements TrainingRepository {
         note: session.note,
         expenditureAssessment: session.expenditureAssessment,
       });
+      if (input.localDate !== session.localDate) await transaction.update(trainingSessionItems)
+        .set({ planLink: null }).where(eq(trainingSessionItems.sessionId, sessionId));
       await transaction
         .update(trainingSessions)
         .set({ ...input, revision: sql`${trainingSessions.revision} + 1`, updatedAt: new Date() })
@@ -967,12 +961,12 @@ export class PostgresTrainingRepository implements TrainingRepository {
     const sessionId = await this.#database.transaction(async (transaction) => {
       if (input.schedule !== null) {
         const [schedule] = await transaction
-          .select({ cancelledAt: trainingSchedules.cancelledAt })
+          .select({ cancelledAt: trainingSchedules.cancelledAt, revision: trainingSchedules.revision })
           .from(trainingSchedules)
           .where(and(eq(trainingSchedules.id, input.schedule.id), eq(trainingSchedules.userId, input.userId)))
           .for("update")
           .limit(1);
-        if (schedule === undefined || schedule.cancelledAt !== null) return "schedule_unavailable" as const;
+        if (schedule === undefined || schedule.cancelledAt !== null || schedule.revision !== input.schedule.revision) return "schedule_unavailable" as const;
         const [started] = await transaction
           .select({ id: trainingSessions.id })
           .from(trainingSessions)
@@ -999,12 +993,15 @@ export class PostgresTrainingRepository implements TrainingRepository {
         })
         .returning({ id: trainingSessions.id });
       if (session === undefined) throw new Error("training session insert returned no row");
-      const sourceItems = input.programUnit?.items ?? input.template?.items ?? [];
+      const sourceItems = input.schedule?.items ?? input.programUnit?.items ?? input.template?.items ?? [];
       if (sourceItems.length > 0) {
         await transaction.insert(trainingSessionItems).values(
           sourceItems.map((item) => ({
             sessionId: session.id,
-            sourceTemplateItemId: input.programUnit === null ? item.id : null,
+            sourceTemplateItemId: !input.schedule?.items && input.programUnit === null ? item.id : null,
+            planLink: input.schedule?.items ? { scheduleId: input.schedule.id, revision: input.schedule.revision,
+              localDate: input.schedule.localDate, title: input.schedule.title, itemId: item.id,
+              item: input.schedule.items.find(value => value.id === item.id)! } : null,
             origin: "planned" as const,
             sortOrder: item.sortOrder,
             exerciseName: item.exerciseName,

@@ -28,9 +28,9 @@ test("a person can turn an evidence-backed system suggestion into their own plan
   await expect(suggestionPanel.getByRole("region", { name: /动作预览/ }).first()).toBeVisible();
   await suggestionPanel.getByText("适用范围和依据").click();
   await expect(suggestionPanel.getByText("E-013、E-014")).toBeVisible();
-  await suggestionPanel.getByRole("button", { name: "存成单次方案" }).click();
+  await suggestionPanel.getByRole("button", { name: "存成训练计划" }).click();
 
-  await expect(page.getByRole("status")).toContainText("已经存到单次方案");
+  await expect(page.getByRole("status")).toContainText("已经存到训练计划");
   await expect(page.getByRole("heading", { name: "全身训练草案" })).toBeVisible();
-  await expect(suggestionPanel.getByText("先看一遍动作和训练量，不合适就改。保存后才会成为你的方案。")).toHaveCount(0);
+  await expect(suggestionPanel.getByText("先看一遍动作和训练量，不合适就改。保存后才会成为你的计划。")).toHaveCount(0);
 });

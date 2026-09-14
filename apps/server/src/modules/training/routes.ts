@@ -159,12 +159,26 @@ const targetResponseSchema = {
   },
 } as const;
 
+const scheduleItemSchema = { ...templateItemResponseSchema, properties: {
+  ...templateItemResponseSchema.properties,
+  progressUnit: { type: "string", enum: ["sets", "seconds", "meters", "none"] },
+} } as const;
+const planLinkInputSchema = { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+  required: ["scheduleId", "itemId", "revision"], properties: {
+    scheduleId: { type: "string", format: "uuid" }, itemId: { type: "string", format: "uuid" },
+    revision: { type: "integer", minimum: 1 },
+  } }] } as const;
+const planLinkResponseSchema = { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+  properties: { scheduleId: { type: "string", format: "uuid" }, itemId: { type: "string", format: "uuid" },
+    revision: { type: "integer" }, localDate: { type: "string" }, title: { type: "string" }, item: scheduleItemSchema } }] } as const;
+
 const sessionItemResponseSchema = {
   type: "object",
   additionalProperties: false,
   required: ["id", "sourceTemplateItemId", "origin", "status", "sortOrder", "exerciseName", "performedExerciseName", "target", "actualNote", "sets"],
   properties: {
     measurement: { anyOf: [{ type: "null" }, { type: "string", enum: ["sets", "activity", "count", "unknown", "mixed"] }] },
+    planLink: planLinkResponseSchema,
     id: { type: "string", format: "uuid" },
     sourceTemplateItemId: { anyOf: [{ type: "null" }, { type: "string", format: "uuid" }] },
     origin: { type: "string", enum: ["planned", "extra"] },
@@ -334,6 +348,10 @@ const scheduleBodySchema = {
   additionalProperties: false,
   required: ["localDate", "timeZone", "title", "note", "sourceTemplateId", "sourceProgramId", "sourceProgramUnitId"],
   properties: {
+    items: { type: "array", maxItems: 50, items: { ...targetInputSchema, properties: {
+      ...targetInputSchema.properties, id: { type: "string", format: "uuid" },
+      progressUnit: { type: "string", enum: ["sets", "seconds", "meters", "none"] },
+    } } },
     localDate: { type: "string", format: "date" },
     timeZone: { type: "string", minLength: 1, maxLength: 100 },
     title: { type: "string", maxLength: 80 },
@@ -349,6 +367,12 @@ const scheduleResponseSchema = {
   additionalProperties: false,
   required: ["id", "localDate", "timeZone", "title", "note", "sourceTemplateId", "sourceTemplateName", "sourceProgramId", "sourceProgramName", "sourceProgramUnitId", "sourceWeekNumber", "sourceTrainingDayName", "status", "revision", "cancelledAt", "startedSessionId", "createdAt", "updatedAt"],
   properties: {
+    items: { anyOf: [{ type: "null" }, { type: "array", items: scheduleItemSchema }] },
+    progress: { type: "array", items: { type: "object", properties: {
+      itemId: { type: "string" }, unit: { type: "string" }, target: { anyOf: [{ type: "null" }, { type: "number" }] },
+      actual: { anyOf: [{ type: "null" }, { type: "number" }] }, remaining: { anyOf: [{ type: "null" }, { type: "number" }] },
+      status: { type: "string" },
+    } } },
     id: { type: "string", format: "uuid" },
     localDate: { type: "string", format: "date" },
     timeZone: { type: "string" },
@@ -435,7 +459,7 @@ function publicProgram(program: Awaited<ReturnType<TrainingService["getProgram"]
 }
 
 function publicSchedule(schedule: Awaited<ReturnType<TrainingService["createSchedule"]>>) {
-  const { userId: _userId, ...result } = schedule;
+  const { userId: _userId, history: _history, ...result } = schedule;
   return result;
 }
 
@@ -456,6 +480,7 @@ export async function registerTrainingRoutes(app: FastifyInstance, options: Trai
             required: ["id", "exerciseName", "actualNote", "sets"], properties: { id: { type: "string", format: "uuid" },
               exerciseName: { type: "string", minLength: 1, maxLength: 100 }, actualNote: nullableString,
               measurement: { type: "string", enum: ["sets", "activity", "count", "unknown", "mixed"] },
+              planLink: planLinkInputSchema,
               sets: { type: "array", maxItems: 100, items: setInputSchema } } } } } },
       response: { 200: sessionResponseSchema },
     },

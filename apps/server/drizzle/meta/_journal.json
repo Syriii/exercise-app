@@ -176,6 +176,13 @@
       "when": 1789030429575,
       "tag": "0024_training_batch_records",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789376407623,
+      "tag": "0025_training_date_plans",
+      "breakpoints": true
     }
   ]
 }

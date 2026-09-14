@@ -3,7 +3,7 @@ import { submissionId } from "../../support/submission-id";
 
 export type Measurement = "sets" | "activity" | "count" | "unknown" | "mixed";
 export interface SetDraft { reps: string; weightKg: string; durationSeconds: string; distanceMeters: string; note: string }
-export interface ActionDraft { id: string; name: string; note: string; measurement: Measurement; count: string; expanded: boolean; sets: SetDraft[] }
+export interface ActionDraft { id: string; name: string; note: string; measurement: Measurement; count: string; expanded: boolean; sets: SetDraft[]; planLink?: import("../../api/training").TrainingPlanLink | null }
 export interface RecordDraft { id: string; revision: number; localDate: string; timeZone: string; time: string; note: string; items: ActionDraft[] }
 export const blankSet = (): SetDraft => ({ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "", note: "" });
 export const blankAction = (name = ""): ActionDraft => ({ id: submissionId(), name, note: "", measurement: "sets", count: "", expanded: false, sets: [blankSet()] });
@@ -19,6 +19,7 @@ export function actionFromActual(item: TrainingSessionItem): ActionDraft {
   const measurement = item.measurement ?? (sets.some(set => set.durationSeconds || set.distanceMeters) ? "mixed" : "sets");
   const same = sets.every(set => JSON.stringify(set) === JSON.stringify(sets[0]));
   return { id: item.id, name: item.performedExerciseName ?? item.exerciseName, note: item.actualNote ?? "",
+    planLink: item.planLink ?? null,
     measurement: sets.length ? measurement : "unknown", count: sets.length ? String(sets.length) : "",
     expanded: !same || measurement === "mixed", sets: sets.length ? sets : [blankSet()] };
 }
@@ -28,7 +29,9 @@ export function recordFromActual(session: TrainingSession): RecordDraft {
 }
 export function actionFromPlan(item: TrainingTemplateItem): ActionDraft {
   const action = blankAction(item.exerciseName);
-  action.measurement = item.targetDurationSeconds !== null || item.targetDistanceMeters !== null ? "activity" : "sets";
+  const unit = "progressUnit" in item ? item.progressUnit : undefined;
+  action.measurement = unit === "sets" ? "sets" : unit === "seconds" || unit === "meters" ? "activity"
+    : item.targetSets !== null ? "sets" : item.targetDurationSeconds !== null || item.targetDistanceMeters !== null ? "activity" : "sets";
   action.count = item.targetSets?.toString() ?? "";
   const set = action.sets[0]!;
   // A range is not an actual count: only carry an exact target; otherwise leave it unknown.
@@ -70,6 +73,8 @@ export function recordPayload(draft: RecordDraft): TrainingRecordInput {
         } else sets = item.sets;
       }
       return { id: item.id, exerciseName: item.name.trim(), actualNote: item.note.trim() || null, measurement: item.measurement,
+        planLink: item.planLink && item.planLink.localDate === draft.localDate && item.planLink.item.exerciseName === item.name.trim()
+          ? { scheduleId: item.planLink.scheduleId, itemId: item.planLink.itemId, revision: item.planLink.revision } : null,
         sets: sets.map(set => ({ reps: item.measurement === "activity" ? null : integer(set.reps, "次数"),
           weightKg: item.measurement === "activity" ? null : decimal(set.weightKg),
           durationSeconds: ["activity", "mixed"].includes(item.measurement) ? integer(set.durationSeconds, "秒数") : null,

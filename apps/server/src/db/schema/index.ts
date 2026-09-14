@@ -414,6 +414,8 @@ export const trainingProgramUnitItems = pgTable(
 export const trainingSchedules = pgTable(
   "training_schedules",
   {
+    items: jsonb("items").$type<readonly import("../../modules/training/types.js").TrainingScheduleItem[]>(),
+    history: jsonb("history").$type<readonly import("../../modules/training/types.js").TrainingScheduleSnapshot[]>(),
     id: uuid("id").defaultRandom().primaryKey(),
     userId: uuid("user_id")
       .notNull()
@@ -488,7 +490,7 @@ export const trainingSessions = pgTable(
   (table) => [
     index("training_sessions_user_date_idx").on(table.userId, table.localDate),
     index("training_sessions_user_status_idx").on(table.userId, table.status),
-    uniqueIndex("training_sessions_source_schedule_uq").on(table.sourceScheduleId),
+    index("training_sessions_source_schedule_idx").on(table.sourceScheduleId),
     index("training_sessions_source_program_unit_idx").on(table.sourceProgramUnitId),
     check("training_sessions_revision_positive_ck", sql`${table.revision} > 0`),
   ],
@@ -497,6 +499,7 @@ export const trainingSessions = pgTable(
 export const trainingSessionItems = pgTable(
   "training_session_items",
   {
+    planLink: jsonb("plan_link").$type<import("../../modules/training/types.js").TrainingPlanLink>(),
     id: uuid("id").defaultRandom().primaryKey(),
     sessionId: uuid("session_id")
       .notNull()

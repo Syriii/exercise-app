@@ -14,12 +14,14 @@ export function recordGate(existing: TrainingSession | null, input: TrainingReco
 }
 
 export function recordedSession(userId: string, id: string, existing: TrainingSession | null,
-  input: TrainingRecordInput, hash: string, now: Date): TrainingSession {
+  input: TrainingRecordInput, hash: string, now: Date,
+  links = new Map<string, import("./types.js").TrainingPlanLink>()): TrainingSession {
   const prior = new Map(existing?.items.map(item => [item.id, item]) ?? []);
   const kept = new Set(input.items.map(item => item.id));
   const items: TrainingSessionItem[] = input.items.map((item, sortOrder) => {
     const old = prior.get(item.id);
     return { id: old?.id ?? randomUUID(), sourceTemplateItemId: old?.sourceTemplateItemId ?? null,
+      planLink: links.get(item.id) ?? null,
       origin: old?.origin ?? "extra", status: "completed", sortOrder,
       exerciseName: old?.exerciseName ?? item.exerciseName, performedExerciseName: item.exerciseName,
       target: old?.target ?? { ...emptyTarget }, actualNote: item.actualNote, measurement: item.measurement ?? "mixed",

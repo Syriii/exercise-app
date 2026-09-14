@@ -24,6 +24,8 @@ interface TemplateItemForm {
   targetRepsMin: string | number;
   targetRepsMax: string | number;
   targetWeightKg: string;
+  targetDurationSeconds: string | number;
+  targetDistanceMeters: string;
   note: string;
 }
 
@@ -75,8 +77,16 @@ function emptyTemplateItem(): TemplateItemForm {
     targetRepsMin: "",
     targetRepsMax: "",
     targetWeightKg: "",
+    targetDurationSeconds: "",
+    targetDistanceMeters: "",
     note: "",
   };
+}
+
+function moveItem(items: TemplateItemForm[], index: number, offset: number) {
+  const next = index + offset;
+  if (next < 0 || next >= items.length) return;
+  const [item] = items.splice(index, 1); items.splice(next, 0, item!);
 }
 
 function currentLocalDate(): string {
@@ -99,7 +109,7 @@ function unitsForWeek(program: TrainingProgram, weekNumber: number): TrainingPro
 
 function sourceTemplateName(unit: TrainingProgramUnit): string | null {
   if (unit.sourceTemplateId === null) return null;
-  return templates.value.find((template) => template.id === unit.sourceTemplateId)?.name ?? "已归档的单次方案";
+  return templates.value.find((template) => template.id === unit.sourceTemplateId)?.name ?? "已归档的训练计划";
 }
 
 function guidanceKey(scope: string, parentId: string, itemId: string): string {
@@ -165,8 +175,8 @@ function templatePayload(): TrainingTemplateInput {
       targetRepsMin: nullableInteger(item.targetRepsMin),
       targetRepsMax: nullableInteger(item.targetRepsMax),
       targetWeightKg: nullableText(item.targetWeightKg),
-      targetDurationSeconds: null,
-      targetDistanceMeters: null,
+      targetDurationSeconds: nullableInteger(item.targetDurationSeconds),
+      targetDistanceMeters: nullableText(item.targetDistanceMeters),
       note: nullableText(item.note),
     })),
   };
@@ -215,7 +225,7 @@ async function generateSuggestion() {
 
 async function adoptSuggestion(value: TrainingSuggestion) {
   saving.value = true; errorMessage.value = "";
-  try { const result = await trainingSuggestionApi.adopt(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result.suggestion : item); templates.value = await trainingApi.listTemplates(); planTab.value = "templates"; notice.value = "已经存到单次方案。"; }
+  try { const result = await trainingSuggestionApi.adopt(value.id, value.revision); suggestions.value = suggestions.value.map((item) => item.id === value.id ? result.suggestion : item); templates.value = await trainingApi.listTemplates(); planTab.value = "templates"; notice.value = "已经存到训练计划。"; }
   catch (error) { reportError(error); }
   finally { saving.value = false; }
 }
@@ -255,10 +265,10 @@ async function saveProgram() {
     if (editingProgram.value === null) {
       const created = await trainingApi.createProgram(input);
       selectedProgramId.value = created.id;
-      notice.value = "周期计划已建立，可以开始添加训练日";
+      notice.value = "多周编排已建立，可以开始添加训练日";
     } else {
       await trainingApi.updateProgram(editingProgram.value.id, editingProgram.value.revision, input);
-      notice.value = "周期计划已更新";
+      notice.value = "多周编排已更新";
     }
     programs.value = await trainingApi.listPrograms();
     programEditorOpen.value = false;
@@ -276,7 +286,7 @@ async function archiveProgram(program: TrainingProgram) {
     await trainingApi.archiveProgram(program.id, program.revision);
     programs.value = await trainingApi.listPrograms();
     if (selectedProgramId.value === program.id) selectedProgramId.value = null;
-    notice.value = "周期计划已归档；已经产生的训练记录仍会保留";
+    notice.value = "多周编排已归档；已经产生的训练记录仍会保留";
   } catch (error) {
     reportError(error);
   } finally {
@@ -311,6 +321,8 @@ function openEditUnit(program: TrainingProgram, unit: TrainingProgramUnit) {
       targetRepsMin: item.targetRepsMin?.toString() ?? "",
       targetRepsMax: item.targetRepsMax?.toString() ?? "",
       targetWeightKg: item.targetWeightKg === null ? "" : Number(item.targetWeightKg).toString(),
+      targetDurationSeconds: item.targetDurationSeconds?.toString() ?? "",
+      targetDistanceMeters: item.targetDistanceMeters ?? "",
       note: item.note ?? "",
     })),
   );
@@ -328,8 +340,8 @@ function unitPayload() {
       targetRepsMin: nullableInteger(item.targetRepsMin),
       targetRepsMax: nullableInteger(item.targetRepsMax),
       targetWeightKg: nullableText(item.targetWeightKg),
-      targetDurationSeconds: null,
-      targetDistanceMeters: null,
+      targetDurationSeconds: nullableInteger(item.targetDurationSeconds),
+      targetDistanceMeters: nullableText(item.targetDistanceMeters),
       note: nullableText(item.note),
     })),
   };
@@ -350,7 +362,7 @@ async function saveUnit() {
         unitForm.sourceTemplateId ? { ...input, items: [] } : input,
       );
       notice.value = unitForm.sourceTemplateId
-        ? "训练方案已复制到周期中；以后不会自动同步"
+        ? "训练计划已复制到周期中；以后不会自动同步"
         : "训练日已加入周期";
     } else {
       await trainingApi.updateProgramUnit(
@@ -377,13 +389,13 @@ function sourceUpdated(unit: TrainingProgramUnit): boolean {
 }
 
 async function reimportUnit(program: TrainingProgram, unit: TrainingProgramUnit) {
-  if (!window.confirm("重新导入会用来源方案的当前内容覆盖这个训练日的本地调整。确定继续吗？")) return;
+  if (!window.confirm("重新导入会用来源计划的当前内容覆盖这个训练日的本地调整。确定继续吗？")) return;
   saving.value = true;
   errorMessage.value = "";
   try {
     await trainingApi.reimportProgramUnit(program.id, unit.id, program.revision);
     programs.value = await trainingApi.listPrograms();
-    notice.value = "训练日已按来源方案的当前内容重新导入";
+    notice.value = "训练日已按来源计划的当前内容重新导入";
   } catch (error) {
     reportError(error);
   } finally {
@@ -416,6 +428,8 @@ function openEditTemplate(template: TrainingTemplate) {
       targetRepsMin: item.targetRepsMin?.toString() ?? "",
       targetRepsMax: item.targetRepsMax?.toString() ?? "",
       targetWeightKg: item.targetWeightKg === null ? "" : Number(item.targetWeightKg).toString(),
+      targetDurationSeconds: item.targetDurationSeconds?.toString() ?? "",
+      targetDistanceMeters: item.targetDistanceMeters ?? "",
       note: item.note ?? "",
     })),
   );
@@ -428,14 +442,14 @@ async function saveTemplate() {
   try {
     if (editingTemplate.value === null) {
       await trainingApi.createTemplate(templatePayload());
-      notice.value = "训练方案已保存";
+      notice.value = "训练计划已保存";
     } else {
       await trainingApi.updateTemplate(
         editingTemplate.value.id,
         editingTemplate.value.revision,
         templatePayload(),
       );
-      notice.value = "训练方案已更新；已保存的训练记录不会改变";
+      notice.value = "训练计划已更新；已保存的训练记录不会改变";
     }
     editorOpen.value = false;
     templates.value = await trainingApi.listTemplates();
@@ -452,7 +466,7 @@ async function archiveTemplate(template: TrainingTemplate) {
   try {
     await trainingApi.archiveTemplate(template.id, template.revision);
     templates.value = await trainingApi.listTemplates();
-    notice.value = "方案已归档，已有训练记录仍会保留";
+    notice.value = "计划已归档，已有训练记录仍会保留";
   } catch (error) {
     reportError(error);
   } finally {
@@ -479,7 +493,7 @@ async function copyTemplate(template: TrainingTemplate) {
       })),
     });
     templates.value = await trainingApi.listTemplates();
-    notice.value = `已复制“${template.name}”，两份方案之后可以分别修改`;
+    notice.value = `已复制“${template.name}”，两份计划之后可以分别修改`;
   } catch (error) {
     reportError(error);
   } finally {
@@ -497,7 +511,7 @@ onActivated(() => void load());
 <template>
   <AppShell page-class="training-page" rail-note="看计划、改计划；记录实际内容时再参考。" show-footer>
         <header class="view-header"><div><h1>训练计划</h1><p>查看和调整计划；实际做过什么，在训练记录中填写。</p></div>
-          <div class="form-actions"><button class="action-button" @click="router.push('/training')">返回训练</button><button class="action-button" @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()">{{ planTab === "templates" ? "新建方案" : "新建周期计划" }}</button></div>
+          <div class="form-actions"><button class="action-button" @click="router.push('/training')">返回训练</button><button class="action-button" @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()">{{ planTab === "templates" ? "新建计划" : "新建多周编排" }}</button></div>
         </header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
@@ -530,18 +544,13 @@ onActivated(() => void load());
                 <ul class="suggestion-baseline"><li v-for="item in suggestion.candidate.publicHealthBaseline" :key="item">{{ item }}</li></ul>
               </template>
               <details><summary>适用范围和依据</summary><p>依据 {{ suggestion.evidenceIds.join('、') }}；生成于 {{ suggestion.inputSnapshot.generatedOn }}。</p><ul><li v-for="item in suggestion.candidate.limitations" :key="item">{{ item }}</li></ul></details>
-              <div class="recommendation-actions"><button v-if="suggestion.candidate.template !== null" class="action-button action-button--primary" type="button" :disabled="saving" @click="adoptSuggestion(suggestion)">存成单次方案</button><button class="text-action" type="button" :disabled="saving" @click="dismissSuggestion(suggestion)">移除草案</button></div>
+              <div class="recommendation-actions"><button v-if="suggestion.candidate.template !== null" class="action-button action-button--primary" type="button" :disabled="saving" @click="adoptSuggestion(suggestion)">存成训练计划</button><button class="text-action" type="button" :disabled="saving" @click="dismissSuggestion(suggestion)">移除草案</button></div>
             </article>
           </section>
 
-          <nav class="plan-kind-tabs" aria-label="训练计划类型">
-            <button type="button" :aria-current="planTab === 'templates' ? 'page' : undefined" @click="planTab = 'templates'">
-              <strong>单次方案</strong><span>选一份就开始</span>
-            </button>
-            <button type="button" :aria-current="planTab === 'programs' ? 'page' : undefined" @click="planTab = 'programs'">
-              <strong>周期计划</strong><span>按周组织训练日</span>
-            </button>
-          </nav>
+          <div class="form-actions"><button v-if="planTab === 'programs'" class="text-action" @click="planTab = 'templates'">返回我的计划</button>
+            <details v-else><summary>更多安排方式</summary><p>需要连续安排时，可以逐周设置不同内容，再为各训练日安排日期。</p><button class="action-button" @click="planTab = 'programs'">按周编排</button></details>
+          </div>
 
           <div class="schedule-toolbar">
             <p>也可以只安排一个训练主题。</p>
@@ -550,7 +559,7 @@ onActivated(() => void load());
 
           <section v-if="scheduleEditorOpen" class="work-panel schedule-editor" aria-labelledby="schedule-editor-title">
             <div class="panel-heading">
-              <div><h2 id="schedule-editor-title">安排训练日期</h2><p>这只是当天安排，不会改变原方案。</p></div>
+              <div><h2 id="schedule-editor-title">安排训练日期</h2><p>这只是当天安排，不会改变原计划。</p></div>
               <button class="text-action" type="button" @click="scheduleEditorOpen = false">取消</button>
             </div>
             <form class="template-form schedule-form" @submit.prevent="saveSchedule">
@@ -565,14 +574,14 @@ onActivated(() => void load());
           <section v-if="editorOpen" class="work-panel template-editor" aria-labelledby="template-editor-title">
             <div class="panel-heading">
               <div>
-                <h2 id="template-editor-title">{{ editingTemplate === null ? "新建单次训练方案" : "编辑训练方案" }}</h2>
-                <p>开始训练时会复制方案内容，之后互不影响。</p>
+                <h2 id="template-editor-title">{{ editingTemplate === null ? "新建训练计划" : "编辑训练计划" }}</h2>
+                <p>安排日期时保存独立内容；之后修改本计划，不影响已安排日期和实际记录。</p>
               </div>
               <button class="text-action" type="button" @click="editorOpen = false">收起</button>
             </div>
             <form class="template-form" @submit.prevent="saveTemplate">
-              <label><span>方案名称</span><input v-model="templateForm.name" required maxlength="80" placeholder="例如：胸部 A" /></label>
-              <label><span>方案备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label>
+              <label><span>计划名称</span><input v-model="templateForm.name" required maxlength="80" placeholder="例如：胸部 A" /></label>
+              <label><span>计划备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label>
 
               <div class="template-items">
                 <article v-for="(item, index) in templateForm.items" :key="index" class="template-item-form">
@@ -585,27 +594,30 @@ onActivated(() => void load());
                   <label><span>最低次数</span><input v-model="item.targetRepsMin" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
                   <label><span>最高次数</span><input v-model="item.targetRepsMax" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
                   <label><span>目标重量 kg</span><input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
+                  <label><span>目标时长（秒）</span><input v-model="item.targetDurationSeconds" type="number" min="1" placeholder="可不填" /></label>
+                  <label><span>目标距离（米）</span><input v-model="item.targetDistanceMeters" inputmode="decimal" placeholder="可不填" /></label>
+                  <div class="form-actions"><button class="text-action" type="button" :disabled="index === 0" @click="moveItem(templateForm.items,index,-1)">上移</button><button class="text-action" type="button" :disabled="index === templateForm.items.length-1" @click="moveItem(templateForm.items,index,1)">下移</button></div>
                   <label class="wide-field"><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="节奏、器械或注意事项" /></label>
                 </article>
               </div>
 
               <div class="form-actions">
                 <button class="text-action" type="button" @click="templateForm.items.push(emptyTemplateItem())">添加动作 →</button>
-                <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存方案" }}</button>
+                <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存计划" }}</button>
               </div>
             </form>
           </section>
 
           <section class="split-heading" aria-labelledby="templates-title">
-            <div><h2 id="templates-title">我的单次训练方案</h2></div>
+            <div><h2 id="templates-title">我的训练计划</h2></div>
             <p>把常练的动作放在一起，下次直接选。</p>
           </section>
 
           <section v-if="templates.length === 0" class="work-panel training-empty">
-            <strong>还没有训练方案</strong>
-            <p>创建常用方案，或从空白训练开始。</p>
+            <strong>还没有训练计划</strong>
+            <p>创建常用计划，或从空白训练开始。</p>
             <div class="form-actions">
-              <button class="action-button action-button--primary" type="button" @click="openCreateTemplate">建立第一份方案</button>
+              <button class="action-button action-button--primary" type="button" @click="openCreateTemplate">建立第一份计划</button>
               <button class="action-button" type="button" :disabled="saving" @click="startTraining(null)">直接开始</button>
             </div>
           </section>
@@ -632,14 +644,14 @@ onActivated(() => void load());
             </article>
           </div>
 
-          <button v-if="templates.length > 0" class="action-button blank-start" type="button" :disabled="saving" @click="startTraining(null)">不使用方案，直接开始</button>
+          <button v-if="templates.length > 0" class="action-button blank-start" type="button" :disabled="saving" @click="startTraining(null)">不使用计划，直接记录</button>
           </template>
 
           <template v-else>
             <section v-if="programEditorOpen" class="work-panel template-editor" aria-labelledby="program-editor-title">
               <div class="panel-heading">
                 <div>
-                  <h2 id="program-editor-title">{{ editingProgram === null ? "新建周期计划" : "编辑周期计划" }}</h2>
+                  <h2 id="program-editor-title">{{ editingProgram === null ? "新建多周编排" : "编辑多周编排" }}</h2>
                   <p>周期只负责整理训练日，不会替你规定具体日期。</p>
                 </div>
                 <button class="text-action" type="button" @click="programEditorOpen = false">收起</button>
@@ -649,20 +661,20 @@ onActivated(() => void load());
                 <label><span>包含几周</span><input v-model="programForm.weekCount" required type="number" inputmode="numeric" min="1" max="52" /></label>
                 <label class="wide-field"><span>备注（可选）</span><input v-model="programForm.note" maxlength="1000" placeholder="训练目标、使用场景或注意事项" /></label>
                 <div class="form-actions wide-field">
-                  <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存周期计划" }}</button>
+                  <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存多周编排" }}</button>
                 </div>
               </form>
             </section>
 
             <section class="split-heading" aria-labelledby="programs-title">
-              <div><h2 id="programs-title">我的周期计划</h2></div>
+              <div><h2 id="programs-title">我的多周编排</h2></div>
               <p>按周编排训练，每周都可以不同。</p>
             </section>
 
             <section v-if="programs.length === 0" class="work-panel training-empty">
-              <strong>还没有周期计划</strong>
+              <strong>还没有多周编排</strong>
               <p>需要多周变化时再创建。</p>
-              <button class="action-button action-button--primary" type="button" @click="openCreateProgram">建立第一个周期计划</button>
+              <button class="action-button action-button--primary" type="button" @click="openCreateProgram">建立第一个多周编排</button>
             </section>
 
             <section v-for="program in programs" :key="program.id" class="work-panel program-card">
@@ -683,7 +695,7 @@ onActivated(() => void load());
 
               <div v-if="selectedProgramId === program.id" class="program-detail">
                 <div class="program-detail__heading">
-                  <div><strong>周期内容</strong><p>可以从空白添加，也可以复制一份单次方案。</p></div>
+                  <div><strong>周期内容</strong><p>可以从空白添加，也可以复制一份训练计划。</p></div>
                   <button class="action-button action-button--primary" type="button" @click="openAddUnit(program)">添加训练日</button>
                 </div>
 
@@ -697,14 +709,14 @@ onActivated(() => void load());
                     <input v-model="unitForm.weekNumber" required type="number" inputmode="numeric" min="1" :max="program.weekCount" />
                   </label>
                   <label v-if="editingUnit === null">
-                    <span>从单次方案复制（可选）</span>
+                    <span>从训练计划复制（可选）</span>
                     <select v-model="unitForm.sourceTemplateId">
                       <option value="">从空白添加</option>
                       <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.name }}</option>
                     </select>
                   </label>
                   <p v-if="editingUnit === null && unitForm.sourceTemplateId" class="source-copy-note wide-field">
-                    会复制当前方案。来源方案以后发生变化时，这里保持不变。
+                    会复制当前计划。来源计划以后发生变化时，这里保持不变。
                   </p>
                   <template v-if="editingUnit !== null || !unitForm.sourceTemplateId">
                     <label class="wide-field"><span>训练日名称</span><input v-model="unitForm.name" required maxlength="80" placeholder="例如：胸部训练 A" /></label>
@@ -720,6 +732,9 @@ onActivated(() => void load());
                         <label><span>最低次数</span><input v-model="item.targetRepsMin" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
                         <label><span>最高次数</span><input v-model="item.targetRepsMax" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
                         <label><span>目标重量 kg</span><input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
+                        <label><span>目标时长（秒）</span><input v-model="item.targetDurationSeconds" type="number" min="1" placeholder="可不填" /></label>
+                        <label><span>目标距离（米）</span><input v-model="item.targetDistanceMeters" inputmode="decimal" placeholder="可不填" /></label>
+                        <div class="form-actions"><button class="text-action" type="button" :disabled="index === 0" @click="moveItem(unitForm.items,index,-1)">上移</button><button class="text-action" type="button" :disabled="index === unitForm.items.length-1" @click="moveItem(unitForm.items,index,1)">下移</button></div>
                         <label class="wide-field"><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="可不填" /></label>
                       </article>
                     </div>
@@ -743,11 +758,11 @@ onActivated(() => void load());
                       <ol class="plain-list template-preview">
                         <li v-for="item in unit.items" :key="item.id"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('unit', unit.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('unit', unit.id, item.id) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('unit', unit.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('unit', unit.id, item.id)]" /></li>
                       </ol>
-                      <p v-if="sourceUpdated(unit) && !unit.started" class="source-update-note">来源方案有更新。当前内容不会自动改变。</p>
+                      <p v-if="sourceUpdated(unit) && !unit.started" class="source-update-note">来源计划有更新。当前内容不会自动改变。</p>
                       <div class="form-actions">
                         <button class="action-button action-button--primary" type="button" :disabled="saving" @click="startProgramUnit(program, unit)">参考这天记录</button>
                         <button class="text-action" type="button" :aria-label="`安排${program.name}第${unit.weekNumber}周${unit.name}`" @click="openScheduleEditor({ title: unit.name, programId: program.id, programUnitId: unit.id })">安排日期</button>
-                        <button v-if="!unit.started" class="text-action" type="button" @click="openEditUnit(program, unit)">编辑</button>
+                        <button class="text-action" type="button" @click="openEditUnit(program, unit)">编辑</button>
                         <button v-if="sourceUpdated(unit) && !unit.started" class="text-action" type="button" :disabled="saving" @click="reimportUnit(program, unit)">重新导入</button>
                       </div>
                     </article>
@@ -765,4 +780,3 @@ onActivated(() => void load());
 <style scoped>
 .training-draft-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 </style>
-

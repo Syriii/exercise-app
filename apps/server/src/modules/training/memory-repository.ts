@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { recordGate, recordedSession } from "./record.js";
+import { resolvePlanLinks, scheduleSnapshot } from "./schedule.js";
 
 import type { TrainingRepository } from "./repository.js";
 import type {
@@ -56,7 +57,8 @@ export class MemoryTrainingRepository implements TrainingRepository {
     if (gate === "missing") return null;
     if (gate === "conflict") return "revision_conflict" as const;
     if (gate === "replay") return existing;
-    const next = recordedSession(userId, id, existing, input, hash, timestamp);
+    const links = resolvePlanLinks(input, existing, [...this.schedules.values()].filter(s => s.userId === userId));
+    const next = recordedSession(userId, id, existing, input, hash, timestamp, links);
     if (existing) {
       this.sessionRevisions.push({ id: randomUUID(), sessionId: id, sessionRevision: existing.revision,
         localDate: existing.localDate, timeZone: existing.timeZone, note: existing.note,
@@ -309,7 +311,6 @@ export class MemoryTrainingRepository implements TrainingRepository {
     if (existing.revision !== expectedRevision) return "revision_conflict";
     const unit = existing.units.find((candidate) => candidate.id === unitId);
     if (unit === undefined) return null;
-    if (unit.started) return "unit_started";
     const nextOrder = existing.units.filter(
       (candidate) => candidate.id !== unitId && candidate.weekNumber === input.weekNumber,
     ).length;
@@ -345,7 +346,6 @@ export class MemoryTrainingRepository implements TrainingRepository {
     if (existing.revision !== expectedRevision) return "revision_conflict";
     const unit = existing.units.find((candidate) => candidate.id === unitId);
     if (unit === undefined) return null;
-    if (unit.started) return "unit_started";
     const updatedUnit: TrainingProgramUnit = {
       ...unit,
       name: template.name,
@@ -390,6 +390,7 @@ export class MemoryTrainingRepository implements TrainingRepository {
   public async createSchedule(
     userId: string,
     input: TrainingScheduleInput & {
+      readonly items: readonly import("./types.js").TrainingScheduleItem[];
       readonly sourceTemplateName: string | null;
       readonly sourceProgramName: string | null;
       readonly sourceWeekNumber: number | null;
@@ -417,19 +418,21 @@ export class MemoryTrainingRepository implements TrainingRepository {
     scheduleId: string,
     expectedRevision: number,
     input: TrainingScheduleInput & {
+      readonly items: readonly import("./types.js").TrainingScheduleItem[];
       readonly sourceTemplateName: string | null;
       readonly sourceProgramName: string | null;
       readonly sourceWeekNumber: number | null;
       readonly sourceTrainingDayName: string | null;
     },
   ): Promise<TrainingSchedule | "revision_conflict" | "schedule_unavailable" | null> {
-    const existing = await this.findSchedule(userId, scheduleId);
-    if (existing === null) return null;
+    const existing = this.schedules.get(scheduleId);
+    if (!existing || existing.userId !== userId) return null;
     if (existing.revision !== expectedRevision) return "revision_conflict";
-    if (existing.status !== "scheduled") return "schedule_unavailable";
+    if (existing.cancelledAt) return "schedule_unavailable";
     const updated: TrainingSchedule = {
       ...existing,
       ...input,
+      history: [...(existing.history ?? []), scheduleSnapshot(existing)],
       revision: existing.revision + 1,
       updatedAt: now(),
     };
@@ -443,12 +446,13 @@ export class MemoryTrainingRepository implements TrainingRepository {
     expectedRevision: number,
     cancelledAt: Date,
   ): Promise<TrainingSchedule | "revision_conflict" | "schedule_unavailable" | null> {
-    const existing = await this.findSchedule(userId, scheduleId);
-    if (existing === null) return null;
+    const existing = this.schedules.get(scheduleId);
+    if (!existing || existing.userId !== userId) return null;
     if (existing.revision !== expectedRevision) return "revision_conflict";
-    if (existing.status !== "scheduled") return "schedule_unavailable";
+    if (existing.cancelledAt) return "schedule_unavailable";
     const updated: TrainingSchedule = {
       ...existing,
+      history: [...(existing.history ?? []), scheduleSnapshot(existing)],
       status: "cancelled",
       revision: existing.revision + 1,
       cancelledAt,
@@ -491,14 +495,17 @@ export class MemoryTrainingRepository implements TrainingRepository {
   }): Promise<TrainingSession | "schedule_unavailable"> {
     if (input.schedule !== null) {
       const current = await this.findSchedule(input.userId, input.schedule.id);
-      if (current === null || current.status !== "scheduled") return "schedule_unavailable";
+      if (current === null || current.status !== "scheduled" || current.revision !== input.schedule.revision) return "schedule_unavailable";
     }
     const createdAt = now();
-    const sourceItems = input.programUnit?.items ?? input.template?.items ?? [];
+    const sourceItems = input.schedule?.items ?? input.programUnit?.items ?? input.template?.items ?? [];
     const items: TrainingSessionItem[] =
       sourceItems.map((item) => ({
         id: randomUUID(),
-        sourceTemplateItemId: input.programUnit === null ? item.id : null,
+        sourceTemplateItemId: !input.schedule?.items && input.programUnit === null ? item.id : null,
+        planLink: input.schedule?.items ? { scheduleId: input.schedule.id, revision: input.schedule.revision,
+          localDate: input.schedule.localDate, title: input.schedule.title, itemId: item.id,
+          item: input.schedule.items.find(value => value.id === item.id)! } : null,
         origin: "planned",
         status: "pending",
         sortOrder: item.sortOrder,
@@ -545,7 +552,6 @@ export class MemoryTrainingRepository implements TrainingRepository {
       this.schedules.set(input.schedule.id, {
         ...input.schedule,
         status: "started",
-        revision: input.schedule.revision + 1,
         startedSessionId: session.id,
         updatedAt: now(),
       });
@@ -633,6 +639,7 @@ export class MemoryTrainingRepository implements TrainingRepository {
     if (session === null) return null;
     if (session.revision !== expectedRevision) return "revision_conflict";
     this.sessionRevisions.push({
+      recordSnapshot: structuredClone(session),
       id: randomUUID(),
       sessionId,
       sessionRevision: session.revision,
@@ -642,7 +649,8 @@ export class MemoryTrainingRepository implements TrainingRepository {
       expenditureAssessment: session.expenditureAssessment,
       createdAt: now(),
     });
-    const updated = { ...session, ...input, revision: session.revision + 1, updatedAt: now() };
+    const updated = { ...session, ...input, revision: session.revision + 1, updatedAt: now(),
+      items: input.localDate === session.localDate ? session.items : session.items.map(item => ({ ...item, planLink: null })) };
     this.sessions.set(sessionId, updated);
     return updated;
   }

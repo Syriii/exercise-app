@@ -8,13 +8,13 @@ async function register(page: Page, suffix: string) {
 }
 async function plan(page: Page, name = "全身简易") {
   await page.goto("/training/plans");
-  await page.getByRole("button", { name: "新建方案", exact: true }).click();
-  await page.getByLabel("方案名称").fill(name);
+  await page.getByRole("button", { name: "新建计划", exact: true }).click();
+  await page.getByLabel("计划名称").fill(name);
   await page.getByLabel("动作名称", { exact: true }).fill("深蹲");
   await page.getByLabel("目标组数").fill("3");
   await page.getByLabel("最低次数").fill("10");
   await page.getByLabel("最高次数").fill("10");
-  await page.getByRole("button", { name: "保存方案", exact: true }).click();
+  await page.getByRole("button", { name: "保存计划", exact: true }).click();
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
 }
 test.beforeEach(async ({ page }, info) => register(page, info.project.name[0]!));
@@ -81,14 +81,15 @@ test("a person copies a plan into a cycle and references its day without marking
   await plan(page, "胸部 A");
   await page.getByRole("button", { name: "复制胸部 A" }).click();
   await expect(page.getByRole("heading", { name: "胸部 A 副本" })).toBeVisible();
-  await page.getByRole("button", { name: /周期计划/ }).first().click();
-  await page.getByRole("button", { name: "新建周期计划", exact: true }).click();
+  await page.getByText("更多安排方式", { exact: true }).click();
+  await page.getByRole("button", { name: "按周编排", exact: true }).click();
+  await page.getByRole("button", { name: "新建多周编排", exact: true }).click();
   await page.getByLabel("计划名称").fill("四周训练");
   await page.getByLabel("包含几周").fill("4");
-  await page.getByRole("button", { name: "保存周期计划", exact: true }).click();
+  await page.getByRole("button", { name: "保存多周编排", exact: true }).click();
   await page.getByRole("button", { name: "添加训练日" }).click();
   await page.getByLabel("放在第几周").fill("2");
-  await page.getByLabel("从单次方案复制（可选）").selectOption({ label: "胸部 A" });
+  await page.getByLabel("从训练计划复制（可选）").selectOption({ label: "胸部 A" });
   await page.getByRole("button", { name: "保存训练日", exact: true }).click();
   await page.getByRole("button", { name: "参考这天记录", exact: true }).click();
   await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
@@ -102,7 +103,7 @@ test("a scheduled plan opens the same editor and history edits and deletes the w
   await page.getByRole("button", { name: "保存安排" }).click();
   await expect(page.getByRole("status")).toContainText("已安排到");
   await page.goto("/today");
-  await page.getByRole("region", { name: "今天还要练" }).getByRole("button", { name: "开始训练", exact: true }).click();
+  await page.getByRole("region", { name: "今天的训练" }).getByRole("button", { name: "按当天计划记录", exact: true }).click();
   await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
   await page.getByLabel("大致时间（可选）").fill("18:30");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();

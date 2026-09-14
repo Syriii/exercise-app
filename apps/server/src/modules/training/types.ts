@@ -77,6 +77,9 @@ export interface TrainingProgram {
 }
 
 export interface TrainingSchedule {
+  readonly progress?: readonly TrainingItemProgress[];
+  readonly items?: readonly TrainingScheduleItem[] | null;
+  readonly history?: readonly TrainingScheduleSnapshot[] | null;
   readonly id: string;
   readonly userId: string;
   readonly localDate: string;
@@ -109,6 +112,7 @@ export interface TrainingSet {
 }
 
 export interface TrainingSessionItem {
+  readonly planLink?: TrainingPlanLink | null;
   readonly measurement?: "sets" | "activity" | "count" | "unknown" | "mixed" | null;
   readonly id: string;
   readonly sourceTemplateItemId: string | null;
@@ -243,6 +247,7 @@ export interface TrainingProgramUnitInput {
 }
 
 export interface TrainingScheduleInput {
+  readonly items?: readonly (TrainingTemplateItemInput & { readonly id?: string; readonly progressUnit?: TrainingProgressUnit })[];
   readonly localDate: string;
   readonly timeZone: string;
   readonly title: string;
@@ -297,10 +302,39 @@ export interface TrainingRecordInput {
   readonly recordedTime: string | null;
   readonly note: string | null;
   readonly items: readonly {
+    readonly planLink?: { readonly scheduleId: string; readonly itemId: string; readonly revision: number } | null;
     readonly measurement?: TrainingSessionItem["measurement"];
     readonly id: string;
     readonly exerciseName: string;
     readonly actualNote: string | null;
     readonly sets: readonly TrainingSetInput[];
   }[];
+}
+
+export type TrainingProgressUnit = "sets" | "seconds" | "meters" | "none";
+export interface TrainingScheduleItem extends TrainingTemplateItem {
+  readonly progressUnit: TrainingProgressUnit;
+}
+export interface TrainingScheduleSnapshot {
+  readonly revision: number;
+  readonly localDate: string;
+  readonly title: string;
+  readonly note: string | null;
+  readonly items: readonly TrainingScheduleItem[] | null;
+}
+export interface TrainingPlanLink {
+  readonly scheduleId: string;
+  readonly itemId: string;
+  readonly revision: number;
+  readonly localDate: string;
+  readonly title: string;
+  readonly item: TrainingScheduleItem;
+}
+export interface TrainingItemProgress {
+  readonly itemId: string;
+  readonly unit: TrainingProgressUnit;
+  readonly target: number | null;
+  readonly actual: number | null;
+  readonly remaining: number | null;
+  readonly status: "unrecorded" | "partial" | "complete" | "unknown";
 }

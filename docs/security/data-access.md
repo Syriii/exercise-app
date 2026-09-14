@@ -30,6 +30,8 @@ PostgreSQL 表 owner 默认可绕过 RLS，因此 API 容器不挂载 owner 密�
 
 完整机器可检查清单位于 `apps/server/src/security/data-access-policy.ts`。测试会把它与当前 41 张 schema 表和全部 RLS migration 对比；任何新增表都必须明确进入 RLS 或写出内部豁免理由。
 
+日期计划的 `training_schedules.items/history` 属于安排账号的健康数据，实际动作的 `training_session_items.plan_link` 继承记录账号归属；不是公共动作库或运维元数据。关联解析只接受同账号安排，保存事务验证目标日期/版本/稳定动作标识。沿用原表RLS，无新私有表或权限扩展；账号导出包含这些字段及旧依据，账号删除沿原外键级联清理。问题报告及日志不收集这些内容。
+
 ## 3. 自动化验证
 
 - 路由/服务测试覆盖训练、档案测量、餐食及修订、图片分析、三类提醒、导出列表和下载的跨账号拒绝。

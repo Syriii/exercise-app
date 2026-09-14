@@ -263,7 +263,34 @@ describe("training routes", () => {
     expect(otherPrograms.json()).toEqual([]);
   });
 
-  it("keeps dated schedules private and links one schedule to one workout", async () => {
+  it("returns independent plan items and cumulative progress without exposing plan history", async () => {
+    const { app, firstCookie, secondCookie } = await createApp();
+    const headers = { cookie: firstCookie };
+    const template = (await app.inject({ method: "POST", url: "/api/v1/training/templates", headers, payload: templatePayload })).json();
+    const planResponse = await app.inject({ method: "POST", url: "/api/v1/training/schedules", headers, payload: {
+      localDate: "2026-09-14", timeZone: "Asia/Shanghai", title: "当天", note: null, sourceTemplateId: template.id,
+      sourceProgramId: null, sourceProgramUnitId: null,
+    } });
+    expect(planResponse.statusCode, planResponse.body).toBe(201);
+    const plan = planResponse.json();
+    expect(plan.items[0].id).not.toBe(template.items[0].id);
+    const input = { revision: 0, localDate: plan.localDate, timeZone: plan.timeZone, recordedTime: null, note: null,
+      items: [{ id: randomUUID(), exerciseName: plan.items[0].exerciseName, actualNote: null, measurement: "sets",
+        planLink: { scheduleId: plan.id, itemId: plan.items[0].id, revision: plan.revision },
+        sets: [{ reps: 10, weightKg: null, durationSeconds: null, distanceMeters: null, note: null }] }] };
+    for (let i=0; i<2; i++) {
+      const record = await app.inject({ method: "PUT", url: `/api/v1/training/records/${randomUUID()}`, headers, payload: input });
+      expect(record.statusCode, record.body).toBe(200);
+      expect(record.json().items[0].planLink).toMatchObject({ itemId: plan.items[0].id, title: "当天" });
+    }
+    const listing = (await app.inject({ method: "GET", url: "/api/v1/training/schedules", headers })).json();
+    expect(listing[0].progress[0].actual).toBe(2);
+    expect(listing[0]).not.toHaveProperty("history");
+    const denied = await app.inject({ method: "PUT", url: `/api/v1/training/records/${randomUUID()}`, headers: { cookie: secondCookie }, payload: input });
+    expect(denied.statusCode).toBe(404);
+  });
+
+  it("keeps dated schedules private and preserves the legacy start-once endpoint", async () => {
     const { app, firstCookie, secondCookie } = await createApp();
     const createdTemplate = await app.inject({
       method: "POST",

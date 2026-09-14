@@ -85,6 +85,7 @@ export interface TrainingRepository {
   ): Promise<readonly TrainingSchedule[]>;
   findSchedule(userId: string, scheduleId: string): Promise<TrainingSchedule | null>;
   createSchedule(userId: string, input: TrainingScheduleInput & {
+    readonly items: readonly import("./types.js").TrainingScheduleItem[];
     readonly sourceTemplateName: string | null;
     readonly sourceProgramName: string | null;
     readonly sourceWeekNumber: number | null;
@@ -95,6 +96,7 @@ export interface TrainingRepository {
     scheduleId: string,
     expectedRevision: number,
     input: TrainingScheduleInput & {
+      readonly items: readonly import("./types.js").TrainingScheduleItem[];
       readonly sourceTemplateName: string | null;
       readonly sourceProgramName: string | null;
       readonly sourceWeekNumber: number | null;

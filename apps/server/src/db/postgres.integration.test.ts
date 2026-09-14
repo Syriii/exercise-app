@@ -28,6 +28,7 @@ import { migratePgBoss, PgBossTaskQueue } from "../modules/tasks/pgboss-task-que
 import { PostgresTrainingRepository } from "../modules/training/postgres-repository.js";
 import { TrainingService } from "../modules/training/service.js";
 import { loadTestDatabaseUrl } from "../testing/test-database-url.js";
+import { verifyDatePlans } from "../testing/training-date-plan-contract.js";
 import { readSecretValue } from "../config/environment.js";
 
 const databaseUrl = loadTestDatabaseUrl();
@@ -381,6 +382,43 @@ describe("PostgreSQL integration", () => {
       expect.objectContaining({ expenditureAssessment: expect.objectContaining({ grossEnergyKcal: 171.5 }) }),
       expect.objectContaining({ expenditureAssessment: null }),
     ]));
+  });
+
+  it("freezes independent date plans and serializes linked records with rollback RLS and export protection", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`date-a-${randomUUID()}`, `date-b-${randomUUID()}`]);
+    const userId = accounts.rows[0]!.id, otherId = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const repository = new PostgresTrainingRepository(restricted.database), service = new TrainingService({ repository });
+    try {
+      await context.run(userId, async () => {
+        const result = await verifyDatePlans(service, userId, otherId);
+        const before = await service.getSession(userId, result.linkedRecordId);
+        const input = { revision: before.revision, localDate: before.localDate, timeZone: before.timeZone,
+          recordedTime: null, note: "date-late-failure", items: before.items.map(item => ({ id: item.id,
+            exerciseName: item.exerciseName, actualNote: null, measurement: item.measurement,
+            planLink: item.planLink ?? null, sets: [] })) };
+        await database.pool.query(`alter table training_sessions add constraint integration_date_late_failure check (id <> '${before.id}'::uuid or note is distinct from 'date-late-failure')`);
+        try {
+          await expect(service.saveRecord(userId, before.id, input)).rejects.toBeDefined();
+          expect(await service.getSession(userId, before.id)).toEqual(before);
+          expect(await service.listSessionRevisions(userId, before.id)).toHaveLength(0);
+        } finally { await database.pool.query("alter table training_sessions drop constraint integration_date_late_failure"); }
+        // Cancellation/removal does not prevent editing already-confirmed facts and their old context.
+        const after = await service.saveRecord(userId, before.id, { ...input, note: "原日期实际" });
+        expect(after.items[0]?.planLink).toEqual(before.items[0]?.planLink);
+        await context.run(otherId, async () => {
+          expect(await repository.findSchedule(userId, result.scheduleId)).toBeNull();
+          expect(await repository.findSession(userId, result.linkedRecordId)).toBeNull();
+          const exported = await new PostgresUserDataExporter(restricted.database).exportUserData(otherId, new Date());
+          expect(exported.data.training_schedules).toHaveLength(0);
+          expect(exported.data.training_session_items).toHaveLength(0);
+        });
+        const exported = await new PostgresUserDataExporter(restricted.database).exportUserData(userId, new Date());
+        expect(exported.data.training_schedules).toEqual(expect.arrayContaining([expect.objectContaining({ id: result.scheduleId, history: expect.any(Array), items: expect.any(Array) })]));
+        expect(exported.data.training_session_items).toEqual(expect.arrayContaining([expect.objectContaining({ plan_link: expect.objectContaining({ scheduleId: result.scheduleId }) })]));
+        expect(exported.data.training_session_revisions).toEqual(expect.arrayContaining([expect.objectContaining({ session_id: before.id, record_snapshot: expect.any(Object) })]));
+      });
+    } finally { await restricted.close(); }
   });
 
   it("atomically creates edits and deletes batch training records with retry rollback and RLS protection", async () => {

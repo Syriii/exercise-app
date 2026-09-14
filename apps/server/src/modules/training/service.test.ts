@@ -5,6 +5,7 @@ import { PlanningService } from "../planning/service.js";
 import { TrainingError } from "./errors.js";
 import { MemoryTrainingRepository } from "./memory-repository.js";
 import { TrainingService } from "./service.js";
+import { verifyDatePlans } from "../../testing/training-date-plan-contract.js";
 
 const emptyTarget = {
   targetSets: null,
@@ -24,6 +25,9 @@ function createService() {
 }
 
 describe("TrainingService", () => {
+  it("freezes dated plans and accumulates only stable same-date actual links", async () => {
+    await verifyDatePlans(createService().service, "user-a", "user-b");
+  });
   it("commits every completion draft item together, and acknowledges only identical retries", async () => {
     const { service, repository } = createService();
     const template = await service.createTemplate("user-a", { name: "两个动作", note: null, items: [
@@ -226,7 +230,7 @@ describe("TrainingService", () => {
     });
   });
 
-  it("starts a program unit with a lightweight snapshot and then locks the unit", async () => {
+  it("keeps a program session snapshot independent when the reusable unit changes", async () => {
     const { service } = createService();
     let program = await service.createProgram("user-a", {
       name: "三周计划",
@@ -270,7 +274,8 @@ describe("TrainingService", () => {
         note: null,
         items: [{ ...emptyTarget, exerciseName: "硬拉" }],
       }),
-    ).rejects.toMatchObject({ code: "training_program_unit_started" });
+    ).resolves.toMatchObject({ units: [expect.objectContaining({ name: "覆盖内容" })] });
+    expect((await service.getSession("user-a", workout.id)).items[0]?.exerciseName).toBe("深蹲");
   });
 
   it("schedules a template on a local date and starts it exactly once", async () => {

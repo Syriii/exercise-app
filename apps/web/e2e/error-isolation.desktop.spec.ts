@@ -21,7 +21,7 @@ test("a planning failure stays private and does not erase other page sections", 
 
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: "今天还可以吃" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "今天还要练" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天的训练" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("服务器暂时无法处理请求，请稍后重试");
   await expect(page.getByRole("alert")).not.toContainText("Failed query");
   await expect(page.getByRole("alert")).not.toContainText("private-user-id");

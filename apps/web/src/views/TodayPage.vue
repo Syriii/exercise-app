@@ -7,6 +7,7 @@ import { nutritionApi, type NutritionDaySummary, type NutritionValueSummary } fr
 import { planningApi, type DailyPlanningReference } from "../api/planning";
 import { reminderApi, type MeasurementReminderStatus, type NutritionReminderStatus, type TrainingReminderStatus } from "../api/reminders";
 import { trainingApi, type TrainingSchedule, type TrainingSession } from "../api/training";
+import { progressSummary } from "../features/training/plan-progress";
 import AppShell from "../app/AppShell.vue";
 import { type AppSection } from "../app/modules";
 
@@ -24,11 +25,7 @@ const nutritionSummary = ref<NutritionDaySummary | null>(null);
 let browserNotificationShown = false;
 
 const today = localDate(new Date());
-const plannedSchedules = computed(() => schedules.value.filter((schedule) => schedule.status === "scheduled"));
-const activeSession = computed(() => sessions.value.find((session) => session.status === "in_progress") ?? null);
-const remainingItems = computed(
-  () => activeSession.value?.items.filter((item) => item.origin === "planned" && item.status === "pending") ?? [],
-);
+const plannedSchedules = computed(() => schedules.value.filter((schedule) => schedule.status !== "cancelled"));
 const completedSessions = computed(() => sessions.value.filter((session) => session.status !== "in_progress"));
 
 function localDate(date: Date): string {
@@ -162,9 +159,7 @@ async function startSchedule(schedule: TrainingSchedule) {
   saving.value = true;
   errorMessage.value = "";
   try {
-    await router.push({ name: "training", query: schedule.sourceTemplateId
-      ? { templateId: schedule.sourceTemplateId }
-      : { programId: schedule.sourceProgramId ?? "", unitId: schedule.sourceProgramUnitId ?? "" } });
+    await router.push({ name: "training", query: { scheduleId: schedule.id } });
   } catch (error) {
     reportError(error);
   } finally {
@@ -228,31 +223,22 @@ onMounted(() => void load());
 
           <section class="work-panel today-training-panel" aria-labelledby="today-training-title">
             <div class="panel-heading">
-              <div><h2 id="today-training-title">今天还要练</h2><p v-if="activeSession">{{ sessionTitle(activeSession) }}</p></div>
-              <span class="status-chip" :data-tone="activeSession && remainingItems.length === 0 ? 'accent' : undefined">
-                {{ activeSession ? (remainingItems.length === 0 ? '计划动作已处理' : `还剩 ${remainingItems.length} 项`) : `${plannedSchedules.length} 个安排` }}
-              </span>
+              <div><h2 id="today-training-title">今天的训练</h2></div>
             </div>
 
-            <template v-if="activeSession">
-              <ul v-if="remainingItems.length > 0" class="plain-list today-training-list"><li v-for="item in remainingItems" :key="item.id"><strong>{{ item.exerciseName }}</strong><span>待完成</span></li></ul>
-              <p v-else>计划动作都已处理，还可以继续补记额外动作。</p>
-              <button class="action-button action-button--primary" type="button" @click="openSection('training')">继续这次训练</button>
-            </template>
-
-            <template v-else-if="plannedSchedules.length > 0">
+            <template v-if="plannedSchedules.length > 0">
               <article v-for="schedule in plannedSchedules" :key="schedule.id" class="today-schedule-card">
-                <div><strong>{{ schedule.title }}</strong><p>{{ schedule.note ?? (schedule.sourceProgramName ? `${schedule.sourceProgramName} · 第 ${schedule.sourceWeekNumber} 周` : schedule.sourceTemplateName ?? '训练主题') }}</p></div>
+                <div><strong>{{ schedule.title }}</strong><p>{{ progressSummary(schedule) }}</p></div>
                 <div class="form-actions">
-                  <button class="action-button action-button--primary" type="button" :disabled="saving" @click="startSchedule(schedule)">开始训练</button>
+                  <button class="action-button action-button--primary" type="button" :disabled="saving" @click="startSchedule(schedule)">按当天计划记录</button>
                   <button class="text-action" type="button" :disabled="saving" @click="cancelSchedule(schedule)">取消今天这项</button>
                 </div>
               </article>
             </template>
 
             <template v-else>
-              <strong>今天还没有训练安排</strong>
-              <button class="text-action" type="button" @click="openSection('training')">安排或直接开始 →</button>
+              <p>{{ completedSessions.length ? completedSessions.map(sessionTitle).join('、') : '今天还没有训练记录' }}</p>
+              <button class="text-action" type="button" @click="openSection('training')">记录训练 →</button>
             </template>
           </section>
 

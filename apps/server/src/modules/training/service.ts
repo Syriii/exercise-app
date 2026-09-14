@@ -1,6 +1,7 @@
 import { TrainingError } from "./errors.js";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { findExerciseGuidance } from "./guidance-catalog.js";
+import { scheduleProgress } from "./schedule.js";
 import type { PlanningService } from "../planning/service.js";
 import type { TrainingRepository } from "./repository.js";
 import type {
@@ -448,13 +449,18 @@ export class TrainingService {
     );
   }
 
-  public listSchedules(userId: string, dateFrom?: string, dateTo?: string): Promise<readonly TrainingSchedule[]> {
+  public async listSchedules(userId: string, dateFrom?: string, dateTo?: string): Promise<readonly TrainingSchedule[]> {
     const normalizedFrom = dateFrom === undefined ? undefined : validLocalDate(dateFrom);
     const normalizedTo = dateTo === undefined ? undefined : validLocalDate(dateTo);
     if (normalizedFrom !== undefined && normalizedTo !== undefined && normalizedFrom > normalizedTo) {
       throw new TrainingError("invalid_training_input", "开始日期不能晚于结束日期", 400);
     }
-    return this.#repository.listSchedules(userId, normalizedFrom, normalizedTo);
+    const [schedules, sessions] = await Promise.all([
+      this.#repository.listSchedules(userId, normalizedFrom, normalizedTo),
+      this.#repository.listSessions(userId, { ...(normalizedFrom ? { dateFrom: normalizedFrom } : {}),
+        ...(normalizedTo ? { dateTo: normalizedTo } : {}) }),
+    ]);
+    return schedules.map(schedule => ({ ...schedule, progress: scheduleProgress(schedule, sessions) }));
   }
 
   public async createSchedule(userId: string, input: TrainingScheduleInput): Promise<TrainingSchedule> {
@@ -467,12 +473,14 @@ export class TrainingService {
     expectedRevision: number,
     input: TrainingScheduleInput,
   ): Promise<TrainingSchedule> {
+    const existing = await this.#repository.findSchedule(userId, scheduleId);
+    if (!existing) throw new TrainingError("training_schedule_not_found", "没有找到日期计划", 404);
     return requireScheduleResult(
       await this.#repository.updateSchedule(
         userId,
         scheduleId,
         expectedRevision,
-        await this.#normalizeSchedule(userId, input),
+        await this.#normalizeSchedule(userId, input, existing),
       ),
     );
   }
@@ -536,7 +544,12 @@ export class TrainingService {
             || (set.distanceMeters !== null && Number(set.distanceMeters) > 999999999.999)) {
           throw new TrainingError("invalid_training_input", "训练数量超出可保存范围", 400);
         }
-        return { id: item.id, measurement, exerciseName: change.performedExerciseName!, actualNote: change.actualNote,
+        const planLink = item.planLink ?? null;
+        if (planLink && (!uuid.test(planLink.scheduleId) || !uuid.test(planLink.itemId)
+            || !Number.isSafeInteger(planLink.revision) || planLink.revision < 1)) {
+          throw new TrainingError("invalid_training_input", "计划关联无效", 400);
+        }
+        return { id: item.id, planLink, measurement, exerciseName: change.performedExerciseName!, actualNote: change.actualNote,
           sets: change.sets.map(set => ({ ...set,
             weightKg: set.weightKg === null ? null : String(Number(set.weightKg)),
             distanceMeters: set.distanceMeters === null ? null : String(Number(set.distanceMeters)) })) };
@@ -723,10 +736,10 @@ export class TrainingService {
       program = await this.#repository.findProgram(userId, schedule.sourceProgramId);
       programUnit = program?.units.find((unit) => unit.id === schedule.sourceProgramUnitId) ?? null;
     }
-    if (schedule.sourceTemplateId !== null && template === null) {
+    if (!schedule.items && schedule.sourceTemplateId !== null && template === null) {
       throw new TrainingError("training_template_not_found", "日程引用的单次方案已经不可用", 409);
     }
-    if (schedule.sourceProgramUnitId !== null && (program === null || programUnit === null)) {
+    if (!schedule.items && schedule.sourceProgramUnitId !== null && (program === null || programUnit === null)) {
       throw new TrainingError("training_program_unit_not_found", "日程引用的周期训练日已经不可用", 409);
     }
     const startedAt = this.#now();
@@ -828,7 +841,9 @@ export class TrainingService {
   async #normalizeSchedule(
     userId: string,
     input: TrainingScheduleInput,
+    existing?: TrainingSchedule,
   ): Promise<TrainingScheduleInput & {
+    readonly items: readonly import("./types.js").TrainingScheduleItem[];
     readonly sourceTemplateName: string | null;
     readonly sourceProgramName: string | null;
     readonly sourceWeekNumber: number | null;
@@ -836,6 +851,16 @@ export class TrainingService {
   }> {
     localDateAt(this.#now(), input.timeZone);
     const localDate = validLocalDate(input.localDate);
+    const sameSource = existing && existing.sourceTemplateId === input.sourceTemplateId
+      && existing.sourceProgramId === input.sourceProgramId && existing.sourceProgramUnitId === input.sourceProgramUnitId;
+    // A date edit must never reload a reusable plan, including after that source was archived.
+    if (sameSource && existing.items) {
+      return { ...input, title: cleanText(input.title, 80) ?? existing.title, localDate,
+        note: cleanText(input.note, 1000), sourceTemplateName: existing.sourceTemplateName,
+        sourceProgramName: existing.sourceProgramName, sourceWeekNumber: existing.sourceWeekNumber,
+        sourceTrainingDayName: existing.sourceTrainingDayName,
+        items: input.items === undefined ? existing.items : this.#scheduleItems(input.items, existing) };
+    }
     const usesTemplate = input.sourceTemplateId !== null;
     const usesProgramUnit = input.sourceProgramId !== null || input.sourceProgramUnitId !== null;
     if ((usesTemplate && usesProgramUnit) || (input.sourceProgramId === null) !== (input.sourceProgramUnitId === null)) {
@@ -862,6 +887,7 @@ export class TrainingService {
       throw new TrainingError("invalid_training_input", "纯训练主题需要填写名称", 400);
     }
     return {
+      items: this.#scheduleItems(input.items ?? template?.items ?? unit?.items ?? [], undefined),
       localDate,
       timeZone: input.timeZone,
       title,
@@ -874,5 +900,30 @@ export class TrainingService {
       sourceWeekNumber: unit?.weekNumber ?? null,
       sourceTrainingDayName: unit?.name ?? null,
     };
+  }
+
+  #scheduleItems(items: NonNullable<TrainingScheduleInput["items"]>, existing?: TrainingSchedule) {
+    if (items.length > 50) throw new TrainingError("invalid_training_input", "日期计划最多 50 个动作", 400);
+    const normalized = items.length ? normalizeTemplate({ name: "日期计划", note: null, items }).items : [];
+    const seen = new Set<string>();
+    return normalized.map((item, sortOrder) => {
+      const incoming = items[sortOrder]!;
+      const prior = incoming.id ? existing?.items?.find(value => value.id === incoming.id) : undefined;
+      if (existing && incoming.id && (!prior || seen.has(incoming.id))) {
+        throw new TrainingError("invalid_training_input", "日期动作标识已失效，请重新打开计划", 400);
+      }
+      if (incoming.id) seen.add(incoming.id);
+      // Replacement is a new identity; target/order edits keep the existing identity.
+      const id = prior?.exerciseName === item.exerciseName ? prior.id : randomUUID();
+      const progressUnit = incoming.progressUnit ?? (item.targetSets !== null ? "sets"
+        : item.targetDurationSeconds !== null ? "seconds" : item.targetDistanceMeters !== null ? "meters" : "none");
+      if (!["sets", "seconds", "meters", "none"].includes(progressUnit)
+          || (progressUnit === "sets" && item.targetSets === null)
+          || (progressUnit === "seconds" && item.targetDurationSeconds === null)
+          || (progressUnit === "meters" && item.targetDistanceMeters === null)) {
+        throw new TrainingError("invalid_training_input", "请选择有目标量的进度单位，或只展示内容", 400);
+      }
+      return { ...item, id, sortOrder, progressUnit };
+    });
   }
 }
