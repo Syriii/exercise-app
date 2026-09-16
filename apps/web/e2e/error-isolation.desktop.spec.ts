@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 
 test("a planning failure stays private and does not erase other page sections", async ({ page }) => {
@@ -5,9 +6,10 @@ test("a planning failure stays private and does not erase other page sections", 
   await page.getByLabel("用户名").fill("desktop_admin");
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
-  await page.route("**/api/v1/planning/daily-reference**", async (route) => {
+  await page.route(/\/api\/v1\/(planning\/daily-reference|nutrition\/day-summary)/, async (route) => {
     await route.fulfill({
       status: 500,
       contentType: "application/json",
@@ -20,9 +22,9 @@ test("a planning failure stays private and does not erase other page sections", 
   });
 
   await page.goto("/today");
-  await expect(page.getByRole("heading", { name: "今天还可以吃" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天已记录的饮食" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "今天的训练" })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("服务器暂时无法处理请求，请稍后重试");
+  await expect(page.getByRole("alert")).toContainText("部分内容暂时读取不了");
   await expect(page.getByRole("alert")).not.toContainText("Failed query");
   await expect(page.getByRole("alert")).not.toContainText("private-user-id");
 
@@ -42,6 +44,7 @@ test("a failed date-scoped request never leaves the previous day's meals on scre
   await page.getByLabel("用户名").fill("desktop_admin");
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.route("**/api/v1/nutrition/meals?**", async (route) => {
@@ -96,6 +99,7 @@ test("nutrition works without the retired diet-plan, coverage and template-manag
   await page.getByLabel("用户名").fill("desktop_admin");
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/today$/);
   const obsoleteRequests: string[] = [];
   page.on("request", request => {

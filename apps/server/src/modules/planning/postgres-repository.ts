@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { and, desc, eq, lte, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lte, sql } from "drizzle-orm";
 
 import type { Database } from "../../db/database.js";
 import {
@@ -19,6 +19,7 @@ import type {
   PersonalProfile,
   PlanningInputSnapshot,
   DailyPlanningResult,
+  SetupProgress,
 } from "./types.js";
 
 function numberValue(value: string | null): number | null {
@@ -82,6 +83,45 @@ function referenceFromRow(row: typeof dailyPlanningReferences.$inferSelect): Dai
 export class PostgresPlanningRepository implements PlanningRepository {
   public constructor(private readonly database: Database) {}
 
+  public async getSetupProgress(userId: string): Promise<SetupProgress | null> {
+    const [row] = await this.database.select({ progress: personalProfiles.setupProgress }).from(personalProfiles).where(eq(personalProfiles.userId, userId)).limit(1);
+    return row?.progress ?? null;
+  }
+
+  public async saveSetupProgress(userId: string, progress: SetupProgress): Promise<SetupProgress> {
+    return this.database.transaction(async transaction => {
+      await transaction.insert(personalProfiles).values({ userId }).onConflictDoNothing({ target: personalProfiles.userId });
+      const [row] = await transaction.select().from(personalProfiles).where(eq(personalProfiles.userId, userId)).for("update");
+      const previous = row?.setupProgress;
+      const merged = {
+        profile: progress.profile || previous?.profile === true,
+        measurement: progress.measurement || previous?.measurement === true,
+        strategy: progress.strategy || previous?.strategy === true,
+        completed: progress.completed || previous?.completed === true,
+      };
+      merged.completed = merged.completed && merged.profile && merged.measurement && merged.strategy;
+      await transaction.update(personalProfiles).set({ setupProgress: merged }).where(eq(personalProfiles.userId, userId));
+      return merged;
+    });
+  }
+
+  public async hasMeasurementHistory(userId: string): Promise<boolean> {
+    const rows = await this.database.select({ id: bodyMeasurements.id }).from(bodyMeasurements).where(eq(bodyMeasurements.userId, userId)).limit(1);
+    return rows.length > 0;
+  }
+
+  public async deleteMeasurement(userId: string, measurementId: string, expectedRevision: number): Promise<"deleted" | "not_found" | "revision_conflict"> {
+    return this.database.transaction(async transaction => {
+      const [existing] = await transaction.select().from(bodyMeasurements).where(and(eq(bodyMeasurements.userId, userId), eq(bodyMeasurements.id, measurementId))).for("update");
+      if (existing === undefined) return "not_found";
+      if (existing.deletedAt !== null) return existing.revision === expectedRevision + 1 ? "deleted" : "revision_conflict";
+      if (existing.revision !== expectedRevision) return "revision_conflict";
+      await transaction.insert(bodyMeasurementRevisions).values({ measurementId, measurementRevision: existing.revision, measuredAt: existing.measuredAt, localDate: existing.localDate, timeZone: existing.timeZone, weightKg: existing.weightKg, waistCm: existing.waistCm, note: existing.note });
+      await transaction.update(bodyMeasurements).set({ deletedAt: new Date(), updatedAt: new Date(), revision: expectedRevision + 1 }).where(eq(bodyMeasurements.id, measurementId));
+      return "deleted";
+    });
+  }
+
   public async getProfile(userId: string): Promise<PersonalProfile | null> {
     const [row] = await this.database.select().from(personalProfiles).where(eq(personalProfiles.userId, userId)).limit(1);
     return row === undefined ? null : profileFromRow(row);
@@ -92,9 +132,11 @@ export class PostgresPlanningRepository implements PlanningRepository {
       const [existing] = await transaction.select().from(personalProfiles).where(eq(personalProfiles.userId, userId)).for("update").limit(1);
       if (existing === undefined) {
         if (expectedRevision !== 0) return "revision_conflict" as const;
-        await transaction.insert(personalProfiles).values({ userId, ...input, heightCm: input.heightCm?.toString() ?? null });
-        return "saved" as const;
+        const inserted = await transaction.insert(personalProfiles).values({ userId, ...input, heightCm: input.heightCm?.toString() ?? null }).onConflictDoNothing({ target: personalProfiles.userId }).returning({ id: personalProfiles.id });
+        return inserted.length ? "saved" as const : "revision_conflict" as const;
       }
+      const { revision: _revision, updatedAt: _updatedAt, ...savedInput } = profileFromRow(existing);
+      if (existing.revision === expectedRevision + 1 && isDeepStrictEqual(savedInput, input)) return "saved" as const;
       if (existing.revision !== expectedRevision) return "revision_conflict" as const;
       await transaction.update(personalProfiles).set({ ...input, heightCm: input.heightCm?.toString() ?? null, revision: sql`${personalProfiles.revision} + 1`, updatedAt: new Date() }).where(and(eq(personalProfiles.userId, userId), eq(personalProfiles.revision, expectedRevision)));
       return "saved" as const;
@@ -119,6 +161,8 @@ export class PostgresPlanningRepository implements PlanningRepository {
         await transaction.insert(goalStrategies).values({ userId, ...values });
         return "saved" as const;
       }
+      const { revision: _revision, updatedAt: _updatedAt, ...savedInput } = strategyFromRow(existing);
+      if (existing.revision === expectedRevision + 1 && isDeepStrictEqual(savedInput, input)) return "saved" as const;
       if (existing.revision !== expectedRevision) return "revision_conflict" as const;
       await transaction.update(goalStrategies).set({ ...values, revision: sql`${goalStrategies.revision} + 1`, updatedAt: new Date() }).where(and(eq(goalStrategies.userId, userId), eq(goalStrategies.revision, expectedRevision)));
       return "saved" as const;
@@ -130,11 +174,11 @@ export class PostgresPlanningRepository implements PlanningRepository {
   }
 
   public async listMeasurements(userId: string): Promise<readonly BodyMeasurement[]> {
-    return (await this.database.select().from(bodyMeasurements).where(eq(bodyMeasurements.userId, userId)).orderBy(desc(bodyMeasurements.measuredAt))).map(measurementFromRow);
+    return (await this.database.select().from(bodyMeasurements).where(and(eq(bodyMeasurements.userId, userId), isNull(bodyMeasurements.deletedAt))).orderBy(desc(bodyMeasurements.localDate), desc(bodyMeasurements.measuredAt), desc(bodyMeasurements.id))).map(measurementFromRow);
   }
 
   public async getLatestMeasurement(userId: string, localDate: string): Promise<BodyMeasurement | null> {
-    const [row] = await this.database.select().from(bodyMeasurements).where(and(eq(bodyMeasurements.userId, userId), lte(bodyMeasurements.localDate, localDate))).orderBy(desc(bodyMeasurements.measuredAt)).limit(1);
+    const [row] = await this.database.select().from(bodyMeasurements).where(and(eq(bodyMeasurements.userId, userId), isNull(bodyMeasurements.deletedAt), lte(bodyMeasurements.localDate, localDate))).orderBy(desc(bodyMeasurements.localDate), desc(bodyMeasurements.measuredAt), desc(bodyMeasurements.id)).limit(1);
     return row === undefined ? null : measurementFromRow(row);
   }
 
@@ -146,8 +190,15 @@ export class PostgresPlanningRepository implements PlanningRepository {
 
   public async updateMeasurement(userId: string, measurementId: string, expectedRevision: number, input: Omit<BodyMeasurement, "id" | "revision" | "createdAt" | "updatedAt">): Promise<BodyMeasurement | "not_found" | "revision_conflict"> {
     return this.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`measurement:${measurementId}`}, 0))`);
       const [existing] = await transaction.select().from(bodyMeasurements).where(and(eq(bodyMeasurements.id, measurementId), eq(bodyMeasurements.userId, userId))).for("update").limit(1);
-      if (existing === undefined) return "not_found" as const;
+      if (existing === undefined && expectedRevision === 0) {
+        const [created] = await transaction.insert(bodyMeasurements).values({ id: measurementId, userId, ...input, weightKg: input.weightKg.toString(), waistCm: input.waistCm?.toString() ?? null }).onConflictDoNothing().returning();
+        return created ? measurementFromRow(created) : "not_found" as const;
+      }
+      if (existing === undefined || existing.deletedAt !== null) return "not_found" as const;
+      const { id: _id, revision: _revision, createdAt: _created, updatedAt: _updated, ...savedInput } = measurementFromRow(existing);
+      if (existing.revision === expectedRevision + 1 && isDeepStrictEqual(savedInput, input)) return measurementFromRow(existing);
       if (existing.revision !== expectedRevision) return "revision_conflict" as const;
       await transaction.insert(bodyMeasurementRevisions).values({
         measurementId,

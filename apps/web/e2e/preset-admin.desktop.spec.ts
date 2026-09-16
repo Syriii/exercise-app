@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 
 test("the preset administrator must change the initial password", async ({ page }) => {
@@ -12,5 +13,6 @@ test("the preset administrator must change the initial password", async ({ page 
   await page.getByLabel("再输入一次").fill("new administrator browser password");
   await page.getByRole("button", { name: "保存新密码" }).click();
 
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 });

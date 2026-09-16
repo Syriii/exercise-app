@@ -13,11 +13,11 @@ export const navigationItems: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { id: "today", shortLabel: "今", label: "今天", description: "安排与剩余" },
+  { id: "today", shortLabel: "今", label: "今天", description: "今天的记录" },
   { id: "training", shortLabel: "练", label: "训练", description: "计划与记录" },
   { id: "nutrition", shortLabel: "食", label: "饮食", description: "参考与餐食" },
   { id: "history", shortLabel: "史", label: "历史", description: "按天回看" },
-  { id: "settings", shortLabel: "设", label: "设置", description: "资料与提醒" },
+  { id: "settings", shortLabel: "我", label: "我的", description: "身体、目标与设置" },
 ] as const;
 
 export const scenarioOptions: ReadonlyArray<{ id: NutritionScenario; label: string }> = [

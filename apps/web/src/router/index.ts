@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
 import { useSessionStore } from "../stores/session";
+import { planningApi } from "../api/planning";
 import AdminPage from "../views/AdminPage.vue";
 import AuthPage from "../views/AuthPage.vue";
 import ChangePasswordPage from "../views/ChangePasswordPage.vue";
@@ -54,6 +55,13 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.admin === true && session.account.role !== "admin") {
     return { name: "today" };
+  }
+  if (to.name !== "change-password" && !(to.name === "settings" && to.params.section === "setup")) {
+    try {
+      if (!(await planningApi.getSetup()).completed) return { name: "settings", params: { section: "setup" } };
+    } catch {
+      return { name: "settings", params: { section: "setup" } };
+    }
   }
   return true;
 });

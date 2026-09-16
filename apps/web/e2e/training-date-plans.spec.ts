@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
@@ -8,6 +9,7 @@ async function setup(page: Page) {
   await page.getByLabel("用户名").fill("date_" + randomUUID().replaceAll("-", "").slice(0, 24));
   await page.getByLabel("密码").fill("browser fake date-plan password");
   await page.getByRole("button", { name: "注册", exact: true }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   const template = await (await page.request.post("/api/v1/training/templates", { data: { name: "练胸", note: null, items: [target] } })).json();
   const date = await page.evaluate(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; });

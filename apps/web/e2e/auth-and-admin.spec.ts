@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 
 test("a person can register and reach today's view", async ({ page }, testInfo) => {
@@ -7,6 +8,7 @@ test("a person can register and reach today's view", async ({ page }, testInfo) 
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
 
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   await expect(page.getByRole("heading", { name: "今天", exact: true })).toBeVisible();
 });
@@ -17,6 +19,7 @@ test("an administrator can inspect runtime health", async ({ page }, testInfo) =
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/admin");
 
@@ -37,6 +40,7 @@ test("an administrator can issue a one-time password without seeing it again", a
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(originalPassword);
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.context().clearCookies();
@@ -45,6 +49,7 @@ test("an administrator can issue a one-time password without seeing it again", a
   await page.getByLabel("用户名").fill(adminUsername);
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/admin");
 

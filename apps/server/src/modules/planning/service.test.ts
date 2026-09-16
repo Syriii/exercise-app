@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MemoryPlanningRepository } from "./memory-repository.js";
 import { PlanningService } from "./service.js";
+import { verifyOnboardingBody } from "../../testing/onboarding-body-contract.js";
 
 async function completeProfile(service: PlanningService, userId: string) {
   await service.updateProfile(userId, 0, {
@@ -24,6 +25,17 @@ async function completeProfile(service: PlanningService, userId: string) {
 }
 
 describe("PlanningService", () => {
+  it("recognizes legacy valid profiles without reenrollment after their last measurement is deleted", async () => {
+    const service = new PlanningService(new MemoryPlanningRepository());
+    await completeProfile(service, "legacy");
+    const record = await service.createMeasurement("legacy", { measuredAt: "2026-08-01T08:00:00Z", localDate: "2026-08-01", timeZone: "Asia/Shanghai", weightKg: 70, waistCm: null, note: null });
+    expect((await service.getSetupProgress("legacy")).completed).toBe(true);
+    await service.deleteMeasurement("legacy", record.id, record.revision);
+    expect((await service.getSetupProgress("legacy")).completed).toBe(true);
+  });
+  it("resumes required setup and safely orders, retries, corrects and deletes body records", async () => {
+    await verifyOnboardingBody(new MemoryPlanningRepository(), "owner", "other");
+  });
   it("does not pass transport revision fields into first profile or strategy inserts", async () => {
     const repository = new MemoryPlanningRepository();
     const profileWrite = vi.spyOn(repository, "saveProfile");
@@ -85,7 +97,7 @@ describe("PlanningService", () => {
   });
 
   it("reuses an unchanged daily reference and creates a new revision after an input change", async () => {
-    const service = new PlanningService(new MemoryPlanningRepository());
+    const service = new PlanningService(new MemoryPlanningRepository(), () => new Date("2026-08-26T04:00:00Z"));
     await completeProfile(service, "user-a");
     await service.createMeasurement("user-a", {
       measuredAt: "2026-08-20T00:00:00.000Z",

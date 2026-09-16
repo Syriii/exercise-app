@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 
 test("a person can turn an evidence-backed system suggestion into their own plan", async ({ page }, testInfo) => {
@@ -6,6 +7,7 @@ test("a person can turn an evidence-backed system suggestion into their own plan
   await page.getByLabel("用户名").fill(`suggest_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto("/settings/profile");

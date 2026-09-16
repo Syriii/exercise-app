@@ -110,3 +110,9 @@ export interface MeasurementRevision {
   readonly note: string | null;
   readonly createdAt: Date;
 }
+export interface SetupProgress {
+  profile: boolean;
+  measurement: boolean;
+  strategy: boolean;
+  completed: boolean;
+}

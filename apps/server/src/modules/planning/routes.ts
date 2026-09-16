@@ -75,6 +75,18 @@ export async function registerPlanningRoutes(app: FastifyInstance, options: { re
     return (await options.identityService.authenticate(request.cookies[sessionCookieName])).id;
   }
 
+  const setupResponse = { type: "object", additionalProperties: false, required: ["profile", "measurement", "strategy", "completed"], properties: { profile: { type: "boolean" }, measurement: { type: "boolean" }, strategy: { type: "boolean" }, completed: { type: "boolean" } } } as const;
+  app.get("/api/v1/planning/setup", { schema: { response: { 200: setupResponse } }, handler: async request => options.planningService.getSetupProgress(await userId(request)) });
+  app.put<{ Body: { step: "start" | "profile" | "measurement" | "strategy" | "finish"; measurementUnknown?: boolean } }>("/api/v1/planning/setup", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["step"], properties: { step: { type: "string", enum: ["start", "profile", "measurement", "strategy", "finish"] }, measurementUnknown: { type: "boolean" } } }, response: { 200: setupResponse } },
+    handler: async request => options.planningService.advanceSetup(await userId(request), request.body.step, request.body.measurementUnknown),
+  });
+
+  app.delete<{ Params: { measurementId: string }; Body: { revision: number } }>("/api/v1/planning/measurements/:measurementId", {
+    schema: { params: { type: "object", required: ["measurementId"], properties: { measurementId: { type: "string", format: "uuid" } } }, body: { type: "object", additionalProperties: false, required: ["revision"], properties: { revision: { type: "integer", minimum: 1 } } }, response: { 204: { type: "null" } } },
+    handler: async (request, reply) => { await options.planningService.deleteMeasurement(await userId(request), request.params.measurementId, request.body.revision); return reply.status(204).send(); },
+  });
+
   app.get("/api/v1/planning/profile", {
     schema: { response: { 200: profileResponse } },
     handler: async (request) => {
@@ -128,7 +140,7 @@ export async function registerPlanningRoutes(app: FastifyInstance, options: { re
   app.put<{ Params: { measurementId: string }; Body: { revision: number; measuredAt: string; localDate: string; timeZone: string; weightKg: number; waistCm: number | null; note: string | null } }>("/api/v1/planning/measurements/:measurementId", {
     schema: {
       params: { type: "object", additionalProperties: false, required: ["measurementId"], properties: { measurementId: { type: "string", format: "uuid" } } },
-      body: { type: "object", additionalProperties: false, required: ["revision", ...Object.keys(measurementInputProperties)], properties: { revision: { type: "integer", minimum: 1 }, ...measurementInputProperties } },
+      body: { type: "object", additionalProperties: false, required: ["revision", ...Object.keys(measurementInputProperties)], properties: { revision: { type: "integer", minimum: 0 }, ...measurementInputProperties } },
       response: { 200: measurementResponse },
     },
     handler: async (request) => serializeMeasurement(await options.planningService.updateMeasurement(await userId(request), request.params.measurementId, request.body.revision, request.body)),

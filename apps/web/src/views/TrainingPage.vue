@@ -5,11 +5,13 @@ import AppShell from "../app/AppShell.vue";
 import { ApiError } from "../api/client";
 import { trainingApi, type TrainingSession, type TrainingTemplate, type TrainingProgram, type TrainingSchedule } from "../api/training";
 import RecordActionFields from "../features/training/RecordActionFields.vue";
+import TrainingReview from "../features/training/TrainingReview.vue";
 import ScheduleEditor from "../features/training/ScheduleEditor.vue";
 import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { progressSummary, itemProgressText } from "../features/training/plan-progress";
 import { actionFromPlan, actionSummary, blankAction, emptyRecord, recordFromActual, recordPayload, type RecordDraft } from "../features/training/record-draft";
 import { submissionId } from "../support/submission-id";
+import { returnToHistory } from "../support/history-return";
 
 const router = useRouter(), route = useRoute();
 function today() { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); }
@@ -63,6 +65,7 @@ async function save() {
     const saved = await trainingApi.saveRecord(draft.value.id, input);
     date.value = saved.localDate; draft.value = null; names.value = ""; notice.value = "这次训练已保存。"; clearConflict();
     await loadData();
+    await returnToHistory(route, router);
   } catch (e) {
     report(e);
     if (e instanceof ApiError && (e.status === 409 || e.status === 404)) {
@@ -93,7 +96,7 @@ function discard() { if (window.confirm("放弃这次尚未保存的输入？已
 async function remove(record: Pick<TrainingSession, "id" | "revision" | "localDate">) {
   if (saving.value || !window.confirm("删除 " + record.localDate + " 的这条训练记录？它将不再计入今天和历史。")) return;
   saving.value = true; error.value = "";
-  try { await trainingApi.deleteRecord(record.id, record.revision); if (draft.value?.id === record.id) draft.value = null; notice.value = "训练记录已删除。"; await loadData(); }
+  try { await trainingApi.deleteRecord(record.id, record.revision); if (draft.value?.id === record.id) draft.value = null; notice.value = "训练记录已删除。"; await loadData(); await returnToHistory(route, router); }
   catch (e) { report(e); if (e instanceof ApiError && e.status === 409) { error.value = "记录已被修改，请核对刷新后的内容，再决定是否删除。"; await loadData(); } }
   finally { saving.value = false; }
 }
@@ -121,7 +124,8 @@ async function handleQuery() {
     const query = { ...route.query };
     if (query.templateId) templates.value = await trainingApi.listTemplates();
     if (query.programId) programs.value = await trainingApi.listPrograms();
-    if (query.edit) { const value = await trainingApi.getSession(String(query.edit)); await edit(value); }
+    if (typeof query.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.date)) date.value = query.date;
+    if (query.edit) { const value = await trainingApi.getSession(String(query.edit)); date.value = value.localDate; await edit(value); }
     else if (query.scheduleId) {
       const values = await trainingApi.listSchedules();
       const plan = values.find(value => value.id === query.scheduleId);
@@ -137,7 +141,7 @@ async function handleQuery() {
         else if (!query.new) error.value = "来源计划已不存在，可以直接填写本次实际内容。";
       }
     }
-    await router.replace({ name: "training" });
+    if (query.edit || query.scheduleId || query.templateId || query.programId || query.new) await router.replace({ name: "training", query: { date: date.value, ...(typeof query.returnTo === "string" ? { returnTo: query.returnTo } : {}) } });
   } catch(e) { report(e); }
   finally { queryBusy = false; }
 }
@@ -236,7 +240,7 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
         <ul><li v-for="item in record.items.filter(i => i.status === 'completed')" :key="item.id"><strong>{{ item.performedExerciseName ?? item.exerciseName }}</strong><span>{{ actionSummary(item) }}</span><p v-if="item.actualNote">{{ item.actualNote }}</p></li></ul>
         <p v-if="!record.items.some(i => i.status === 'completed')">尚无已确认完成的动作。</p><p v-if="record.note">{{ record.note }}</p>
         <div class="form-actions"><button class="action-button" :disabled="saving" @click="edit(record)">修改整条记录</button><button class="text-action" :disabled="saving" @click="remove(record)">删除记录</button></div>
-        <details v-if="record.items.some(item => item.status === 'completed')"><summary>更多</summary><button class="text-action" :disabled="saving" @click="saveAsPlan(record)">存为我的计划</button></details>
+        <details v-if="record.items.some(item => item.status === 'completed')"><summary>更多</summary><button class="text-action" :disabled="saving" @click="saveAsPlan(record)">存为我的计划</button><TrainingReview :key="record.id" :record="record" @saved="loadData" /></details>
       </article>
     </template>
   </AppShell>

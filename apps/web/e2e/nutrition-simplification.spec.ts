@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 import { addPersonalFood, createMeal } from "./helpers/nutrition";
 
@@ -6,6 +7,7 @@ test.beforeEach(async ({ page }, info) => {
   await page.getByLabel("用户名").fill(`diet_simple_${info.project.name[0]}_${Date.now()}`);
   await page.getByLabel("密码").fill("browser-only diet test password");
   await page.getByRole("button", { name: "注册", exact: true }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/today$/);
   await page.goto("/nutrition?date=2026-09-06");
 });

@@ -101,7 +101,7 @@ export class ReminderService {
     const localDate = validLocalDate(localDateInput);
     const settings = await this.getTrainingSettings(userId, defaultTimeZone);
     const schedules = await this.#trainingService.listSchedules(userId, localDate, localDate);
-    const scheduleCount = schedules.filter((schedule) => schedule.status === "scheduled").length;
+    const scheduleCount = schedules.filter((schedule) => schedule.status !== "cancelled").length;
     if (!settings.enabled) return { state: "disabled", scheduleCount, nextAt: null };
     if (scheduleCount === 0) return { state: "none_scheduled", scheduleCount: 0, nextAt: null };
     const dayState = await this.#repository.getTrainingDayState(userId, localDate);
@@ -156,19 +156,14 @@ export class ReminderService {
     const paused = await this.#pausedStatus(await this.#repository.getNutritionDayState(userId, localDate));
     if (paused !== null) return { ...paused, reason: null, mealCount: 0 };
     if (!this.#isDue(localDate, settings.localTime, settings.timeZone)) return { state: "not_due", reason: null, mealCount: 0, nextAt: null };
-    if (this.#nutritionService === undefined || this.#planningService === undefined) throw new Error("nutrition reminder dependencies unavailable");
-    const reference = await this.#planningService.getDailyReference(userId, localDate, settings.timeZone);
-    const summary = await this.#nutritionService.getDaySummary(userId, localDate, { energyKcal: reference.result.targetEnergyKcal, proteinGrams: reference.result.proteinGrams, carbohydrateGrams: reference.result.carbohydrateGrams, fatGrams: reference.result.fatGrams });
-    const values = [summary.energyKcal, summary.proteinGrams, summary.carbohydrateGrams, summary.fatGrams];
-    const reason = summary.mealCount === 0 ? "no_meals" : values.some((value) => !value.complete) ? "incomplete" : values.some((value) => value.remaining !== null && value.remaining < 0) ? "over_target" : "remaining";
-    return { state: "due", reason, mealCount: summary.mealCount, nextAt: null };
+    return { state: "due", reason: null, mealCount: 0, nextAt: null };
   }
 
   public snoozeNutrition(userId: string, localDateInput: string, minutes: number) { return this.#snooze((state) => this.#repository.saveNutritionDayState(userId, state), localDateInput, minutes); }
   public dismissNutrition(userId: string, localDateInput: string) { return this.#repository.saveNutritionDayState(userId, { localDate: validLocalDate(localDateInput), status: "dismissed", snoozedUntil: null }); }
 
   public async getMeasurementSettings(userId: string, defaultTimeZone: string): Promise<MeasurementReminderSettings> {
-    return (await this.#repository.getMeasurementSettings(userId)) ?? { enabled: true, intervalDays: 7, localTime: "09:00", timeZone: validTimeZone(defaultTimeZone, this.#now()), revision: 0, updatedAt: null };
+    return (await this.#repository.getMeasurementSettings(userId)) ?? { enabled: false, intervalDays: 7, localTime: "09:00", timeZone: validTimeZone(defaultTimeZone, this.#now()), revision: 0, updatedAt: null };
   }
 
   public async updateMeasurementSettings(userId: string, expectedRevision: number, input: { enabled: boolean; intervalDays: number; localTime: string; timeZone: string }) {
@@ -187,7 +182,7 @@ export class ReminderService {
   public async getMeasurementStatus(userId: string, localDateInput: string, defaultTimeZone: string): Promise<MeasurementReminderStatus> {
     const localDate = validLocalDate(localDateInput);
     const settings = await this.getMeasurementSettings(userId, defaultTimeZone);
-    const latest = this.#planningService === undefined ? null : (await this.#planningService.listMeasurements(userId))[0] ?? null;
+    const latest = this.#planningService === undefined ? null : (await this.#planningService.listMeasurements(userId)).find(value => value.localDate <= localDate) ?? null;
     const nextDueDate = latest === null ? localDate : addDays(latest.localDate, settings.intervalDays);
     if (!settings.enabled) return { state: "disabled", latestMeasurementDate: latest?.localDate ?? null, nextDueDate, nextAt: null };
     const paused = await this.#pausedStatus(await this.#repository.getMeasurementDayState(userId, localDate));

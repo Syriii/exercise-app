@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 
 async function photoMeal(page: Page, suffix: string) {
@@ -6,6 +7,7 @@ async function photoMeal(page: Page, suffix: string) {
   await page.getByLabel("用户名").fill(`foodreplace_${suffix}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册", exact: true }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/nutrition");
   await page.getByText("拍照识别设置", { exact: true }).click();

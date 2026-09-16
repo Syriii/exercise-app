@@ -6,9 +6,7 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await page.getByLabel("用户名").fill(`planning_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
-  await expect(page).toHaveURL(/\/today$/);
-
-  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/settings\/setup$/);
   await expect(page.getByRole("heading", { level: 1, name: "基础资料" })).toBeVisible();
   const profile = page.getByRole("region", { name: "基础资料" });
   await profile.getByText("出生日期", { exact: true }).click();
@@ -26,11 +24,13 @@ test("a person can create an evidence-backed daily nutrition reference", async (
 
   const strategy = page.getByRole("region", { name: "目标与营养" });
   await strategy.getByLabel("维持体重").check();
+  await strategy.getByText(/更多营养选项/).click();
   await strategy.getByLabel("均衡分配").check();
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(page.getByRole("region", { name: "训练提醒" })).toBeVisible();
-  await page.getByRole("button", { name: "完成设置" }).click();
-  await expect(page).toHaveURL(/\/settings$/);
+  await page.getByRole("button", { name: "完成设置", exact: true }).click();
+  await expect(page).toHaveURL(/\/today$/);
+  await page.goto("/settings");
   await expect(page.getByRole("region", { name: "设置项目" })).toContainText("63 kg");
 
   await page.goto("/nutrition");
@@ -49,7 +49,6 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await page.getByRole("button", { name: "保存修正" }).click();
   await expect(page.getByText("误录的身体测量已修正，旧值仍可追溯。")).toBeVisible();
   await page.goto("/today");
-  await expect(page.getByRole("heading", { name: "今天还可以吃" })).toBeVisible();
-  const measurementDate = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  await expect(page.getByText(`采用 ${measurementDate} 的体重`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天已记录的饮食" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天还可以吃" })).toHaveCount(0);
 });

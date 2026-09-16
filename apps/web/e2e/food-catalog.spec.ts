@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 import { createMeal } from "./helpers/nutrition";
 
@@ -6,6 +7,7 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   await page.getByLabel("用户名").fill(`catalog_${testInfo.project.name.startsWith("mobile") ? "m" : "d"}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册", exact: true }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/nutrition");
   const meal = await createMeal(page, "目录早餐");

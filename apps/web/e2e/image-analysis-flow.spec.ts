@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 import { addPersonalFood, createMeal } from "./helpers/nutrition";
 
@@ -16,6 +17,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await page.getByLabel("用户名").fill(`image_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto("/settings/profile");
@@ -101,6 +103,7 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
   await page.getByLabel("用户名").fill(`image_retry_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   let failedOnce = false;
@@ -143,6 +146,7 @@ test("manual photo recognition previews a partial replacement, retries safely an
   await page.getByLabel("用户名").fill(`photo_control_${testInfo.project.name[0]}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
   await page.goto("/nutrition");
   const meal = await createMeal(page, "替换早餐");

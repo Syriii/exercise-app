@@ -2,7 +2,7 @@
 
 一个面向训练与饮食记录的开源健身辅助应用。项目先以响应式 Web App 验证真实使用体验，成熟后再封装为 Android APK。
 
-当前已有 Vue Web、Fastify API、PostgreSQL、pg-boss worker、账号与部署基础及训练/饮食主体实现。新一轮使用逻辑设计已确认并进入 Phase 6.6 改造；首个切片的单项照片食物、份量同比换算与常用复用已于2026-09-07以3659bbe上线。本地122项测试、桌面/手机43项E2E、真实PostgreSQL15项隔离测试、新版真实模型合约及本次备份恢复升级验证通过。其余页面改造继续待实现，不能把一个切片发布视为全部新设计已交付。
+项目使用 Vue Web、Fastify API、PostgreSQL 和 pg-boss worker。当前源码包括单项照片食物识别与份量换算、统一食物目录、事后批量训练记录及独立日期计划；今天使用两张摘要卡，首次设置支持必要步骤续填与跳过提醒，我的提供身体数据新增／纠错／删除，历史分别查看记录和趋势并返回原编辑位置。实现、本地验收、真实 PostgreSQL 验收和生产发布是独立阶段，准确交付状态见任务计划，不以源码存在代表已经上线。
 
 建议先看[完整页面文字行为树](docs/experience/experience-design.md)，再看[待实现与验收清单](docs/architecture/delivery-plan.md#phase-66-使用逻辑改造待实现)。新方向是“今天、饮食、训练、历史、我的”五入口，拍照产生可复用单项食物，训练以事后批量记录为主，身体数据在我的获得稳定入口。
 
@@ -55,7 +55,7 @@ ALLOW_CONTAINER_RECREATE_TEST=true deployment/scripts/verify-increment0.sh full
 
 第一次部署可以直接跟随[快速部署教程](docs/deployment/quick-start.md)，启动容器前先运行其中的无副作用预检；持久化、安全、备份恢复、升级和完整验收见[自托管手册](docs/deployment/self-hosting.md)。
 
-运行中遇到页面问题时，现有版本可在“设置 → 问题报告”生成可复制、可下载的脱敏文本；新设计将入口移至“我的 → 设置”，尚待实施。容器启动、数据库或后台任务异常时，在 `deployment/` 目录执行：
+运行中遇到页面问题时，可在“我的 → 应用设置 → 问题报告”生成可复制、可下载的脱敏文本。容器启动、数据库或后台任务异常时，在 `deployment/` 目录执行：
 
 ```bash
 ./scripts/collect-diagnostics.sh

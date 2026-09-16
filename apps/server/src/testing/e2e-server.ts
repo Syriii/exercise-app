@@ -95,7 +95,7 @@ const reminderService = new ReminderService({
 });
 await identityService.initializeAdmin("administrator test password");
 for (const username of ["desktop_admin", "mobile_admin"]) {
-  await identityRepository.createAccount(
+  const account = await identityRepository.createAccount(
     {
       username,
       normalizedUsername: username,
@@ -105,6 +105,14 @@ for (const username of ["desktop_admin", "mobile_admin"]) {
     },
     { bypassRegistration: true },
   );
+  if (typeof account === "string") throw new Error("E2E admin fixture failed");
+  // Shared operational fixtures have already completed onboarding; user-flow tests register fresh accounts.
+  await planningService.advanceSetup(account.id, "start");
+  await planningService.advanceSetup(account.id, "profile");
+  await planningService.advanceSetup(account.id, "measurement", true);
+  await planningService.updateStrategy(account.id, 0, { weightStrategy: "maintain", macroPreference: "balanced", regularExercise: false, trainingIntent: null, targetWeightKg: null, targetDate: null });
+  await planningService.advanceSetup(account.id, "strategy");
+  await planningService.advanceSetup(account.id, "finish");
 }
 
 await queue.start();

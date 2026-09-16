@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { readFile } from "node:fs/promises";
 
 import { expect, test } from "@playwright/test";
@@ -7,6 +8,7 @@ async function register(page: import("@playwright/test").Page, username: string,
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 }
 
@@ -22,6 +24,7 @@ test("a person can manage independent reminders and download a private JSON expo
   await expect(page.getByRole("status")).toContainText("饮食提醒已开启");
 
   const measurementReminder = page.getByRole("region", { name: "身体测量提醒" });
+  await measurementReminder.getByRole("checkbox").check();
   await measurementReminder.getByLabel("间隔天数").fill("14");
   await measurementReminder.getByRole("button", { name: "保存测量提醒" }).click();
   await expect(page.getByRole("status")).toContainText("每 14 天");

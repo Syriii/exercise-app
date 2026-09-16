@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from "vue";
+import { returnToHistory } from "../support/history-return";
 import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
@@ -119,6 +120,7 @@ async function saveMetadata(meal: Meal) {
     meals.value = meals.value.map(item => item.id === meal.id ? saved : item).filter(item => item.localDate === selectedDate.value).sort((a,b) => b.occurredAt.localeCompare(a.occurredAt));
     notice.value = saved.localDate === selectedDate.value ? "餐食信息已保存" : `餐食已移至 ${saved.localDate}，原日期不再重复计入`;
     try { await refreshSummary(); } catch { errorMessage.value = "餐食已保存，汇总暂时刷新不了，请不要重复保存。"; }
+    await returnToHistory(route, router);
   } catch (cause) { errorMessage.value = cause instanceof ApiError ? cause.message : "餐食信息暂时保存不了，填写的内容已保留。"; }
   finally { saving.value = false; }
 }
@@ -412,6 +414,7 @@ async function saveContribution(meal: Meal, existing?: MealContribution) {
     meals.value = meals.value.map((value) => value.id === saved.id ? saved : value);
     contributionForms[meal.id] = emptyContribution(); editingContributionId.value = null; delete correctionBases[meal.id]; notice.value = "食物已修正，当天营养已更新";
     try { await refreshSummary(); } catch { errorMessage.value = "食物已保存，汇总暂时刷新不了，请不要重复保存。"; }
+    await returnToHistory(route, router);
   } catch (error) { console.error("Nutrition contribution save failed", error); errorMessage.value = error instanceof ApiError ? error.message : "暂时保存不了这条营养记录"; }
   finally { saving.value = false; }
 }
@@ -433,9 +436,16 @@ async function refreshSummary(expectedDate = selectedDate.value) {
   if (selectedDate.value === expectedDate) summary.value = refreshed;
 }
 async function handleRequestedAction() {
-  if (route.name !== "nutrition" || route.query.action !== "new-meal") return;
-  await openMealComposer();
-  await router.replace({ name: "nutrition", query: selectedDate.value === localDate(new Date()) ? {} : { date: selectedDate.value } });
+  if (route.name !== "nutrition") return;
+  if (typeof route.query.mealId === "string") {
+    openMeals[route.query.mealId] = true;
+    await nextTick();
+    scrollToMealContent(document.getElementById(`meal-${route.query.mealId}`));
+  }
+  if (route.query.action !== "new-meal" && route.query.action !== "photo") return;
+  await openMealComposer(route.query.action === "photo" ? "photo" : "food");
+  const { action: _action, ...query } = route.query;
+  await router.replace({ name: "nutrition", query: { ...query, date: selectedDate.value } });
 }
 
 watch(() => route.query.date, (value) => {

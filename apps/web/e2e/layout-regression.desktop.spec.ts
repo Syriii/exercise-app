@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 
 const applicationRoutes = ["/today", "/training", "/nutrition", "/history", "/settings", "/settings/profile", "/settings/measurement", "/settings/strategy", "/settings/reminders", "/settings/data", "/feedback", "/admin"] as const;
@@ -8,6 +9,7 @@ async function login(page: Page) {
   await page.getByLabel("用户名").fill("desktop_admin");
   await page.getByLabel("密码").fill("operations test password");
   await page.getByRole("button", { name: "登录" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 }
 

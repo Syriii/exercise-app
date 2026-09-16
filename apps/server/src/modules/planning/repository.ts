@@ -6,9 +6,14 @@ import type {
   PersonalProfile,
   PlanningInputSnapshot,
   DailyPlanningResult,
+  SetupProgress,
 } from "./types.js";
 
 export interface PlanningRepository {
+  getSetupProgress(userId: string): Promise<SetupProgress | null>;
+  saveSetupProgress(userId: string, progress: SetupProgress): Promise<SetupProgress>;
+  hasMeasurementHistory(userId: string): Promise<boolean>;
+  deleteMeasurement(userId: string, measurementId: string, expectedRevision: number): Promise<"deleted" | "not_found" | "revision_conflict">;
   getProfile(userId: string): Promise<PersonalProfile | null>;
   saveProfile(
     userId: string,

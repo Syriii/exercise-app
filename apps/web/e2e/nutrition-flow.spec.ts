@@ -1,3 +1,4 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 import { addPersonalFood, createMeal, openPicker } from "./helpers/nutrition";
 
@@ -30,11 +31,11 @@ test("an empty history page shows one useful state instead of an empty trend rep
   await page.getByLabel("用户名").fill(`history_empty_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto("/history");
-  await expect(page.getByText("最近 90 天还没有记录")).toBeVisible();
-  await expect(page.getByText("完成的训练、保存的饮食和身体测量会按日期出现在这里。")).toBeVisible();
+  await expect(page.getByText("这段时间没有符合筛选的记录。未记录不代表没有运动或进食。")).toBeVisible();
   await expect(page.getByRole("region", { name: "90 天概览" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "回到今天" })).toBeVisible();
 });
@@ -55,9 +56,10 @@ test("today opens nutrition with the quick meal form ready", async ({ page }, te
   await page.getByLabel("用户名").fill(`quick_meal_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
-  await page.getByRole("button", { name: "去记一顿" }).click();
+  await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
   await expect(page).toHaveURL(/\/nutrition/);
   await expect(page.getByRole("region", { name: "快速记餐" })).toBeVisible();
   await expect(page.getByLabel("餐次名称（可选）")).toBeFocused();
@@ -70,6 +72,7 @@ test("a body measurement is a first-class history record", async ({ page }, test
   await page.getByLabel("用户名").fill(`measurement_history_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto("/settings/measurement");
@@ -80,12 +83,11 @@ test("a body measurement is a first-class history record", async ({ page }, test
 
   await page.goto("/history");
   await expect(page.getByText("最近 90 天还没有记录")).toHaveCount(0);
-  const datedHistory = page.getByLabel("按日期排列的训练、饮食与身体测量历史");
-  await expect(datedHistory.getByText("身体测量 · 1 条")).toBeVisible();
-  await expect(datedHistory.getByText("63 kg")).toBeVisible();
-  await expect(datedHistory.getByText("腰围 72 cm")).toBeVisible();
-  await page.locator(".history-filters").getByRole("button", { name: "测量", exact: true }).click();
-  await expect(datedHistory.getByText("1 条测量")).toBeVisible();
+  const datedHistory = page.locator(".history-day-records");
+  await expect(datedHistory.getByText("体重 63 kg")).toBeVisible();
+  await expect(datedHistory.getByText(/腰围 72 cm/)).toBeVisible();
+  await page.getByRole("button", { name: "身体", exact: true }).click();
+  await expect(datedHistory.getByRole("button", { name: "查看／修正身体记录" })).toBeVisible();
 });
 
 test("a person can reuse matching foods, search public products, and manage common foods", async ({ page }, testInfo) => {
@@ -98,6 +100,7 @@ test("a person can reuse matching foods, search public products, and manage comm
   await page.getByLabel("用户名").fill(`food_reuse_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto(`/nutrition?date=${yesterdayDate}`);
@@ -156,6 +159,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await page.getByLabel("用户名").fill(`nutrition_${projectKey}_${Date.now()}`);
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册" }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto("/settings/profile");
@@ -210,22 +214,18 @@ test("a person can record, correct, and review a meal without treating unknown n
 
   await page.goto("/history");
   await page.locator(".history-filters").getByRole("button", { name: "饮食", exact: true }).click();
-  const datedHistory = page.getByLabel("按日期排列的训练、饮食与身体测量历史");
-  const trends = page.getByRole("region", { name: "90 天概览" });
-  await expect(datedHistory).toBeVisible();
-  await expect(datedHistory.getByText("饮食 · 1 顿")).toBeVisible();
-  await expect(trends.getByText("1 天")).toBeVisible();
-  await expect(trends.getByText("250 kcal")).toBeVisible();
-  await expect(trends.getByText("5.2 g")).toBeVisible();
-  await expect(trends.getByText("63 kg")).toBeVisible();
-  await expect(datedHistory.getByText("250 kcal", { exact: true })).toBeVisible();
-  await expect(page.getByText("只汇总已经填写的营养数值。")).toBeVisible();
-  const datedHistoryBox = await datedHistory.boundingBox();
-  const trendsBox = await trends.boundingBox();
-  expect(datedHistoryBox).not.toBeNull();
-  expect(trendsBox).not.toBeNull();
-  expect(trendsBox!.y).toBeGreaterThan(datedHistoryBox!.y + datedHistoryBox!.height - 1);
-  await page.getByRole("button", { name: "查看或修正" }).click();
+  const datedHistory = page.locator(".history-day-records");
+  await expect(datedHistory).toContainText("午饭");
+  await expect(page.getByRole("heading", { name: "饮食趋势" })).toHaveCount(0);
+  await page.getByRole("button", { name: "趋势", exact: true }).click();
+  await page.getByLabel("趋势类型").getByRole("button", { name: "饮食", exact: true }).click();
+  const trends = page.getByRole("table");
+  await expect(trends).toContainText("250 kcal");
+  await expect(trends).toContainText("5.2 g");
+  await expect(trends).toContainText("未知");
+  await expect(trends.getByRole("columnheader")).toHaveText(["日期", "能量", "蛋白质", "碳水化合物", "脂肪"]);
+  await page.getByRole("button", { name: "记录", exact: true }).click();
+  await page.getByRole("button", { name: "查看／修改餐食" }).click();
   await expect(page).toHaveURL(/\/nutrition\?date=/);
   await expect(page.locator("article.meal-card").filter({ hasText: "米饭" })).toBeVisible();
 });

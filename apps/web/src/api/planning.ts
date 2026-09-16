@@ -69,6 +69,9 @@ export interface DailyPlanningReference {
 }
 
 export const planningApi = {
+  getSetup: () => apiRequest<{ profile: boolean; measurement: boolean; strategy: boolean; completed: boolean }>("/api/v1/planning/setup"),
+  advanceSetup: (step: "start" | "profile" | "measurement" | "strategy" | "finish", measurementUnknown = false) => apiRequest<{ profile: boolean; measurement: boolean; strategy: boolean; completed: boolean }>("/api/v1/planning/setup", { method: "PUT", body: JSON.stringify({ step, measurementUnknown }) }),
+  deleteMeasurement: (id: string, revision: number) => apiRequest<void>(`/api/v1/planning/measurements/${id}`, { method: "DELETE", body: JSON.stringify({ revision }) }),
   getProfile: () => apiRequest<PersonalProfile>("/api/v1/planning/profile"),
   updateProfile: (revision: number, input: Omit<PersonalProfile, "revision" | "updatedAt">) =>
     apiRequest<PersonalProfile>("/api/v1/planning/profile", { method: "PUT", body: JSON.stringify({ revision, ...input }) }),

@@ -1,9 +1,11 @@
+import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 async function register(page: Page, suffix: string) {
   await page.goto("/register");
   await page.getByLabel("用户名").fill("batch_" + suffix + "_" + Date.now());
   await page.getByLabel("密码").fill("a browser-only secure password");
   await page.getByRole("button", { name: "注册", exact: true }).click();
+  await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 }
 async function plan(page: Page, name = "全身简易") {
@@ -103,23 +105,26 @@ test("a scheduled plan opens the same editor and history edits and deletes the w
   await page.getByRole("button", { name: "保存安排" }).click();
   await expect(page.getByRole("status")).toContainText("已安排到");
   await page.goto("/today");
-  await page.getByRole("region", { name: "今天的训练" }).getByRole("button", { name: "按当天计划记录", exact: true }).click();
+  await page.getByRole("region", { name: "今天的训练" }).getByRole("button", { name: "查看／修改今天计划 →", exact: true }).click();
+  await page.getByRole("button", { name: "从当天计划记录", exact: true }).click();
   await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
   await page.getByLabel("大致时间（可选）").fill("18:30");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
   await page.goto("/history");
-  await expect(page.getByText(/已记录 · 1 个动作 · 18:30/)).toBeVisible();
-  await page.getByRole("button", { name: "修改／删除整条训练" }).click();
+  await expect(page.getByText("训练 · 18:30", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "查看／修改训练" }).click();
   await page.getByLabel("训练日期").fill("2026-09-01");
   await page.getByLabel("本次备注（可选）").fill("更正日期");
   await page.getByLabel("每组次数").fill("12");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
-  await expect(page.getByRole("article", { name: "已存训练记录" })).toContainText("12 / 12 / 12 次");
-  await page.getByRole("button", { name: "修改整条记录" }).click();
+  await expect(page).toHaveURL(/\/history\?/);
+  await page.getByText("查看记录内容", { exact: true }).click();
+  await expect(page.locator(".history-session details")).toContainText("12 / 12 / 12 次");
+  await page.getByRole("button", { name: "查看／修改训练" }).click();
   page.once("dialog", d => d.accept());
   await page.getByRole("button", { name: "删除这条已存记录" }).click();
-  await expect(page.getByText("训练记录已删除。", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/history\?/);
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
 });
 
@@ -129,13 +134,13 @@ test("old unfinished records import only confirmed actual actions and keep corre
   const old = await (await page.request.post('/api/v1/training/sessions', { data: { templateId: template.id, timeZone: 'Asia/Shanghai' } })).json();
   expect((await page.request.put(`/api/v1/training/sessions/${old.id}/items/${old.items[0].id}`, { data: { revision: old.revision, status: 'completed', performedExerciseName: '徒手深蹲', actualNote: '旧记录', sets: [{ reps: 8, weightKg: null, durationSeconds: null, distanceMeters: null, note: null }] } })).ok()).toBeTruthy();
   await page.goto('/history');
-  await page.getByRole('button', { name: '修改／删除整条训练' }).click();
+  await page.getByRole('button', { name: '查看／修改训练' }).click();
   await expect(page.getByRole('region', { name: '动作填写' })).toHaveCount(1);
   await expect(page.getByLabel('动作名称', { exact: true })).toHaveValue('徒手深蹲');
   await expect(page.getByLabel('组数', { exact: true })).toHaveValue('1');
   await page.getByLabel('每组次数').fill('9');
   await page.getByRole('button', { name: '保存训练记录', exact: true }).click();
-  await expect(page.getByText('这次训练已保存。', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/history\?/);
   const saved = await (await page.request.get(`/api/v1/training/sessions/${old.id}`)).json();
   expect(saved.items.filter((i: any) => i.status === 'completed')).toHaveLength(1);
   expect(saved.items.find((i: any) => i.exerciseName === '卧推').status).toBe('skipped');

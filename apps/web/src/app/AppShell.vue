@@ -35,6 +35,7 @@ const activeSection = computed<AppSection | null>(() => {
 });
 
 const username = computed(() => sessionStore.account?.username ?? "");
+const historyReturn = computed(() => typeof route.query.returnTo === "string" && /^\/history(?:\?|$)/.test(route.query.returnTo) ? route.query.returnTo : null);
 
 function openSection(section: AppSection) {
   void router.push({ name: section });
@@ -76,6 +77,7 @@ function openSection(section: AppSection) {
       </header>
 
       <main class="app-main">
+        <button v-if="historyReturn" type="button" class="text-action history-return" @click="router.push(historyReturn)">← 返回原历史位置</button>
         <slot />
       </main>
 

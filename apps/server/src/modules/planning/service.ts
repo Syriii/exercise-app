@@ -10,6 +10,7 @@ import type {
   PlanningInputSnapshot,
   PlanningSexCategory,
   WeightStrategy,
+  SetupProgress,
 } from "./types.js";
 
 export const emptyProfile: PersonalProfile = {
@@ -66,7 +67,39 @@ function assertNumber(value: number | null, name: string, minimum: number, maxim
 }
 
 export class PlanningService {
-  public constructor(private readonly repository: PlanningRepository) {}
+  public constructor(private readonly repository: PlanningRepository, private readonly now: () => Date = () => new Date()) {}
+
+  public async getSetupProgress(userId: string): Promise<SetupProgress> {
+    const persisted = await this.repository.getSetupProgress(userId);
+    if (persisted !== null) return persisted;
+    const [profile, strategy, measurement] = await Promise.all([this.repository.getProfile(userId), this.repository.getStrategy(userId), this.repository.hasMeasurementHistory(userId)]);
+    return { profile: profile !== null, measurement, strategy: strategy !== null, completed: profile !== null && measurement && strategy !== null };
+  }
+
+  public async advanceSetup(userId: string, step: "start" | "profile" | "measurement" | "strategy" | "finish", measurementUnknown = false): Promise<SetupProgress> {
+    const progress = await this.getSetupProgress(userId);
+    const invalid = () => new PlanningError("invalid_planning_input", "请先完成前面的必要步骤；未知资料可以明确选择暂不填写", 400);
+    if (step === "profile") {
+      if (await this.repository.getProfile(userId) === null) throw invalid();
+      progress.profile = true;
+    } else if (step === "measurement") {
+      if (!progress.profile || (!measurementUnknown && !(await this.repository.hasMeasurementHistory(userId)))) throw invalid();
+      progress.measurement = true;
+    } else if (step === "strategy") {
+      if (!progress.profile || !progress.measurement || await this.repository.getStrategy(userId) === null) throw invalid();
+      progress.strategy = true;
+    } else if (step === "finish") {
+      if (!progress.profile || !progress.measurement || !progress.strategy) throw invalid();
+      progress.completed = true;
+    }
+    return this.repository.saveSetupProgress(userId, progress);
+  }
+
+  public async deleteMeasurement(userId: string, measurementId: string, expectedRevision: number): Promise<void> {
+    const result = await this.repository.deleteMeasurement(userId, measurementId, expectedRevision);
+    if (result === "not_found") throw new PlanningError("measurement_not_found", "找不到这条身体测量", 404);
+    if (result === "revision_conflict") throw new PlanningError("planning_revision_conflict", "这条测量已更新，请刷新核对后再删除", 409);
+  }
 
   public async getProfile(userId: string): Promise<PersonalProfile> {
     return (await this.repository.getProfile(userId)) ?? emptyProfile;
@@ -169,6 +202,9 @@ export class PlanningService {
   public async getDailyReference(userId: string, localDate: string, timeZone: string) {
     if (!validDate(localDate)) throw new PlanningError("invalid_planning_input", "日期格式不正确", 400);
     if (!validTimeZone(timeZone)) throw new PlanningError("invalid_planning_input", "时区无效", 400);
+    const latest = await this.repository.getLatestReference(userId, localDate);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(this.now());
+    if (latest !== null && localDate < today) return latest;
     const profile = await this.getProfile(userId);
     const strategy = await this.getStrategy(userId);
     const measurement = await this.repository.getLatestMeasurement(userId, localDate);
@@ -203,7 +239,6 @@ export class PlanningService {
         revision: strategy.revision,
       },
     };
-    const latest = await this.repository.getLatestReference(userId, localDate);
     if (latest !== null && latest.methodVersion === planningMethodVersion && JSON.stringify(latest.inputSnapshot) === JSON.stringify(normalizedSnapshot)) return latest;
     const result = calculateDailyReference({ localDate, profile, strategy, measurement });
     return this.repository.createReference(userId, planningMethodVersion, planningEvidenceIds, normalizedSnapshot, result);
@@ -216,6 +251,6 @@ export class PlanningService {
     if (!validTimeZone(input.timeZone)) throw new PlanningError("invalid_planning_input", "测量时区无效", 400);
     assertNumber(input.weightKg, "体重", 20, 400);
     assertNumber(input.waistCm, "腰围", 30, 300);
-    return { measuredAt, localDate: input.localDate, timeZone: input.timeZone, weightKg: input.weightKg, waistCm: input.waistCm, note: cleanText(input.note, 500) };
+    return { measuredAt, localDate: input.localDate, timeZone: input.timeZone, weightKg: Math.round(input.weightKg * 100) / 100, waistCm: input.waistCm === null ? null : Math.round(input.waistCm * 100) / 100, note: cleanText(input.note, 500) };
   }
 }

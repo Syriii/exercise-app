@@ -29,6 +29,7 @@ import { PostgresTrainingRepository } from "../modules/training/postgres-reposit
 import { TrainingService } from "../modules/training/service.js";
 import { loadTestDatabaseUrl } from "../testing/test-database-url.js";
 import { verifyDatePlans } from "../testing/training-date-plan-contract.js";
+import { verifyOnboardingBody } from "../testing/onboarding-body-contract.js";
 import { readSecretValue } from "../config/environment.js";
 
 const databaseUrl = loadTestDatabaseUrl();
@@ -139,6 +140,40 @@ afterAll(async () => {
 });
 
 describe("PostgreSQL integration", () => {
+  it("persists onboarding and atomically retries deletes and orders body records with RLS rollback and export protection", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`body-a-${randomUUID()}`, `body-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const raw = new PostgresPlanningRepository(restricted.database);
+    const repository = new Proxy(raw, { get(target, property) {
+      const value = Reflect.get(target, property);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => context.run(typeof args[0] === "string" ? args[0] : null, () => Reflect.apply(value, target, args));
+    } });
+    try {
+      await verifyOnboardingBody(repository, owner, other);
+      await context.run(owner, async () => {
+        const existing = (await raw.listMeasurements(owner))[0]!;
+        await database.pool.query(`alter table body_measurements add constraint integration_body_late_failure check (id <> '${existing.id}'::uuid or deleted_at is null)`);
+        try {
+          await expect(raw.deleteMeasurement(owner, existing.id, existing.revision)).rejects.toBeDefined();
+          expect((await raw.listMeasurements(owner))[0]).toEqual(existing);
+          expect(await raw.listMeasurementRevisions(owner, existing.id)).toHaveLength(0);
+        } finally { await database.pool.query("alter table body_measurements drop constraint integration_body_late_failure"); }
+        await raw.deleteMeasurement(owner, existing.id, existing.revision);
+        const exported = await new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date());
+        expect(exported.data.personal_profiles).toEqual(expect.arrayContaining([expect.objectContaining({ setup_progress: expect.objectContaining({ completed: true }) })]));
+        expect(exported.data.body_measurements).toEqual(expect.arrayContaining([expect.objectContaining({ id: existing.id, deleted_at: expect.any(String) })]));
+        await context.run(other, async () => {
+          expect(await raw.listMeasurements(owner)).toEqual([]);
+          expect(await raw.getSetupProgress(owner)).toBeNull();
+          expect(await raw.deleteMeasurement(owner, existing.id, existing.revision)).toBe("not_found");
+          const otherExport = await new PostgresUserDataExporter(restricted.database).exportUserData(other, new Date());
+          expect(otherExport.data.body_measurements).toEqual([]);
+        });
+      });
+    } finally { await restricted.close(); }
+  });
   it("enforces API row security for direct and child health records", async () => {
     const suffix = randomUUID();
     const accounts = await database.pool.query<{ id: string }>(
@@ -701,7 +736,7 @@ describe("PostgreSQL integration", () => {
     });
     const username = `planning_${randomUUID().replaceAll("-", "")}`.slice(0, 32);
     const account = (await identity.register(username, "a planning integration secure password")).account;
-    const planning = new PlanningService(new PostgresPlanningRepository(database.database));
+    const planning = new PlanningService(new PostgresPlanningRepository(database.database), () => new Date("2026-08-26T04:00:00Z"));
     const profileInput = {
       revision: 0,
       birthDate: "2004-08-26",
