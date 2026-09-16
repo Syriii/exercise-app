@@ -2,6 +2,34 @@ import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 import { createMeal } from "./helpers/nutrition";
 
+test("Chinese catalog finds regional staples in both scripts and saves a sourced portion", async ({ page }, testInfo) => {
+  await page.goto("/register");
+  await page.getByLabel("用户名").fill(`tfda_${testInfo.project.name.startsWith("mobile") ? "m" : "d"}_${Date.now()}`);
+  await page.getByLabel("密码").fill("a browser-only secure password");
+  await page.getByRole("button", { name: "注册", exact: true }).click();
+  await completeSetup(page);
+  await page.goto("/nutrition");
+  const meal = await createMeal(page, "中文目录早餐");
+  const picker = meal.getByRole("region", { name: "添加食物", exact: true });
+  await picker.getByRole("button", { name: "添加食物", exact: true }).click();
+  await picker.getByLabel("搜索食物", { exact: true }).fill("無糖豆漿");
+  await picker.getByRole("button", { name: "搜索", exact: true }).click();
+  const row = picker.getByRole("listitem").filter({ has: page.getByRole("button", { name: "选择：豆浆(无糖)", exact: true }) });
+  await row.locator("summary").click();
+  await expect(row).toContainText("台湾食药署");
+  await expect(row).toContainText("OGDL-Taiwan-1.0");
+  await expect(row).toContainText("包裝產品");
+  await row.getByRole("button", { name: "设为常用：豆浆(无糖)", exact: true }).click();
+  await row.getByRole("button", { name: "选择：豆浆(无糖)", exact: true }).click();
+  await picker.getByLabel("豆浆(无糖)份量（g）").fill("250");
+  await picker.getByRole("button", { name: "加入这顿饭（1项）", exact: true }).click();
+  await expect(meal.locator(".meal-items > li")).toHaveCount(1);
+  await expect(meal.locator(".meal-items")).toContainText("87.5 kcal");
+  await page.reload();
+  await expect(meal.locator(".meal-items")).toContainText("豆浆(无糖)");
+  await expect(meal.locator(".meal-items")).toContainText("87.5 kcal");
+});
+
 test("catalog browsing, favorites, multi-selection and lost-response retry preserve one meal", async ({ page }, testInfo) => {
   await page.goto("/register");
   await page.getByLabel("用户名").fill(`catalog_${testInfo.project.name.startsWith("mobile") ? "m" : "d"}_${Date.now()}`);
@@ -16,7 +44,8 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   const list = picker.getByRole("list", { name: "食物列表" });
   await expect(list.getByRole("listitem")).toHaveCount(12);
   await picker.getByRole("button", { name: "加载更多食物" }).click();
-  await expect(list.getByRole("listitem")).toHaveCount(16);
+  await expect(list.getByRole("listitem")).toHaveCount(24);
+  await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
   await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
   await picker.getByRole("button", { name: "设为常用：鸡蛋（水煮全蛋）", exact: true }).click();
   await expect(list.getByRole("listitem").first()).toContainText("鸡蛋（水煮全蛋）");
@@ -38,6 +67,7 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
     }
     await page.setViewportSize(original);
   }
+  await picker.getByLabel("搜索食物", { exact: true }).fill("西兰花（水煮、沥干、无盐）");
   await picker.getByLabel("食物分类", { exact: true }).selectOption("vegetables");
   await picker.getByRole("button", { name: "选择：西兰花（水煮、沥干、无盐）", exact: true }).click();
   await picker.getByLabel("西兰花（水煮、沥干、无盐）份量（g）").fill("50");
@@ -70,6 +100,8 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   await picker.getByLabel("食物分类", { exact: true }).selectOption("all");
   await expect(list.getByRole("listitem").first()).toContainText("鸡蛋（水煮全蛋）");
   await picker.getByRole("button", { name: "取消常用：鸡蛋（水煮全蛋）", exact: true }).click();
+  await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
+  await picker.getByRole("button", { name: "搜索", exact: true }).click();
   await expect(picker.getByRole("button", { name: "设为常用：鸡蛋（水煮全蛋）", exact: true })).toBeVisible();
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
   await picker.getByText("找不到？补充个人食物", { exact: true }).click();

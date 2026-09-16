@@ -2,6 +2,8 @@ import type { StoredTemporaryMedia } from "../media/temporary-media-store.js";
 import type { AnalysisWorkItem, ImageNutritionCandidate, MealImageAnalysis, PhotoAnalysisSettings } from "./types.js";
 
 export interface ImageAnalysisRepository {
+  /** Worker-only sweep; expires active attempts without resending photos or changing meal facts. */
+  expireInterrupted(cutoff: Date, now: Date): Promise<number>;
   getSettings(userId: string): Promise<PhotoAnalysisSettings>;
   saveSettings(userId: string, revision: number, automatic: boolean, consent: boolean): Promise<PhotoAnalysisSettings | "revision_conflict">;
   enqueueFailed(userId: string, analysisId: string): Promise<void>;

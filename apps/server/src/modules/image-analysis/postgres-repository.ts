@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ne, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, ne, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../../db/database.js";
 import { mealContributions, mealImageAnalysisAttempts, mealImageAnalyses, meals, temporaryMedia, users } from "../../db/schema/index.js";
 import { imageFoodContributions } from "../nutrition/image-foods.js";
@@ -7,6 +7,22 @@ import type { ImageAnalysisRepository } from "./repository.js";
 import type { AnalysisWorkItem, ImageAnalysisAttempt, ImageNutritionCandidate, MealImageAnalysis } from "./types.js";
 
 export class PostgresImageAnalysisRepository implements ImageAnalysisRepository {
+  public async expireInterrupted(cutoff: Date, now: Date) {
+    return this.database.transaction(async tx => {
+      // Lock parent first, as in begin/succeed/fail; concurrent sweepers skip claimed rows.
+      const rows = await tx.select({ id: mealImageAnalyses.id, status: mealImageAnalyses.status })
+        .from(mealImageAnalyses).where(and(inArray(mealImageAnalyses.status, ["pending", "running"]), lte(mealImageAnalyses.updatedAt, cutoff)))
+        .orderBy(asc(mealImageAnalyses.updatedAt), asc(mealImageAnalyses.id)).limit(100).for("update", { skipLocked: true });
+      for (const row of rows) {
+        const code = row.status === "running" ? "analysis_interrupted" : "queue_wait_expired";
+        await tx.update(mealImageAnalysisAttempts).set({ status: "failed", errorCode: code, finishedAt: now })
+          .where(and(eq(mealImageAnalysisAttempts.analysisId, row.id), eq(mealImageAnalysisAttempts.status, "running")));
+        await tx.update(mealImageAnalyses).set({ status: "failed", lastErrorCode: code, revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: now })
+          .where(eq(mealImageAnalyses.id, row.id));
+      }
+      return rows.length;
+    });
+  }
   public async getSettings(userId: string) {
     const [row] = await this.database.select({ automatic: users.photoAnalysisAutomatic, consentAt: users.photoAnalysisConsentAt, revision: users.photoAnalysisSettingsRevision }).from(users).where(eq(users.id, userId));
     if (!row) throw new Error("account_not_found"); return row;
@@ -58,8 +74,8 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       if (analysis?.status !== "running" || attempt?.status !== "running") return "not_running" as const;
       const [meal] = await tx.select().from(meals).where(and(eq(meals.id, analysis.mealId), eq(meals.userId, analysis.userId), isNull(meals.deletedAt))).for("update").limit(1);
       if (meal === undefined) return "not_running" as const;
-      const [media] = await tx.select({ status: temporaryMedia.status }).from(temporaryMedia).where(eq(temporaryMedia.id, analysis.mediaId)).for("share");
-      if (media?.status !== "available") {
+      const [media] = await tx.select({ status: temporaryMedia.status, expiresAt: temporaryMedia.expiresAt }).from(temporaryMedia).where(eq(temporaryMedia.id, analysis.mediaId)).for("share");
+      if (media?.status !== "available" || media.expiresAt <= new Date()) {
         await tx.update(mealImageAnalysisAttempts).set({ status: "failed", errorCode: "image_unavailable", finishedAt: new Date() }).where(eq(mealImageAnalysisAttempts.id, attemptId));
         await tx.update(mealImageAnalyses).set({ status: "cancelled", lastErrorCode: "image_unavailable", revision: analysis.revision + 1, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id));
         return "not_running" as const;
@@ -84,7 +100,17 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       return { status: "succeeded" as const, tentativeHandled: true };
     });
   }
-  public async fail(id: string, attemptId: string, errorCode: string) { await this.database.transaction(async (tx) => { await tx.update(mealImageAnalysisAttempts).set({ status: "failed", errorCode, finishedAt: new Date() }).where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.status, "running"))); await tx.update(mealImageAnalyses).set({ status: "failed", lastErrorCode: errorCode, revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(and(eq(mealImageAnalyses.id, id), eq(mealImageAnalyses.status, "running"))); }); }
+  public async fail(id: string, attemptId: string, errorCode: string) {
+    await this.database.transaction(async tx => {
+      const [analysis] = await tx.select({ status: mealImageAnalyses.status }).from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update");
+      if (analysis?.status !== "running") return;
+      const changed = await tx.update(mealImageAnalysisAttempts).set({ status: "failed", errorCode, finishedAt: new Date() })
+        .where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.analysisId, id), eq(mealImageAnalysisAttempts.status, "running"))).returning({ id: mealImageAnalysisAttempts.id });
+      // An old attempt failing after recovery must not fail the new attempt.
+      if (changed.length === 0) return;
+      await tx.update(mealImageAnalyses).set({ status: "failed", lastErrorCode: errorCode, revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id));
+    });
+  }
   public async retry(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string }) {
     const result = await this.database.transaction(async tx => {
       const [row] = await tx.select().from(mealImageAnalyses).where(and(eq(mealImageAnalyses.id, id), eq(mealImageAnalyses.userId, userId))).for("update");

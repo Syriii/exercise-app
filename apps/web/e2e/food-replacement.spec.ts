@@ -32,6 +32,7 @@ test("single photo food replacement reuses catalog, keeps drafts and reconciles 
   await chicken.getByRole("button", { name: "换食物", exact: true }).click();
   const picker = meal.getByRole("region", { name: "替换单项食物" });
   await expect(picker.getByRole("list", { name: "食物列表" }).getByRole("listitem")).toHaveCount(12);
+  await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
   await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
   await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
   // New basis is grams, not the old photo's one piece.
@@ -100,7 +101,9 @@ test("stale replacement refreshes the server, requires renewed confirmation and 
   await expect(unknown).toContainText("蛋白质 未知");
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
   await unknown.getByRole("button", { name: "换食物", exact: true }).click();
+  await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
   await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("button", { name: "搜索", exact: true }).click();
   await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
   const changed = await (await page.request.get(`/api/v1/nutrition/meals?from=${data.localDate}&to=${data.localDate}`)).json();
   const current = changed.find((value: { id: string }) => value.id === data.id), item = current.contributions.find((value: { id: string }) => value.id === rice.id);

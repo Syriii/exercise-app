@@ -59,6 +59,7 @@ await database.check();
 await queue.start();
 await queue.ensureQueue(mealImageQueueDefinition);
 await queue.ensureQueue(portabilityQueueDefinition);
+await imageAnalysisService.recoverInterrupted(config.deepseekTimeoutMs);
 if (imageAnalyzer !== null) {
   await queue.work(mealImageQueue, (analysisId) => imageAnalysisService.process(analysisId));
 }
@@ -66,6 +67,14 @@ await queue.work(portabilityQueue, (taskId) => portabilityService.process(taskId
 await portabilityService.recoverPendingTasks();
 await portabilityService.cleanupExpiredMedia();
 const mediaCleanupTimer = setInterval(() => void portabilityService.cleanupExpiredMedia().catch((error: unknown) => process.stderr.write(`Temporary media cleanup failed: ${error instanceof Error ? error.message : "unknown error"}\n`)), config.mediaCleanupIntervalSeconds * 1000);
+let recoveryRunning = false;
+const imageRecoveryTimer = setInterval(() => {
+  if (recoveryRunning) return;
+  recoveryRunning = true;
+  void imageAnalysisService.recoverInterrupted(config.deepseekTimeoutMs)
+    .catch(() => process.stderr.write("Image analysis recovery temporarily unavailable\n"))
+    .finally(() => { recoveryRunning = false; });
+}, 30_000);
 await operationsService.recordWorkerHeartbeat(workerInstanceId, workerStartedAt);
 const heartbeatTimer = setInterval(() => {
   if (heartbeatRunning) {
@@ -86,6 +95,7 @@ const heartbeatTimer = setInterval(() => {
 process.stdout.write("Exercise App worker database and task queue are ready.\n");
 
 async function shutDown(): Promise<void> {
+  clearInterval(imageRecoveryTimer);
   clearInterval(heartbeatTimer);
   clearInterval(mediaCleanupTimer);
   await queue.stop();

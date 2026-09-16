@@ -9,6 +9,7 @@ import { PlanningService } from "../planning/service.js";
 import { MemoryNutritionRepository } from "./memory-repository.js";
 import { FixedPublicFoodProvider } from "./public-food-provider.js";
 import { NutritionService } from "./service.js";
+import { builtinFoods } from "./food-catalog.js";
 
 it("serves one catalog with authenticated favorites, snapshots, pagination and external fallback", async () => {
   const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
@@ -28,7 +29,7 @@ it("serves one catalog with authenticated favorites, snapshots, pagination and e
     expect((await request("GET", "/api/v1/nutrition/food-catalog?limit=51")).statusCode).toBe(400);
     const page = await request("GET", "/api/v1/nutrition/food-catalog?limit=3");
     expect(page.statusCode, page.body).toBe(200);
-    expect(page.json()).toMatchObject({ items: expect.any(Array), total: 16, nextCursor: expect.any(String), warning: null });
+    expect(page.json()).toMatchObject({ items: expect.any(Array), total: builtinFoods.length, nextCursor: expect.any(String), warning: null });
     const search = await request("POST", "/api/v1/nutrition/food-catalog/search", { query: "豆奶" });
     expect(search.statusCode, search.body).toBe(200);
     const food = search.json().items.find((item: { provider: string }) => item.provider === "open_food_facts");

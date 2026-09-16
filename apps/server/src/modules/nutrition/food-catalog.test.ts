@@ -11,6 +11,39 @@ const egg = builtinFoods.find((food) => food.id === "usda:173424")!;
 const selection = { foodId: egg.id, version: egg.version, amount: 100 };
 
 describe("unified food catalog", () => {
+  it("exposes the versioned TFDA catalog with Chinese search, sample provenance, unknown values and immutable portions", async () => {
+    const tfda = builtinFoods.filter(food => food.provider === "tfda");
+    expect(tfda).toHaveLength(2180);
+    expect(new Set(builtinFoods.map(food => food.id)).size).toBe(builtinFoods.length);
+    for (const food of tfda) {
+      expect(food).toMatchObject({ basisAmount: 100, basisUnit: "g", license: "OGDL-Taiwan-1.0", sourceUrl: "https://data.gov.tw/dataset/8543" });
+      for (const key of ["energyKcal", "proteinGrams", "fatGrams", "carbohydrateGrams"] as const)
+        if (food[key] !== null) { expect(Number.isFinite(food[key])).toBe(true); expect(food[key]).toBeGreaterThanOrEqual(0); }
+    }
+    const service = new NutritionService(new MemoryNutritionRepository());
+    const rice = (await service.getFoodCatalog("owner", "米饭", "grains")).items.find(food => food.id === "tfda:A0550601")!;
+    expect(rice).toMatchObject({ energyKcal: 183, proteinGrams: 3.1, carbohydrateGrams: 41, fatGrams: 0.3 });
+    expect((await service.getFoodCatalog("owner", "无糖豆浆")).items).toEqual((await service.getFoodCatalog("owner", "無糖豆漿")).items);
+    const soy = (await service.getFoodCatalog("owner", "豆浆(无糖)")).items.find(food => food.id === "tfda:H1150201")!;
+    expect(soy).toMatchObject({ energyKcal: 35, proteinGrams: 3.6, originalName: expect.stringContaining("包裝產品") });
+    expect(tfda.find(food => food.id === "tfda:M9900201")).toMatchObject({ fatGrams: null, originalName: expect.stringContaining("100.3") });
+    expect((await service.getFoodCatalog("owner", "馒头", "grains")).items.some(food => food.id === "tfda:R2400201")).toBe(true);
+    await service.setFoodFavorite("owner", soy.id, true);
+    expect((await service.getFoodCatalog("owner")).items[0]).toMatchObject({ id: soy.id, isFavorite: true });
+    expect((await service.getFoodCatalog("other", soy.label)).items.every(food => !food.isFavorite)).toBe(true);
+    let meal = await service.createMeal("owner", mealInput);
+    meal = await service.addFoodSelections("owner", meal.id, meal.revision, randomUUID(), [{ foodId: soy.id, version: soy.version, amount: 250 }]);
+    expect(meal.contributions[0]).toMatchObject({ energyKcal: 87.5, proteinGrams: 9, foodSnapshot: { id: soy.id, provider: "tfda", license: "OGDL-Taiwan-1.0", energyKcal: 35 } });
+    await service.setFoodFavorite("owner", soy.id, false);
+    expect((await service.getMeal("owner", meal.id)).contributions).toEqual(meal.contributions);
+    const ids = new Set<string>(); let cursor: string | null = null;
+    do {
+      const page = await service.getFoodCatalog("other", "", "all", cursor, 50);
+      for (const food of page.items) { expect(ids.has(food.id)).toBe(false); ids.add(food.id); }
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(ids.size).toBe(2196);
+  });
   it("retries personal creation atomically without duplicates, cross-account sharing or resurrection", async () => {
     const repository = new MemoryNutritionRepository();
     const service = new NutritionService(repository);
@@ -73,7 +106,7 @@ describe("unified food catalog", () => {
     expect(page.total).toBe(builtinFoods.length);
     expect((await service.getFoodCatalog("other", "鸡蛋")).items[0]!.isFavorite).toBe(false);
     await service.setFoodFavorite("owner", egg.id, false);
-    expect((await service.getFoodCatalog("owner", "鸡蛋")).items[0]).toMatchObject({ id: egg.id, isFavorite: false });
+    expect((await service.getFoodCatalog("owner", egg.label)).items[0]).toMatchObject({ id: egg.id, isFavorite: false });
     const own = await service.createPersonalFood("owner", unknownInput);
     await expect(service.setFoodFavorite("other", own.id, true)).rejects.toMatchObject({ statusCode: 404 });
     await service.setFoodFavorite("owner", own.id, true);
@@ -133,7 +166,7 @@ describe("unified food catalog", () => {
     const service = new NutritionService(new MemoryNutritionRepository(), { search: async () => { calls++; throw new Error("offline"); } });
     expect((await service.searchFoodCatalog("owner", "")).total).toBe(builtinFoods.length);
     expect(calls).toBe(0);
-    const page = await service.searchFoodCatalog("owner", "鸡蛋");
+    const page = await service.searchFoodCatalog("owner", egg.label);
     expect(page.items[0]!.id).toBe(egg.id);
     expect(page.warning).toContain("已有目录");
     expect(calls).toBe(1);

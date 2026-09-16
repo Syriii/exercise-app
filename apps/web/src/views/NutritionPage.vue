@@ -149,6 +149,8 @@ function analysisStatus(value: MealImageAnalysis, meal: Meal): string {
 function confidenceLabel(value: "low" | "medium" | "high"): string { return value === "high" ? "较高" : value === "medium" ? "一般" : "较低"; }
 function imageAnalysisFailureText(code: string | null, imageAvailable: boolean): string {
   if (!imageAvailable) return "这次识别没有完成；已有食物记录仍保留。";
+  if (code === "analysis_interrupted") return "上次识别意外中断，已有食物未改动；原图仍在，可以重新分析。";
+  if (code === "queue_wait_expired") return "这张照片等待处理过久，已有食物未改动；原图仍在，可以重新分析。";
   if (code === "deepseek_timeout") return "识别等待超时，原图仍在，可以重新分析。";
   if (code === "deepseek_rate_limited" || code === "deepseek_overloaded" || code === "deepseek_server_error" || code === "deepseek_server_unavailable" || code === "deepseek_network_error") return "识别服务暂时繁忙，系统已自动尝试恢复；原图仍在，可以稍后重新分析。";
   if (code === "deepseek_authentication_failed" || code === "deepseek_insufficient_balance") return "识别服务配置当前不可用，原图仍在；你可以先手工记录，管理员处理后再试。";

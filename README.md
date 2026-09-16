@@ -6,7 +6,7 @@
 
 建议先看[完整页面文字行为树](docs/experience/experience-design.md)，再看[待实现与验收清单](docs/architecture/delivery-plan.md#phase-66-使用逻辑改造待实现)。新方向是“今天、饮食、训练、历史、我的”五入口，拍照产生可复用单项食物，训练以事后批量记录为主，身体数据在我的获得稳定入口。
 
-服务器已经完成首次启动、真实 migration/RLS 和健康/访问检查，本次同机备份恢复与升级验证也已通过；域名/HTTPS、服务器故障恢复和异机备份继续按独立专项处理。大型公共食物目录仍需合法数据源，Android 等待 Web 体验认可。准确当前阶段见[任务计划](.planning/exercise-app/task_plan.md)。
+服务器已经完成首次启动、真实 migration/RLS 和健康/访问检查，本次同机备份恢复与升级验证也已通过；域名/HTTPS、服务器故障恢复和异机备份继续按独立专项处理。公共目录已接入 2180 项台湾食药署中文样品和原有 16 项 USDA 基础食物，保留来源、生熟与未知营养；这不等于覆盖所有大陆食堂菜式。来源许可见[食物目录数据来源](docs/domain/food-catalog-sources.md)，实拍评测方法见[图片识别评测](docs/domain/photo-recognition-evaluation.md)。Android 等待 Web 体验认可。准确当前阶段见[任务计划](.planning/exercise-app/task_plan.md)。
 
 ## 已确认的两个功能域
 

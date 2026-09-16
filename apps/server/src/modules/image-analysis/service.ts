@@ -14,6 +14,14 @@ export const mealImageQueue = "meal-image-analysis";
 export const mealImageQueueDefinition = { name: mealImageQueue, retryLimit: 0, retryDelaySeconds: 5, retryBackoff: false, expireInSeconds: 180, heartbeatSeconds: 30, deleteAfterSeconds: 86400 } as const;
 
 export class ImageAnalysisService {
+  public async recoverInterrupted(providerTimeoutMs = 120_000) {
+    // The provider has one total deadline including retries. Leave time for upload/read/write;
+    // queue loss and process death become a visible retryable failure, never another paid call.
+    if (!Number.isFinite(providerTimeoutMs) || providerTimeoutMs < 0) throw new Error("invalid_analysis_timeout");
+    const now = this.options.now?.() ?? new Date();
+    const cutoff = new Date(now.getTime() - Math.max(300_000, providerTimeoutMs + 60_000));
+    return this.options.repository.expireInterrupted(cutoff, now);
+  }
   public settings(userId: string) { return this.options.repository.getSettings(userId); }
   public async saveSettings(userId: string, revision: number, automatic: boolean, consent: boolean) {
     const current = await this.settings(userId);

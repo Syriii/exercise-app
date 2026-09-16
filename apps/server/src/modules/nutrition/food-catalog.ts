@@ -1,6 +1,11 @@
 import type { NutrientValues, PersonalFoodTemplate } from "./types.js";
 import { createHash } from "node:crypto";
 import { usdaFoods } from "./usda-foods.generated.js";
+import { tfdaFoods } from "./tfda-foods.generated.js";
+import OpenCC from "opencc-js";
+
+const simplified = OpenCC.Converter({ from: "tw", to: "cn" });
+export const normalizeFoodSearch = (value: string) => simplified(value).normalize("NFKC").trim().toLocaleLowerCase("zh-CN");
 
 export const foodCategories = {
   grains: "谷薯主食", vegetables: "蔬菜", fruit: "水果", meat_eggs: "肉鱼蛋",
@@ -9,13 +14,14 @@ export const foodCategories = {
 export type FoodCategory = keyof typeof foodCategories;
 export interface FoodProvenance {
   category: FoodCategory;
-  provider: "usda_sr_legacy" | "open_food_facts" | "personal" | "photo_estimate";
+  provider: "usda_sr_legacy" | "tfda" | "open_food_facts" | "personal" | "photo_estimate";
   sourceName: string;
   sourceUrl: string | null;
   license: string | null;
   originalName: string | null;
 }
 export interface FoodDefinition extends NutrientValues, FoodProvenance {
+  searchAliases?: string;
   id: string;
   version: string;
   label: string;
@@ -30,11 +36,21 @@ export interface FoodCatalogPage {
   categories: typeof foodCategories;
   warning: string | null;
 }
-export const builtinFoods: readonly FoodDefinition[] = usdaFoods.map(({ fdcId, ...food }) => ({
+export const builtinFoods: readonly FoodDefinition[] = [...usdaFoods.map(({ fdcId, ...food }): FoodDefinition => ({
   ...food, id: `usda:${fdcId}`, version: "SR-Legacy-2018-04", basisAmount: 100, basisUnit: "g",
   provider: "usda_sr_legacy", sourceName: "USDA FoodData Central · SR Legacy 2018",
   sourceUrl: `https://fdc.nal.usda.gov/food-details/${fdcId}/nutrients`, license: "CC0-1.0",
-}));
+})), ...tfdaFoods.map(({ code, aliases, ...food }): FoodDefinition => ({
+  ...food, id: `tfda:${code}`, version: "2026-08-26-c1ef5502", basisAmount: 100, basisUnit: "g", searchAliases: aliases,
+  provider: "tfda", sourceName: "台湾食药署 · 食品营养成分资料集 2026 · 样品参考，做法可能不同",
+  sourceUrl: "https://data.gov.tw/dataset/8543", license: "OGDL-Taiwan-1.0",
+}))];
+
+// Public catalog text is immutable for this build; do not reconvert 2,000+ descriptions per keystroke.
+const publicSearchText = new Map(builtinFoods.map(food => [food.id, normalizeFoodSearch(`${food.label} ${food.searchAliases ?? ""} ${food.provider === "tfda" ? "" : food.originalName ?? ""}`)]));
+export function foodMatchesSearch(food: FoodDefinition, normalizedQuery: string): boolean {
+  return (publicSearchText.get(food.id) ?? normalizeFoodSearch(`${food.label} ${food.originalName ?? ""}`)).includes(normalizedQuery);
+}
 
 export function personalFood(food: PersonalFoodTemplate): CatalogFood {
   const result: CatalogFood = {

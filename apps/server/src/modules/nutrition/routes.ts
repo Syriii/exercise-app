@@ -14,7 +14,7 @@ const nullableString = { anyOf: [{ type: "null" }, { type: "string" }] } as cons
 const nutrientProperties = { energyKcal: nullableNumber, proteinGrams: nullableNumber, carbohydrateGrams: nullableNumber, fatGrams: nullableNumber } as const;
 const catalogProperties = { id: { type: "string" }, version: { type: "string" }, label: { type: "string" },
   basisAmount: nullableNumber, basisUnit: nullableString, category: { type: "string", enum: Object.keys(foodCategories) },
-  provider: { type: "string", enum: ["usda_sr_legacy", "open_food_facts", "personal", "photo_estimate"] }, sourceName: { type: "string" },
+  provider: { type: "string", enum: ["usda_sr_legacy", "tfda", "open_food_facts", "personal", "photo_estimate"] }, sourceName: { type: "string" },
   sourceUrl: nullableString, license: nullableString, originalName: nullableString, ...nutrientProperties } as const;
 const foodDefinitionResponse = { type: "object", additionalProperties: false, required: Object.keys(catalogProperties), properties: catalogProperties } as const;
 const catalogFoodResponse = { ...foodDefinitionResponse, required: [...foodDefinitionResponse.required, "isFavorite"], properties: { ...catalogProperties, isFavorite: { type: "boolean" } } } as const;

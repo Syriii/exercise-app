@@ -146,7 +146,9 @@ test("a person can reuse matching foods, search public products, and manage comm
 
   const commonPicker = await openPicker(snack);
   await commonPicker.getByRole("button", { name: "取消常用：豆浆", exact: true }).click();
-  await expect(commonPicker.getByRole("button", { name: "设为常用：豆浆", exact: true })).toBeVisible();
+  await commonPicker.getByLabel("搜索食物", { exact: true }).fill("豆浆");
+  await commonPicker.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect(commonPicker.getByRole("listitem").filter({ hasText: "个人录入" }).getByRole("button", { name: "设为常用：豆浆", exact: true })).toBeVisible();
   await expect(snack.locator(".meal-items").getByText("豆浆", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "管理我的常用食物" })).toHaveCount(0);
 

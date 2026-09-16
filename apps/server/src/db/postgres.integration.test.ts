@@ -140,6 +140,88 @@ afterAll(async () => {
 });
 
 describe("PostgreSQL integration", () => {
+  it("persists TFDA source snapshots and favorites with isolated ownership and retry-safe portions", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`tfda-a-${randomUUID()}`, `tfda-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const service = new NutritionService(new PostgresNutritionRepository(restricted.database));
+    const soy = builtinFoods.find(food => food.id === "tfda:H1150201")!;
+    try {
+      await context.run(owner, () => service.setFoodFavorite(owner, soy.id, true));
+      expect((await context.run(owner, () => service.getFoodCatalog(owner))).items[0]).toMatchObject({ id: soy.id, isFavorite: true });
+      expect((await context.run(other, () => service.getFoodCatalog(other, "无糖豆浆"))).items.every(food => !food.isFavorite)).toBe(true);
+      const meal = await context.run(owner, () => service.createMeal(owner, { occurredAt: "2026-09-16T00:00:00Z", localDate: "2026-09-16", timeZone: "UTC", name: "中文目录验证", note: null }));
+      const submission = randomUUID(), selections = [{ foodId: soy.id, version: soy.version, amount: 250 }];
+      const save = () => context.run(owner, () => service.addFoodSelections(owner, meal.id, meal.revision, submission, selections));
+      const saved = await save();
+      expect((await save()).contributions).toEqual(saved.contributions);
+      expect(saved.contributions).toHaveLength(1);
+      expect(saved.contributions[0]).toMatchObject({ energyKcal: 87.5, proteinGrams: 9, foodSnapshot: { id: soy.id, provider: "tfda", license: "OGDL-Taiwan-1.0", originalName: soy.originalName, energyKcal: 35 } });
+      await expect(context.run(other, () => service.getMeal(other, meal.id))).rejects.toMatchObject({ statusCode: 404 });
+      await context.run(owner, () => service.setFoodFavorite(owner, soy.id, false));
+      expect((await context.run(owner, () => service.getMeal(owner, meal.id))).contributions).toEqual(saved.contributions);
+      const exported = await context.run(owner, () => new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date()));
+      expect(JSON.stringify(exported.data)).toContain("OGDL-Taiwan-1.0");
+    } finally { await restricted.close(); }
+  });
+  it("recovers a killed image attempt with atomic expiry, RLS, stale-writer fencing and one retry result", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`recovery-a-${randomUUID()}`, `recovery-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const images = new PostgresImageAnalysisRepository(database.database);
+    const nutrition = new NutritionService(new PostgresNutritionRepository(database.database));
+    const meal = await nutrition.createMeal(owner, { occurredAt: "2026-09-16T00:00:00Z", localDate: "2026-09-16", timeZone: "UTC", name: "恢复测试", note: null });
+    const make = (automatic = true) => images.create(owner, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "a".repeat(64) }, new Date(Date.now() + 86_400_000), "test", "recovery", automatic);
+    const analysis = await make();
+    const child = spawn(process.execPath, ["--import", "tsx", resolve(import.meta.dirname, "../testing/image-crash-worker.ts")], {
+      env: { ...process.env, TEST_IMAGE_ANALYSIS_ID: analysis.id }, stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    try {
+      expect(await waitForWorkerStart(child)).toBe(analysis.id);
+      child.kill("SIGKILL"); await once(child, "exit");
+      expect(child.signalCode).toBe("SIGKILL");
+    } finally { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }
+    const first = (await images.get(owner, analysis.id))!.attempts[0]!;
+    const cutoff = new Date(Date.now() - 300_000), now = new Date();
+    await database.pool.query("update meal_image_analyses set updated_at = $2 where id = $1", [analysis.id, new Date(cutoff.getTime() - 1000)]);
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const scoped = new PostgresImageAnalysisRepository(restricted.database);
+    try {
+      expect(await context.run(other, () => scoped.expireInterrupted(cutoff, now))).toBe(0);
+      expect(await context.run(other, () => scoped.retry(other, analysis.id, 2))).toBe("not_found");
+      await database.pool.query(`alter table meal_image_analyses add constraint integration_recovery_late_failure check (id <> '${analysis.id}'::uuid or status <> 'failed')`);
+      try {
+        await expect(images.expireInterrupted(cutoff, now)).rejects.toBeDefined();
+        expect(await images.get(owner, analysis.id)).toMatchObject({ status: "running", attempts: [{ status: "running", finishedAt: null }] });
+      } finally { await database.pool.query("alter table meal_image_analyses drop constraint integration_recovery_late_failure"); }
+      const sweep = await Promise.all([images.expireInterrupted(cutoff, now), images.expireInterrupted(cutoff, now)]);
+      expect(sweep.reduce((sum, count) => sum + count, 0)).toBe(1);
+      const failed = (await images.get(owner, analysis.id))!;
+      expect(failed).toMatchObject({ status: "failed", lastErrorCode: "analysis_interrupted", attempts: [{ status: "failed", errorCode: "analysis_interrupted" }] });
+      const retries = await Promise.all([images.retry(owner, analysis.id, failed.revision), images.retry(owner, analysis.id, failed.revision)]);
+      expect(retries.filter(result => typeof result !== "string")).toHaveLength(1);
+      const second = await images.beginAttempt(analysis.id); if (typeof second === "string") throw new Error(second);
+      const candidate = { title: "鸡蛋", foods: [{ label: "鸡蛋", portionAmount: 100, portionUnit: "g", note: null, energyKcal: 155, proteinGrams: 13, carbohydrateGrams: 1, fatGrams: 11 }], observedFoods: [], energyKcal: 155, proteinGrams: 13, carbohydrateGrams: 1, fatGrams: 11, confidence: "low" as const, assumptions: [], uncertaintyNote: "测试" };
+      expect(await images.succeed(analysis.id, first.id, candidate, "old")).toBe("not_running");
+      await images.fail(analysis.id, first.id, "old_failure");
+      expect((await images.get(owner, analysis.id))?.status).toBe("running");
+      const completed = await Promise.all([images.succeed(analysis.id, second.attemptId, candidate, "new"), images.succeed(analysis.id, second.attemptId, candidate, "duplicate")]);
+      expect(completed).toEqual(expect.arrayContaining([{ status: "succeeded", tentativeHandled: true }, "not_running"]));
+      await images.fail(analysis.id, first.id, "late_old_failure");
+      expect((await images.get(owner, analysis.id))?.status).toBe("succeeded");
+      expect((await nutrition.getMeal(owner, meal.id)).contributions).toHaveLength(1);
+      const exported = await context.run(owner, () => new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date()));
+      expect(exported.data.meal_image_analysis_attempts).toEqual(expect.arrayContaining([expect.objectContaining({ id: first.id, status: "failed" }), expect.objectContaining({ id: second.attemptId, status: "succeeded" })]));
+      const lost = await make(), waiting = await make(false), recent = await make();
+      await database.pool.query("update meal_image_analyses set updated_at = $2 where id = any($1::uuid[])", [[lost.id, waiting.id], new Date(cutoff.getTime() - 1000)]);
+      expect(await context.run(owner, () => scoped.expireInterrupted(cutoff, now))).toBe(1);
+      expect(await images.get(owner, lost.id)).toMatchObject({ status: "failed", lastErrorCode: "queue_wait_expired" });
+      expect((await images.get(owner, waiting.id))?.status).toBe("waiting");
+      expect((await images.get(owner, recent.id))?.status).toBe("pending");
+      await database.pool.query("update temporary_media set expires_at = now() - interval '1 second' where id = (select media_id from meal_image_analyses where id = $1)", [lost.id]);
+      expect(await images.retry(owner, lost.id, (await images.get(owner, lost.id))!.revision)).toBe("not_failed");
+      expect((await images.get(owner, lost.id))?.imageAvailable).toBe(false);
+    } finally { await restricted.close(); }
+  });
   it("persists onboarding and atomically retries deletes and orders body records with RLS rollback and export protection", async () => {
     const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`body-a-${randomUUID()}`, `body-b-${randomUUID()}`]);
     const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
@@ -912,7 +994,7 @@ describe("PostgreSQL integration", () => {
     };
 
     const emptyMeal = await nutrition.createMeal(account.id, { occurredAt: "2026-08-26T04:00:00.000Z", localDate: "2026-08-26", timeZone: "Asia/Shanghai", name: "照片午饭", note: null });
-    const analysis = await images.create(account.id, emptyMeal.id, "image/jpeg", { objectKey: `integration/${randomUUID()}.jpg`, byteSize: 128, sha256: "a".repeat(64) }, new Date("2026-08-27T00:00:00.000Z"), "deepseek-vision", "nutrition-photo-v1");
+    const analysis = await images.create(account.id, emptyMeal.id, "image/jpeg", { objectKey: `integration/${randomUUID()}.jpg`, byteSize: 128, sha256: "a".repeat(64) }, new Date(Date.now() + 86_400_000), "deepseek-vision", "nutrition-photo-v1");
     const attempt = await images.beginAttempt(analysis.id);
     if (attempt === "not_found" || attempt === "not_ready") throw new Error("expected image analysis attempt");
     await expect(images.succeed(analysis.id, attempt.attemptId, candidate, "provider-integration-1")).resolves.toEqual({ status: "succeeded", tentativeHandled: true });
@@ -923,7 +1005,7 @@ describe("PostgreSQL integration", () => {
 
     let manualMeal = await nutrition.createMeal(account.id, { occurredAt: "2026-08-26T10:00:00.000Z", localDate: "2026-08-26", timeZone: "Asia/Shanghai", name: "手工晚饭", note: null });
     manualMeal = await nutrition.addContribution(account.id, manualMeal.id, manualMeal.revision, { mode: "item", label: "手工米饭", portionAmount: 200, portionUnit: "g", basisDescription: null, energyKcal: 232, proteinGrams: null, carbohydrateGrams: null, fatGrams: null }, false);
-    const manualAnalysis = await images.create(account.id, manualMeal.id, "image/jpeg", { objectKey: `integration/${randomUUID()}.jpg`, byteSize: 128, sha256: "b".repeat(64) }, new Date("2026-08-27T00:00:00.000Z"), "deepseek-vision", "nutrition-photo-v1");
+    const manualAnalysis = await images.create(account.id, manualMeal.id, "image/jpeg", { objectKey: `integration/${randomUUID()}.jpg`, byteSize: 128, sha256: "b".repeat(64) }, new Date(Date.now() + 86_400_000), "deepseek-vision", "nutrition-photo-v1");
     const manualAttempt = await images.beginAttempt(manualAnalysis.id);
     if (manualAttempt === "not_found" || manualAttempt === "not_ready") throw new Error("expected manual meal analysis attempt");
     await images.succeed(manualAnalysis.id, manualAttempt.attemptId, candidate, "provider-integration-2");
@@ -944,7 +1026,7 @@ describe("PostgreSQL integration", () => {
     ];
     const candidate = { title: "早餐", foods, observedFoods: [], energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null, confidence: "low" as const, assumptions: [], uncertaintyNote: "照片估算" };
     const initial = await nutrition.createMeal(userId, input);
-    const analysis = await images.create(userId, initial.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "c".repeat(64) }, new Date("2026-08-27T00:00:00Z"), "test", "food-items-v2");
+    const analysis = await images.create(userId, initial.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "c".repeat(64) }, new Date(Date.now() + 86_400_000), "test", "food-items-v2");
     const attempt = await images.beginAttempt(analysis.id);
     if (typeof attempt === "string") throw new Error("expected attempt");
     const results = await Promise.all([images.succeed(analysis.id, attempt.attemptId, candidate, "test-1"), images.succeed(analysis.id, attempt.attemptId, candidate, "test-2")]);
@@ -961,7 +1043,7 @@ describe("PostgreSQL integration", () => {
     for (const item of [...meal.contributions]) {
       meal = await nutrition.deleteContribution(userId, meal.id, item.id, meal.revision, item.revision);
     }
-    const retry = await images.create(userId, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "d".repeat(64) }, new Date("2026-08-27T00:00:00Z"), "test", "food-items-v2");
+    const retry = await images.create(userId, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "d".repeat(64) }, new Date(Date.now() + 86_400_000), "test", "food-items-v2");
     const retryAttempt = await images.beginAttempt(retry.id);
     if (typeof retryAttempt === "string") throw new Error("expected attempt");
     await images.succeed(retry.id, retryAttempt.attemptId, candidate, "test-late");

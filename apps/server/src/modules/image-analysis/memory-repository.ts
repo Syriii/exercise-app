@@ -9,6 +9,18 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
   readonly #items = new Map<string, AnalysisWorkItem>();
   readonly #settings = new Map<string, import("./types.js").PhotoAnalysisSettings>();
   readonly #expires = new Map<string, Date>();
+  public async expireInterrupted(cutoff: Date, now: Date) {
+    let count = 0;
+    for (const [id, value] of this.#items) {
+      if (!["pending", "running"].includes(value.status) || value.updatedAt > cutoff) continue;
+      const code = value.status === "running" ? "analysis_interrupted" : "queue_wait_expired";
+      this.#items.set(id, { ...value, status: "failed", lastErrorCode: code, revision: value.revision + 1, updatedAt: now,
+        attempts: value.attempts.map(attempt => attempt.status === "running" ? { ...attempt, status: "failed", errorCode: code, finishedAt: now } : attempt) });
+      count += 1;
+      if (count === 100) break;
+    }
+    return count;
+  }
   public async getSettings(userId: string) { return clone(this.#settings.get(userId) ?? { automatic: false, consentAt: null, revision: 1 }); }
   public async saveSettings(userId: string, revision: number, automatic: boolean, consent: boolean) {
     const value = await this.getSettings(userId);
@@ -52,11 +64,11 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
   }
   public async succeed(id: string, attemptId: string, candidate: ImageNutritionCandidate, providerRequestId: string | null) {
     const value = this.#items.get(id); const attempt = value?.attempts.find((item) => item.id === attemptId); if (value === undefined || value.status !== "running" || attempt?.status !== "running") return "not_running" as const;
-    if (!value.imageAvailable) { this.#items.set(id, { ...value, status: "cancelled", lastErrorCode: "image_unavailable", revision: value.revision + 1, attempts: value.attempts.map(item => item.id === attemptId ? { ...item, status: "failed", errorCode: "image_unavailable", finishedAt: new Date() } : item) }); return "not_running" as const; }
+    if (!value.imageAvailable || (this.#expires.get(value.mediaId)?.getTime() ?? 0) <= Date.now()) { this.#items.set(id, { ...value, status: "cancelled", lastErrorCode: "image_unavailable", revision: value.revision + 1, attempts: value.attempts.map(item => item.id === attemptId ? { ...item, status: "failed", errorCode: "image_unavailable", finishedAt: new Date() } : item) }); return "not_running" as const; }
     const attempts = value.attempts.map((item) => item.id === attemptId ? { ...item, status: "succeeded" as const, providerRequestId, finishedAt: new Date() } : item);
     this.#items.set(id, { ...value, status: "succeeded", candidate, lastErrorCode: null, attempts, revision: value.revision + 1, updatedAt: new Date() }); return { status: "succeeded" as const, tentativeHandled: false };
   }
-  public async fail(id: string, attemptId: string, errorCode: string) { const value = this.#items.get(id); if (value === undefined) return; const attempts = value.attempts.map((item) => item.id === attemptId && item.status === "running" ? { ...item, status: "failed" as const, errorCode, finishedAt: new Date() } : item); this.#items.set(id, { ...value, status: "failed", lastErrorCode: errorCode, attempts, revision: value.revision + 1, updatedAt: new Date() }); }
+  public async fail(id: string, attemptId: string, errorCode: string) { const value = this.#items.get(id); if (value?.status !== "running" || !value.attempts.some(item => item.id === attemptId && item.status === "running")) return; const attempts = value.attempts.map((item) => item.id === attemptId ? { ...item, status: "failed" as const, errorCode, finishedAt: new Date() } : item); this.#items.set(id, { ...value, status: "failed", lastErrorCode: errorCode, attempts, revision: value.revision + 1, updatedAt: new Date() }); }
   public async retry(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string }) { const value = this.#items.get(id); if (value === undefined || value.userId !== userId) return "not_found" as const; if (value.revision !== revision) return "revision_conflict" as const; if (!["failed", "waiting", "cancelled"].includes(value.status) || !value.imageAvailable || (this.#expires.get(value.mediaId)?.getTime() ?? 0) <= Date.now()) return "not_failed" as const; const saved = { ...value, ...provider, status: "pending" as const, lastErrorCode: null, revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return clone(saved); }
   public async markAdopted(userId: string, id: string, revision: number) { const value = this.#items.get(id); if (value === undefined || value.userId !== userId) return "not_found" as const; if (value.revision !== revision) return "revision_conflict" as const; if (value.status !== "succeeded" || value.candidate === null || value.adoptedAt !== null) return "not_ready" as const; const saved = { ...value, adoptedAt: new Date(), revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return clone(saved); }
   public async markMediaStatus(mediaId: string, status: "available" | "deletion_pending" | "deleted" | "missing") { for (const [id, value] of this.#items) if (value.mediaId === mediaId) this.#items.set(id, { ...value, imageAvailable: status === "available", updatedAt: new Date() }); }

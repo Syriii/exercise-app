@@ -125,6 +125,7 @@ onBeforeUnmount(() => { generation++; });
         <button class="action-button" type="submit" :disabled="loading || saving">搜索</button>
       </form>
       <p class="field-help">不输入可浏览全部已接入食物，常用排在前面。搜索至少两个字时也会查询 Open Food Facts，发送搜索词但不发送账号信息。</p>
+      <p class="field-help">食物数据包含台湾食药署样品与 USDA 参考；请核对生熟、含糖和加工状态，不同做法的营养会有差异。</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <p v-if="replacement && replacementConflict && !error" class="field-help">餐食已有变化，请重新查看并确认当前食物，所选内容仍保留。</p>
       <button v-if="replacement && (error || replacementConflict)" class="text-action" type="button" :disabled="saving || disabled" @click="refreshReplacement">重新查看餐食</button>

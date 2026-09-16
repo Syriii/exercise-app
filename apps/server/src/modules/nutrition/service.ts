@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { catalogFoods, externalFoodVersion, foodCategories, foodSnapshot, personalFood, scaleFood, type FoodCategory, type FoodCatalogPage, type FoodDefinition } from "./food-catalog.js";
+import { catalogFoods, externalFoodVersion, foodCategories, foodSnapshot, foodMatchesSearch, normalizeFoodSearch, personalFood, scaleFood, type FoodCategory, type FoodCatalogPage, type FoodDefinition } from "./food-catalog.js";
 
 import type { ImageNutritionCandidate } from "../image-analysis/types.js";
 import { imageFoodContributions } from "./image-foods.js";
@@ -79,9 +79,9 @@ export class NutritionService {
   public async getFoodCatalog(userId: string, query = "", category: FoodCategory | "all" = "all", cursor: string | null = null, limit = 25, external: readonly FoodDefinition[] = []): Promise<FoodCatalogPage> {
     if (query.length > 100 || !Number.isInteger(limit) || limit < 1 || limit > 50 || (category !== "all" && !Object.hasOwn(foodCategories, category)))
       throw new NutritionError("invalid_nutrition_input", "食物查询条件无效", 400);
-    const text = query.trim().toLocaleLowerCase("zh-CN");
+    const text = normalizeFoodSearch(query);
     const foods = catalogFoods(await this.repository.listFoodTemplates(userId), external).filter((food) =>
-      (category === "all" || category === food.category) && `${food.label} ${food.originalName ?? ""}`.toLocaleLowerCase("zh-CN").includes(text));
+      (category === "all" || category === food.category) && foodMatchesSearch(food, text));
     const start = cursor === null ? 0 : foods.findIndex((food) => food.id === cursor) + 1;
     if (cursor !== null && start === 0) throw new NutritionError("food_catalog_changed", "列表已变化，请重新搜索；已选食物会保留", 409);
     const items = foods.slice(start, start + limit);
@@ -91,7 +91,7 @@ export class NutritionService {
   public async setFoodFavorite(userId: string, foodId: string, favorite: boolean): Promise<void> {
     const food = catalogFoods(await this.repository.listFoodTemplates(userId), this.externalFoods()).find((value) => value.id === foodId);
     if (!food) throw new NutritionError("food_not_found", "找不到这个食物", 404);
-    const isPublic = food.provider === "usda_sr_legacy" || food.provider === "open_food_facts";
+    const isPublic = food.provider === "usda_sr_legacy" || food.provider === "tfda" || food.provider === "open_food_facts";
     const { category, provider, sourceName, sourceUrl, license, originalName } = food;
     await this.repository.setFoodFavorite(userId, foodId, favorite, isPublic ? {
       label: food.label, portionAmount: food.basisAmount, portionUnit: food.basisUnit, basisDescription: food.sourceName,

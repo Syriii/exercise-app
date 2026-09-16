@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MemoryTemporaryMediaStore } from "../media/memory-temporary-media-store.js";
 import { MemoryNutritionRepository } from "../nutrition/memory-repository.js";
@@ -68,6 +68,58 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it("expires interrupted attempts once, fences late success and failure, and safely retries the same photo", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-16T00:00:00Z"));
+      const values = await fixture();
+      const pending = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+      const first = await values.repository.beginAttempt(pending.id);
+      if (typeof first === "string") throw new Error(first);
+      const waiting = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png), false);
+      expect(await values.service.recoverInterrupted()).toBe(0);
+      vi.setSystemTime(new Date("2026-09-16T00:05:01Z"));
+      expect(await values.service.recoverInterrupted()).toBe(1);
+      expect(await values.service.recoverInterrupted()).toBe(0);
+      const failed = (await values.repository.get("user-1", pending.id))!;
+      expect(failed).toMatchObject({ status: "failed", lastErrorCode: "analysis_interrupted", imageAvailable: true,
+        attempts: [{ id: first.attemptId, status: "failed", errorCode: "analysis_interrupted" }] });
+      expect((await values.repository.get("user-1", waiting.id))?.status).toBe("waiting");
+      await expect(values.service.retry("user-2", pending.id, failed.revision)).rejects.toMatchObject({ statusCode: 404 });
+      const retries = await Promise.allSettled([values.service.retry("user-1", pending.id, failed.revision), values.service.retry("user-1", pending.id, failed.revision)]);
+      expect(retries.filter(result => result.status === "fulfilled")).toHaveLength(1);
+      const second = await values.repository.beginAttempt(pending.id);
+      if (typeof second === "string") throw new Error(second);
+      await values.repository.fail(pending.id, first.attemptId, "late_old_failure");
+      expect(await values.repository.succeed(pending.id, first.attemptId, candidate, "old")).toBe("not_running");
+      expect((await values.repository.get("user-1", pending.id))?.status).toBe("running");
+      expect(await values.repository.succeed(pending.id, second.attemptId, candidate, "new")).toMatchObject({ status: "succeeded" });
+      await values.repository.fail(pending.id, first.attemptId, "late_old_failure");
+      expect((await values.repository.get("user-1", pending.id))?.status).toBe("succeeded");
+      expect(await values.repository.succeed(pending.id, second.attemptId, candidate, "duplicate")).toBe("not_running");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("expires lost pending deliveries without touching recent jobs or sending photos, and rejects retries after media expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-16T00:00:00Z"));
+      let calls = 0;
+      const values = await fixture({ model: "test", analyze: async () => { calls++; return { candidate, providerRequestId: null }; } });
+      const pending = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+      vi.setSystemTime(new Date("2026-09-16T00:05:01Z"));
+      const recent = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+      expect(await values.service.recoverInterrupted(600_000)).toBe(0);
+      expect(await values.service.recoverInterrupted()).toBe(1);
+      const failed = (await values.repository.get("user-1", pending.id))!;
+      expect(failed).toMatchObject({ status: "failed", lastErrorCode: "queue_wait_expired", attempts: [] });
+      expect((await values.repository.get("user-1", recent.id))?.status).toBe("pending");
+      await values.service.process(pending.id);
+      expect(calls).toBe(0);
+      vi.setSystemTime(new Date("2026-09-17T00:00:01Z"));
+      await expect(values.service.retry("user-1", pending.id, failed.revision)).rejects.toMatchObject({ statusCode: 409 });
+    } finally { vi.useRealTimers(); }
+  });
   it("keeps manual uploads waiting, starts only the selected photo, and never bulk starts old photos", async () => {
     const values = await fixture();
     expect(await values.service.settings("user-1")).toMatchObject({ automatic: false, consentAt: null });

@@ -4,7 +4,7 @@ import type { ContributionInput, Meal, NutrientValues } from "./nutrition";
 export type FoodCategory = "grains" | "vegetables" | "fruit" | "meat_eggs" | "dairy" | "beans" | "fats" | "other";
 export interface FoodDefinition extends NutrientValues {
   id: string; version: string; label: string; basisAmount: number | null; basisUnit: string | null;
-  category: FoodCategory; provider: "usda_sr_legacy" | "open_food_facts" | "personal" | "photo_estimate";
+  category: FoodCategory; provider: "usda_sr_legacy" | "tfda" | "open_food_facts" | "personal" | "photo_estimate";
   sourceName: string; sourceUrl: string | null; license: string | null; originalName: string | null;
 }
 export interface CatalogFood extends FoodDefinition { isFavorite: boolean; }
