@@ -248,8 +248,9 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   }
 
   app.setErrorHandler((error, request, reply) => {
-    request.log.error({ err: error }, "request failed");
     if (error instanceof IdentityError || error instanceof ImageAnalysisError || error instanceof NutritionError || error instanceof TrainingError || error instanceof TrainingSuggestionError || error instanceof ReminderError || error instanceof PlanningError || error instanceof PortabilityError) {
+      // Business details and SQL parameters belong in private records, not runtime logs.
+      request.log.error({ code: error.code, statusCode: error.statusCode }, "request failed");
       void reply.status(error.statusCode).send({
         code: error.code,
         message: error.message,
@@ -266,6 +267,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
         : 500;
     const publicMessage =
       statusCode < 500 && error instanceof Error ? error.message : "服务器暂时无法处理请求";
+    request.log.error({ code: statusCode >= 500 ? "internal_error" : "request_error", statusCode }, "request failed");
 
     void reply.status(statusCode).send({
       code: statusCode >= 500 ? "internal_error" : "request_error",

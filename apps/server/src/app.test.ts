@@ -61,12 +61,19 @@ describe("health routes", () => {
     expect(response.body).not.toContain("secret");
   });
 
-  it("does not expose unexpected server error details to the browser", async () => {
+  it("does not expose unexpected server error details to the browser or runtime logs", async () => {
     const app = await buildApp({
       config,
       checkDatabase: async () => undefined,
     });
     apps.push(app);
+    const logs: unknown[][] = [];
+    const originalLogger = app.log.error;
+    app.addHook("onRequest", (request, _reply, done) => {
+      request.log.error = (...args: unknown[]) => { logs.push(args); };
+      done();
+    });
+    app.addHook("onResponse", (request, _reply, done) => { request.log.error = originalLogger; done(); });
     app.get("/api/v1/test-internal-error", async () => {
       throw new Error('Failed query: insert into "private_table" params: private-user-id');
     });
@@ -81,6 +88,7 @@ describe("health routes", () => {
     });
     expect(response.body).not.toContain("private_table");
     expect(response.body).not.toContain("private-user-id");
+    expect(logs).toEqual([[{ code: "internal_error", statusCode: 500 }, "request failed"]]);
   });
 
   it("serves the web entry for browser history routes without swallowing API 404s", async () => {

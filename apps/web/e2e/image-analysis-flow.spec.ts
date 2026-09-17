@@ -39,9 +39,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await page.getByLabel("餐食照片（可选）").setInputFiles({
     name: "canteen.png",
     mimeType: "image/png",
-    buffer: Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
-    ]),
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
   });
   await expect(page.getByText("canteen.png")).toBeVisible();
   await expect(page.getByText(/保持原图/)).toBeVisible();
@@ -93,6 +91,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(items).toHaveCount(1);
   await expect(page.getByText("已记录 180 kcal")).toBeVisible();
   await analysis.getByText("查看已保存照片", { exact: true }).click();
+  await expect.poll(() => analysis.getByRole("img", { name: "本次识别使用的餐食照片" }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1);
   const originalUrl = await analysis.getByRole("img", { name: "本次识别使用的餐食照片" }).getAttribute("src");
   const original = await page.request.get(originalUrl!);
   expect(original.status()).toBe(200);
