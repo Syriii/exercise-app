@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { sql } from "drizzle-orm";
+import { PostgresPortabilityRepository } from "../modules/portability/postgres-repository.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDatabase } from "./database.js";
@@ -1171,6 +1173,80 @@ describe("PostgreSQL integration", () => {
         await expect(service.replaceFoodSelection(userId, meal.id, item.id, removed.revision, changed.revision + 2, choice)).rejects.toMatchObject({ statusCode: 404 });
         expect(await service.getMeal(userId, meal.id)).toEqual(removed);
       });
+    } finally { await restricted.close(); }
+  });
+
+  it("retains meal photos and transactional usage history with isolated exports, rollback and deletion fencing", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`usage-a-${randomUUID()}`, `usage-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const nutrition = new NutritionService(new PostgresNutritionRepository(restricted.database));
+    const images = new PostgresImageAnalysisRepository(database.database);
+    const scoped = new PostgresImageAnalysisRepository(restricted.database);
+    const history = async () => (await database.pool.query<{ entity_type: string; entity_id: string; before: Record<string, unknown> | null; after: Record<string, unknown> }>("select * from meal_record_events where user_id = $1 order by id", [owner])).rows;
+    try {
+      const meal = await context.run(owner, () => nutrition.createMeal(owner, { occurredAt: "2026-09-17T00:00:00Z", localDate: "2026-09-17", timeZone: "UTC", name: "留存测试", note: null }));
+      const uploaded = await context.run(owner, () => scoped.create(owner, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "a".repeat(64) }, null, "requested-test", "prompt-test"));
+      const work = (await images.getWorkItem(uploaded.id))!;
+      expect((await database.pool.query("select expires_at from temporary_media where id = $1", [work.mediaId])).rows[0].expires_at).toBeNull();
+      const portability = new PostgresPortabilityRepository(database.database);
+      expect((await portability.listExpiredMedia(new Date("2099-01-01"))).some(row => row.id === work.mediaId)).toBe(false);
+      const attempt = await images.beginAttempt(uploaded.id);
+      if (typeof attempt === "string") throw Error(attempt);
+      const candidate = { title: "番茄", observedFoods: [], foods: [{ label: "小番茄", portionAmount: 200, portionUnit: "g", note: null, energyKcal: 60, proteinGrams: 2, carbohydrateGrams: 12, fatGrams: 0 }], energyKcal: 60, proteinGrams: 2, carbohydrateGrams: 12, fatGrams: 0, confidence: "low" as const, assumptions: [], uncertaintyNote: "估算" };
+      const result = { candidate, providerRequestId: "test-id", providerModel: "returned-test", durationMs: 88, usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 } };
+      await images.succeed(uploaded.id, attempt.attemptId, candidate, "test-id", result);
+      let saved = await context.run(owner, () => nutrition.getMeal(owner, meal.id));
+      const item = saved.contributions[0]!;
+      const input = { mode: "item" as const, label: "葡萄", portionAmount: 150, portionUnit: "g", basisDescription: "用户修正", energyKcal: 90, proteinGrams: 2, carbohydrateGrams: 20, fatGrams: 0 };
+      saved = await context.run(owner, () => nutrition.updateContribution(owner, meal.id, item.id, saved.revision, item.revision, input, false));
+      const events = await history();
+      expect(events.find(row => row.entity_type === "meal_contributions" && row.after.label === "葡萄")).toMatchObject({ before: { label: "小番茄", portion_amount: 200 }, after: { label: "葡萄", portion_amount: 150 } });
+      expect(JSON.stringify(events)).not.toContain("object_key");
+      expect(events.find(row => row.entity_type === "meal_image_analyses" && row.before === null)?.after.media).toMatchObject({ sha256: "a".repeat(64) });
+      const attemptEvidence = (await images.get(owner, uploaded.id))!.attempts[0]!.evidence;
+      expect(attemptEvidence).toMatchObject({ model: "requested-test", promptVersion: "prompt-test", providerModel: "returned-test", candidate, durationMs: 88, usage: result.usage });
+      // Duplicate/late worker delivery is not a second result or history mutation.
+      expect(await images.succeed(uploaded.id, attempt.attemptId, candidate, "duplicate", result)).toBe("not_running");
+      await expect(context.run(owner, () => nutrition.updateContribution(owner, meal.id, item.id, 1, 1, input, false))).rejects.toMatchObject({ statusCode: 409 });
+      expect(await history()).toEqual(events);
+      // A late transaction failure rolls back both the business edit and its captured event.
+      await expect(context.run(owner, () => restricted.database.transaction(async tx => {
+        await tx.execute(sql`update meal_contributions set label = 'must-roll-back', revision = revision + 1 where id = ${item.id}`);
+        throw Error("rollback-probe");
+      }))).rejects.toThrow("rollback-probe");
+      expect(await history()).toEqual(events);
+      await context.run(other, async () => {
+        expect((await restricted.database.execute(sql`select * from meal_record_events where user_id = ${owner}`)).rows).toHaveLength(0);
+        expect(await scoped.get(other, uploaded.id)).toBeNull();
+      });
+      await expect(context.run(other, () => restricted.database.execute(sql`insert into meal_record_events(user_id, meal_id, entity_type, entity_id, operation, "after") values (${other}, ${meal.id}, 'meals', ${meal.id}, 'insert', '{}')`))).rejects.toThrow();
+      const exported = await context.run(owner, () => new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date()));
+      expect(exported.data.meal_record_events).toHaveLength(events.length);
+      expect(exported.data.meal_image_analysis_attempts).toEqual(expect.arrayContaining([expect.objectContaining({ evidence: attemptEvidence })]));
+      const completed = (await images.get(owner, uploaded.id))!;
+      const again = await context.run(owner, () => scoped.reanalyze(owner, completed.id, completed.revision, { model: "new-test", promptVersion: "new-prompt" }));
+      if (typeof again === "string") throw Error(again);
+      expect((await database.pool.query("select previous_analysis_id from meal_image_analyses where id = $1", [again.id])).rows[0].previous_analysis_id).toBe(completed.id);
+      const next = await images.beginAttempt(again.id);
+      if (typeof next === "string") throw Error(next);
+      await context.run(owner, () => scoped.markMediaStatus(work.mediaId, "deletion_pending"));
+      expect((await portability.listExpiredMedia(new Date())).some(row => row.id === work.mediaId)).toBe(true);
+      expect(await images.succeed(again.id, next.attemptId, candidate, "late-after-delete")).toBe("not_running");
+      expect((await images.get(owner, again.id))?.status).toBe("cancelled");
+      expect((await images.get(owner, uploaded.id))?.candidate).toEqual(candidate);
+      expect((await context.run(owner, () => nutrition.getMeal(owner, meal.id))).contributions[0]?.label).toBe("葡萄");
+      await images.markMediaStatus(work.mediaId, "deleted");
+      const afterDeletion = await history();
+      await images.markMediaStatus(work.mediaId, "deleted");
+      expect(await history()).toEqual(afterDeletion);
+      // A retained photo on a deleted meal must become a cleanup candidate, not a forever orphan.
+      const extra = await context.run(owner, () => scoped.create(owner, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 12, sha256: "b".repeat(64) }, null, "test", "test", false));
+      await context.run(owner, () => nutrition.deleteMeal(owner, meal.id, saved.revision));
+      const extraWork = (await images.getWorkItem(extra.id))!;
+      expect((await portability.listExpiredMedia(new Date())).some(row => row.id === extraWork.mediaId)).toBe(true);
+      await database.pool.query("delete from users where id = $1", [owner]);
+      expect(await history()).toHaveLength(0);
     } finally { await restricted.close(); }
   });
 

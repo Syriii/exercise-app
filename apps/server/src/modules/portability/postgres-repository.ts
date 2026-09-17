@@ -80,7 +80,15 @@ export class PostgresPortabilityRepository implements PortabilityRepository {
   }
 
   public async listUserMedia(userId: string) { return this.database.select({ id: temporaryMedia.id, objectKey: temporaryMedia.objectKey, status: temporaryMedia.status }).from(temporaryMedia).where(eq(temporaryMedia.userId, userId)); }
-  public async listExpiredMedia(now: Date) { return this.database.select({ id: temporaryMedia.id, objectKey: temporaryMedia.objectKey }).from(temporaryMedia).where(and(eq(temporaryMedia.status, "available"), lte(temporaryMedia.expiresAt, now))); }
+  public async listExpiredMedia(now: Date) {
+    return this.database.select({ id: temporaryMedia.id, objectKey: temporaryMedia.objectKey }).from(temporaryMedia).where(sql`
+      ${temporaryMedia.status} = 'deletion_pending' OR (${temporaryMedia.status} = 'available' AND (
+        ${temporaryMedia.expiresAt} <= ${now} OR (
+          EXISTS (SELECT 1 FROM meal_image_analyses a WHERE a.media_id = ${temporaryMedia.id}) AND
+          NOT EXISTS (SELECT 1 FROM meal_image_analyses a JOIN meals m ON m.id = a.meal_id WHERE a.media_id = ${temporaryMedia.id} AND m.deleted_at IS NULL)
+        )
+      ))`);
+  }
   public async markMediaStatus(mediaId: string, status: "available" | "deletion_pending" | "deleted" | "missing") { await this.database.update(temporaryMedia).set({ status, deletedAt: status === "deleted" || status === "missing" ? new Date() : null, updatedAt: new Date() }).where(eq(temporaryMedia.id, mediaId)); }
   public async removeTask(taskId: string) { await this.database.delete(backgroundTasks).where(eq(backgroundTasks.id, taskId)); }
 

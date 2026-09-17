@@ -122,11 +122,11 @@ chmod 600 .env secrets/database_password secrets/api_database_password secrets/s
 - `PUBLIC_FOOD_SEARCH_TIMEOUT_MS` 与 `PUBLIC_FOOD_SEARCH_CACHE_SECONDS`：外部搜索超时和进程内公共结果缓存时间，默认 5 秒与 10 分钟；应用不会做输入即搜索，并限制上游请求频率。
 - `IMAGE_UPLOAD_MAX_BYTES`：应用接收单张照片的上限，默认 8 MiB，低于供应商文档的 32 MiB 单图限制，避免手机原图占用过多内存和临时磁盘。
 - `EXPORT_MAX_BYTES` 与 `EXPORT_RETENTION_HOURS`：账号 JSON 导出的大小上限与下载保留时间；默认 64 MiB、7 天。导出不包含密码、会话令牌或原始照片。
-- `MEDIA_CLEANUP_INTERVAL_SECONDS`：worker 清理过期导出和临时照片的间隔，默认 1 小时。
+- `MEDIA_CLEANUP_INTERVAL_SECONDS`：worker 清理过期导出、已删除餐食照片及失败删除的间隔，默认 1 小时。
 - `MAX_ACCOUNTS`：普通账号与管理员账号的总上限，默认 10；并发注册也不能突破该上限。
 - `AUTH_RATE_LIMIT_*`、`WRITE_RATE_LIMIT_*`、`IMAGE_RATE_LIMIT_*`：单个 API 进程按来源 IP 限制登录注册、写操作与图片提交频率。默认值面向不超过 10 人的单机部署；多个 API 副本需要改用共享限流存储。
 - `MAX_ACTIVE_IMAGE_ANALYSES_PER_ACCOUNT`：单个账号同时等待或处理中的图片分析上限，默认 3。
-- `TEMP_MEDIA_MAX_BYTES_PER_ACCOUNT`：单个账号可占用的临时照片与导出空间上限，默认 256 MiB；采用结果或到期清理后释放。
+- `TEMP_MEDIA_MAX_BYTES_PER_ACCOUNT`：单个账号可占用的保留照片与导出空间上限，默认 256 MiB；照片不会到期释放，需主动删除或部署者明确扩容。达到上限拒绝新上传并保留已有照片，不静默淘汰样本。
 - `BACKUP_DIRECTORY` 与 `BACKUP_RETENTION_DAYS`：宿主机数据库备份目录与本机保留天数；默认 `deployment/backups/`、14 天。
 - `BACKUP_MIRROR_DIRECTORY`：可选的已存在目录。设置后，每次成功备份会把备份和 SHA-256 清单再复制一份；它应位于异地挂载或受保护的备份存储，而不是同一块磁盘的另一个目录。
 
@@ -172,7 +172,7 @@ docker compose -f compose.yaml -f compose.deepseek.yaml up -d --build
 docker compose -f compose.yaml -f compose.deepseek.yaml logs --tail=100 api worker
 ```
 
-后续更新、停止、查看日志也要使用相同的两个 `-f` 参数，否则重建后的容器不会挂载 Key。模型请求由 worker 直接把私有照片编码为 `data:image/...;base64` 发送给 DeepSeek；照片不需要公开 URL，也不使用远端 Files API。没有现有营养值时，结构化候选会先作为“暂定值”计入当天剩余量，用户随后核对或修正；已有手工或确认值时只保留候选，不自动覆盖。确认采用后默认删除本机临时原图。
+后续更新、停止、查看日志也要使用相同的两个 `-f` 参数，否则重建后的容器不会挂载 Key。模型请求由 worker 直接把私有照片编码为 `data:image/...;base64` 发送给 DeepSeek；照片不需要公开 URL，也不使用远端 Files API。没有现有营养值时，结构化候选会先作为“暂定值”计入当天剩余量，用户随后核对或修正；已有手工或确认值时只保留候选，不自动覆盖。识别或修正不会自动删除照片；已上传版本长期保留，用户主动删除照片或餐食后清理。
 
 `setup` 应以状态码 0 退出，日志应说明数据库、队列 migration 完成并且 `admin` 已就绪。随后检查：
 
@@ -204,7 +204,7 @@ Compose 只映射 `api` 端口；PostgreSQL 和 worker 没有宿主机端口。�
 
 ```text
 postgres_data   -> 长期数据库数据，必须备份
-temporary_media -> 待分析照片和限时 JSON 导出，到期清理且不做长期备份
+temporary_media -> 长期保留的餐食照片和限时 JSON 导出；仅导出到期，照片主动删除后清理；该 volume 不在默认数据库备份内
 代码与镜像        -> 可从 Git 和 Dockerfile 重建
 secret 文件       -> 不进 Git，由部署者独立安全保存
 ```
@@ -235,7 +235,7 @@ mkdir -p backups
 
 脚本先写入权限受限的 `.partial` 文件，确认非空后原子改名，并为每份备份生成 `.manifest.json`，记录创建时间、字节数、SHA-256 和“不含临时照片”。成功或失败会写入 `maintenance_events`，管理员页面只显示最近时间，不显示文件路径和个人数据。
 
-备份文件包含个人训练、饮食、账号和会话等私有数据，应加密并保存在服务器之外。临时照片和限时下载文件所在的 `temporary_media` volume 不进入长期备份；已确认的结构化营养结果仍在数据库备份中。`BACKUP_MIRROR_DIRECTORY` 只是复制入口，部署者仍需保证目标存储的访问控制、加密和异地可靠性。
+备份文件包含个人训练、饮食、账号和会话等私有数据，应加密并保存在服务器之外。保留照片和限时下载文件所在的 `temporary_media` volume 不进入默认数据库备份；结构化营养结果与使用过程在数据库备份中。照片现为长期留存材料，需要单独规划授权的私有媒体备份，否则主机或磁盘损坏会丢失这些照片；普通容器重建不会删除媒体 volume。`BACKUP_MIRROR_DIRECTORY` 只是复制入口，部署者仍需保证目标存储的访问控制、加密和异地可靠性。
 
 可以由宿主机定时任务调用，例如每天 03:20：
 

@@ -169,6 +169,21 @@ export async function registerImageAnalysisRoutes(
     (_request, payload, done) => done(null, payload),
   );
 
+  app.get<{ Params: { analysisId: string } }>("/api/v1/image-analyses/:analysisId/original", {
+    schema: { params: analysisIdParams },
+    handler: async (request, reply) => {
+      const original = await options.imageAnalysisService.downloadOriginal(await userId(request), request.params.analysisId);
+      return reply.header("Cache-Control", "private, no-store").header("Content-Disposition", "inline").type(original.contentType).send(original.stream);
+    },
+  });
+  app.delete<{ Params: { analysisId: string } }>("/api/v1/image-analyses/:analysisId/original", {
+    schema: { params: analysisIdParams, response: { 204: { type: "null" } } },
+    handler: async (request, reply) => {
+      await options.imageAnalysisService.removeOriginal(await userId(request), request.params.analysisId);
+      return reply.status(204).send();
+    },
+  });
+
   const settingsResponse = { type: "object", additionalProperties: false, required: ["automatic", "consentAt", "revision"], properties: { automatic: { type: "boolean" }, consentAt: nullableString, revision: { type: "integer" } } } as const;
   app.get("/api/v1/photo-analysis-settings", { schema: { response: { 200: settingsResponse } }, handler: async request => {
     const value = await options.imageAnalysisService.settings(await userId(request)); return { ...value, consentAt: value.consentAt?.toISOString() ?? null };

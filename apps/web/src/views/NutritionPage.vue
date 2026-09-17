@@ -11,6 +11,7 @@ import MealFoodItem from "../features/nutrition/MealFoodItem.vue";
 import FoodPicker from "../features/nutrition/FoodPicker.vue";
 import PhotoAnalysisSettings from "../features/nutrition/PhotoAnalysisSettings.vue";
 import ImageResultReplacement from "../features/nutrition/ImageResultReplacement.vue";
+import RetainedMealPhoto from "../features/nutrition/RetainedMealPhoto.vue";
 import { foodCatalogApi } from "../api/food-catalog";
 import { newFoodPickerDraft, type FoodPickerDraft, type FoodReplacementTarget } from "../features/nutrition/food-picker-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
@@ -567,6 +568,7 @@ onBeforeUnmount(stopPolling);
                       <div><strong>{{ analysis.candidate?.title ?? '餐食照片' }}</strong></div>
                       <span class="status-chip" :data-tone="analysis.status === 'failed' ? 'danger' : analysis.status === 'succeeded' ? 'accent' : undefined">{{ analysisStatus(analysis, meal) }}</span>
                     </header>
+                    <RetainedMealPhoto :analysis="analysis" @deleted="loadImageAnalyses(meal.id)" />
                     <p v-if="analysis.status === 'pending' || analysis.status === 'running'" class="field-help">正在分析，可以稍后回来查看。</p>
                     <div v-else-if="analysis.status === 'waiting' || analysis.status === 'cancelled'">
                       <p class="field-help">{{ analysis.imageAvailable ? '照片已保存在这餐，尚未发起新的识别。' : '原图已不可用，请重新选择照片；已有记录仍保留。' }}</p>

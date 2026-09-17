@@ -68,10 +68,10 @@ export class ImageAnalysisService {
     try { stored = await this.options.mediaStore.put(source, { maxBytes: this.options.maxUploadBytes }); }
     catch (error) { if (error instanceof Error && "code" in error && error.code === "media_too_large") throw new ImageAnalysisError("image_too_large", "图片超过应用允许大小", 413); throw error; }
     try {
-      if (usage.temporaryMediaBytes + stored.byteSize > (this.options.temporaryMediaMaxBytesPerAccount ?? 256 * 1024 * 1024)) throw new ImageAnalysisError("temporary_media_quota_reached", "临时照片空间已满，请等待处理或删除旧照片", 429);
+      if (usage.temporaryMediaBytes + stored.byteSize > (this.options.temporaryMediaMaxBytesPerAccount ?? 256 * 1024 * 1024)) throw new ImageAnalysisError("temporary_media_quota_reached", "照片存储空间已满，请下载并删除不再需要的照片，或联系管理员扩容", 429);
       const actualContentType = await detectImageType(await readAll(await this.options.mediaStore.open(stored.objectKey), this.options.maxUploadBytes));
       if (actualContentType === null || (declaredContentType !== undefined && declaredContentType !== actualContentType)) throw new ImageAnalysisError("invalid_image", "只接受内容真实匹配的 JPEG、PNG、GIF 或 WebP 图片", 400);
-      const created = await this.options.repository.create(userId, mealId, actualContentType, stored, new Date((this.options.now?.() ?? new Date()).getTime() + 24 * 60 * 60 * 1000), this.options.analyzer?.model ?? "unconfigured", imageAnalysisPromptVersion, automatic);
+      const created = await this.options.repository.create(userId, mealId, actualContentType, stored, null, this.options.analyzer?.model ?? "unconfigured", imageAnalysisPromptVersion, automatic);
       attached = true;
       if (automatic) await this.enqueue(userId, created.id);
       return (await this.options.repository.get(userId, created.id))!;
@@ -87,11 +87,18 @@ export class ImageAnalysisService {
     if (this.options.analyzer === null) throw new Error("image analyzer unavailable");
     const started = await this.options.repository.beginAttempt(analysisId);
     if (started === "not_found" || started === "not_ready") return;
+    try { await this.options.nutritionService.getMeal(started.work.userId, started.work.mealId); }
+    catch (error) {
+      if (error instanceof Error && "statusCode" in error && error.statusCode === 404) {
+        await this.options.repository.fail(analysisId, started.attemptId, "meal_unavailable"); return;
+      }
+      throw error;
+    }
     if (!started.work.imageAvailable) { await this.options.repository.fail(analysisId, started.attemptId, "image_unavailable"); return; }
     try {
       const image = await readAll(await this.options.mediaStore.open(started.work.objectKey), this.options.maxUploadBytes);
       const result = await this.options.analyzer.analyze(started.work.contentType, image);
-      const completed = await this.options.repository.succeed(analysisId, started.attemptId, result.candidate, result.providerRequestId);
+      const completed = await this.options.repository.succeed(analysisId, started.attemptId, result.candidate, result.providerRequestId, result);
       const newer = completed !== "not_running" && !completed.tentativeHandled
         ? (await this.options.repository.list(started.work.userId, started.work.mealId)).some(other => other.id !== analysisId && other.createdAt >= started.work.createdAt)
         : false;
@@ -140,9 +147,43 @@ export class ImageAnalysisService {
     return { analysis: (await this.options.repository.get(userId, analysisId))!, meal };
   }
 
+  public async original(userId: string, analysisId: string) {
+    const analysis = await this.options.repository.get(userId, analysisId);
+    if (!analysis) throw new ImageAnalysisError("analysis_not_found", "找不到这张照片", 404);
+    await this.options.nutritionService.getMeal(userId, analysis.mealId);
+    const work = await this.options.repository.getWorkItem(analysisId);
+    if (!work || work.userId !== userId || !work.imageAvailable) throw new ImageAnalysisError("image_unavailable", "原图已不可用，结构化记录仍保留", 404);
+    return work;
+  }
+
+  public async downloadOriginal(userId: string, analysisId: string) {
+    const work = await this.original(userId, analysisId);
+    if (!(await this.options.mediaStore.exists(work.objectKey))) {
+      await this.options.repository.markMediaStatus(work.mediaId, "missing");
+      throw new ImageAnalysisError("image_unavailable", "原图已不可用，结构化记录仍保留", 404);
+    }
+    try { return { contentType: work.contentType, stream: await this.options.mediaStore.open(work.objectKey) }; }
+    catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        await this.options.repository.markMediaStatus(work.mediaId, "missing");
+        throw new ImageAnalysisError("image_unavailable", "原图已不可用，结构化记录仍保留", 404);
+      }
+      throw error;
+    }
+  }
+
+  public async removeOriginal(userId: string, analysisId: string) {
+    const analysis = await this.options.repository.get(userId, analysisId);
+    if (!analysis) throw new ImageAnalysisError("analysis_not_found", "找不到这张照片", 404);
+    await this.options.nutritionService.getMeal(userId, analysis.mealId);
+    // Idempotent, including retries after a storage failure: deletion_pending is recoverable.
+    await this.deleteOriginal(analysisId, true);
+  }
+
   private async deleteOriginal(analysisId: string, imageAvailable: boolean) {
     if (!imageAvailable) return;
     const work = await this.options.repository.getWorkItem(analysisId); if (work === null) return;
+    if (work.mediaStatus === "deleted" || work.mediaStatus === "missing") return;
     await this.options.repository.markMediaStatus(work.mediaId, "deletion_pending");
     const deleted = await this.options.mediaStore.delete(work.objectKey);
     await this.options.repository.markMediaStatus(work.mediaId, deleted ? "deleted" : "missing");

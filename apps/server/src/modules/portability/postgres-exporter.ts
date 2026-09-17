@@ -6,6 +6,7 @@ import type { UserDataExporter } from "./repository.js";
 import type { UserExportEnvelope } from "./types.js";
 
 export const userExportRootTables = [
+  "meal_record_events",
   "background_tasks",
   "body_measurements",
   "daily_planning_references",

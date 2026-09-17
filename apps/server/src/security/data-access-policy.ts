@@ -1,4 +1,5 @@
 export const directAccountTables = [
+  "meal_record_events",
   "training_suggestions",
   "training_templates",
   "training_programs",

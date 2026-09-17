@@ -205,7 +205,7 @@ export const temporaryMedia = pgTable(
     byteSize: integer("byte_size").notNull(),
     sha256: text("sha256").notNull(),
     status: temporaryMediaStatus("status").default("available").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
   },
@@ -1010,6 +1010,7 @@ export const mealImageAnalyses = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     mealId: uuid("meal_id").notNull().references(() => meals.id, { onDelete: "cascade" }),
     mediaId: uuid("media_id").notNull().references(() => temporaryMedia.id, { onDelete: "restrict" }),
+    previousAnalysisId: uuid("previous_analysis_id"),
     status: mealImageAnalysisStatus("status").default("pending").notNull(),
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
@@ -1039,6 +1040,7 @@ export const mealImageAnalysisAttempts = pgTable(
     status: attemptStatus("status").default("running").notNull(),
     providerRequestId: text("provider_request_id"),
     errorCode: text("error_code"),
+    evidence: jsonb("evidence").$type<import("../../modules/image-analysis/types.js").AnalysisAttemptEvidence>(),
     startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
@@ -1049,7 +1051,21 @@ export const mealImageAnalysisAttempts = pgTable(
   ],
 );
 
+/** Transactional business history, not diagnostics and not verified training labels. */
+export const mealRecordEvents = pgTable("meal_record_events", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  mealId: uuid("meal_id").notNull().references(() => meals.id, { onDelete: "cascade" }),
+  entityType: text("entity_type").notNull(),
+  entityId: uuid("entity_id").notNull(),
+  operation: text("operation").notNull(),
+  before: jsonb("before").$type<Record<string, unknown>>(),
+  after: jsonb("after").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => [index("meal_record_events_meal_idx").on(table.mealId, table.id), index("meal_record_events_user_idx").on(table.userId)]);
+
 export const schema = {
+  mealRecordEvents,
   users,
   credentials,
   sessions,

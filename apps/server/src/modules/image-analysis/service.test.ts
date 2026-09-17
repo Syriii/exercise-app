@@ -68,6 +68,34 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it("keeps photos and per-attempt evidence across time, rejects other accounts and fences results after deletion", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-17T00:00:00Z"));
+      const usage = { promptTokens: 10, completionTokens: 20, totalTokens: 30 };
+      const values = await fixture({ model: "configured-test", analyze: async () => ({ candidate, providerRequestId: "test", providerModel: "returned-test", usage, durationMs: 123 }) });
+      const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+      await values.service.process(uploaded.id);
+      vi.setSystemTime(new Date("2027-09-17T00:00:00Z"));
+      const photo = await values.service.downloadOriginal("user-1", uploaded.id);
+      const parts = []; for await (const part of photo.stream) parts.push(part);
+      expect(Buffer.concat(parts)).toEqual(png);
+      await expect(values.service.downloadOriginal("user-2", uploaded.id)).rejects.toMatchObject({ statusCode: 404 });
+      await expect(values.service.removeOriginal("user-2", uploaded.id)).rejects.toMatchObject({ statusCode: 404 });
+      const completed = (await values.repository.get("user-1", uploaded.id))!;
+      expect(completed.attempts[0]?.evidence).toMatchObject({ model: "configured-test", providerModel: "returned-test", candidate, usage, durationMs: 123 });
+      const again = await values.service.reanalyze("user-1", uploaded.id, completed.revision);
+      const running = await values.repository.beginAttempt(again.id);
+      if (typeof running === "string") throw new Error(running);
+      await values.service.removeOriginal("user-1", uploaded.id);
+      await values.service.removeOriginal("user-1", uploaded.id);
+      expect((await values.repository.getWorkItem(uploaded.id))?.mediaStatus).toBe("deleted");
+      expect(await values.repository.succeed(again.id, running.attemptId, candidate, "late")).toBe("not_running");
+      expect((await values.repository.get("user-1", again.id))?.status).toBe("cancelled");
+      expect((await values.repository.get("user-1", uploaded.id))?.candidate).toEqual(candidate);
+      expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
   it("expires interrupted attempts once, fences late success and failure, and safely retries the same photo", async () => {
     vi.useFakeTimers();
     try {
@@ -100,7 +128,7 @@ describe("ImageAnalysisService", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("expires lost pending deliveries without touching recent jobs or sending photos, and rejects retries after media expiry", async () => {
+  it("expires lost deliveries without resending photos and retains originals until explicitly deleted", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-09-16T00:00:00Z"));
@@ -117,7 +145,11 @@ describe("ImageAnalysisService", () => {
       await values.service.process(pending.id);
       expect(calls).toBe(0);
       vi.setSystemTime(new Date("2026-09-17T00:00:01Z"));
-      await expect(values.service.retry("user-1", pending.id, failed.revision)).rejects.toMatchObject({ statusCode: 409 });
+      const retry = await values.service.retry("user-1", pending.id, failed.revision);
+      expect(retry.status).toBe("pending");
+      await values.service.removeOriginal("user-1", pending.id);
+      await expect(values.service.downloadOriginal("user-1", pending.id)).rejects.toMatchObject({ statusCode: 404 });
+      await expect(values.service.retry("user-1", pending.id, retry.revision)).rejects.toMatchObject({ statusCode: 409 });
     } finally { vi.useRealTimers(); }
   });
   it("keeps manual uploads waiting, starts only the selected photo, and never bulk starts old photos", async () => {

@@ -22,6 +22,7 @@ export type ImageAdoptionInput = ContributionInput & { analysisRevision: number;
 export interface PhotoAnalysisSettings { automatic: boolean; consentAt: string | null; revision: number; }
 export interface ImageReplacementInput { operationId: string; mealRevision: number; analysisRevision: number; replaceIds: string[]; }
 export const nutritionApi = {
+  deleteOriginal: (id: string) => apiRequest<void>(`/api/v1/image-analyses/${id}/original`, { method: "DELETE" }),
   photoSettings: () => apiRequest<PhotoAnalysisSettings>("/api/v1/photo-analysis-settings"),
   savePhotoSettings: (input: { revision: number; automatic: boolean; consent: boolean }) => apiRequest<PhotoAnalysisSettings>("/api/v1/photo-analysis-settings", { method: "PUT", body: JSON.stringify(input) }),
   reanalyze: (id: string, revision: number) => apiRequest<MealImageAnalysis>(`/api/v1/image-analyses/${id}/reanalyze`, { method: "POST", body: JSON.stringify({ revision, consent: true }) }),

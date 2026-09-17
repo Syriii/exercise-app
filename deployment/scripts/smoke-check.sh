@@ -45,7 +45,7 @@ api_role=$(postgres_sql \
 [ "$api_role" = "1" ] || fail "restricted exercise_api role is missing or over-privileged"
 rls_tables=$(postgres_sql \
   "select count(*) from pg_catalog.pg_tables where schemaname = 'public' and rowsecurity;")
-[ "$rls_tables" = "32" ] || fail "expected 32 account-owned tables with row security, found $rls_tables"
+[ "$rls_tables" = "33" ] || fail "expected 33 account-owned tables with row security, found $rls_tables"
 compose exec -T api sh -eu -c \
   'test -r /run/secrets/api_database_password; test ! -e /run/secrets/database_password'
 compose exec -T worker sh -eu -c \

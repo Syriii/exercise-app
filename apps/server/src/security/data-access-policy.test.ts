@@ -21,6 +21,7 @@ describe("database access classification", () => {
       readFile(resolve(import.meta.dirname, "../../drizzle/0013_api_rls.sql"), "utf8"),
       readFile(resolve(import.meta.dirname, "../../drizzle/0014_reflective_mimic.sql"), "utf8"),
       readFile(resolve(import.meta.dirname, "../../drizzle/0018_wakeful_carmella_unuscione.sql"), "utf8"),
+      readFile(resolve(import.meta.dirname, "../../drizzle/0027_meal_usage_history.sql"), "utf8"),
     ])).join("\n");
     for (const table of [...directAccountTables, ...inheritedAccountTables]) {
       expect(migration).toContain(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`);

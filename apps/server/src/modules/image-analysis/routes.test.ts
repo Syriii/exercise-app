@@ -103,6 +103,13 @@ describe("image analysis routes", () => {
     });
     expect(uploaded.statusCode, uploaded.body).toBe(202);
     const analysisId = uploaded.json<{ id: string }>().id;
+    const photoUrl = `/api/v1/image-analyses/${analysisId}/original`;
+    expect((await app.inject({ method: "GET", url: photoUrl })).statusCode).toBe(401);
+    const photo = await app.inject({ method: "GET", url: photoUrl, headers: { cookie } });
+    expect(photo.statusCode).toBe(200);
+    expect(photo.headers["cache-control"]).toBe("private, no-store");
+    expect(photo.headers["content-type"]).toBe("image/png");
+    expect(photo.rawPayload.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
     let analysis: AnalysisResponse | null = null;
     for (let count = 0; count < 10; count += 1) {
@@ -151,6 +158,8 @@ describe("image analysis routes", () => {
       },
     });
     expect(adopted.statusCode, adopted.body).toBe(200);
+    expect((await app.inject({ method: "GET", url: photoUrl, headers: { cookie } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: photoUrl, headers: { cookie } })).statusCode).toBe(204);
     expect(adopted.json()).toMatchObject({
       analysis: { adoptedAt: expect.any(String), imageAvailable: false },
       meal: {

@@ -28,6 +28,16 @@ export interface ImageNutritionCandidate {
   readonly uncertaintyNote: string;
 }
 
+export interface AnalysisAttemptEvidence {
+  readonly model: string;
+  readonly promptVersion: string;
+  readonly providerModel?: string | null;
+  readonly durationMs?: number;
+  readonly usage?: import("./analyzer.js").ImageAnalyzerUsage | null;
+  readonly finishReason?: string | null;
+  readonly candidate?: ImageNutritionCandidate;
+}
+
 export interface ImageAnalysisAttempt {
   readonly id: string;
   readonly sequence: number;
@@ -36,6 +46,7 @@ export interface ImageAnalysisAttempt {
   readonly errorCode: string | null;
   readonly startedAt: Date;
   readonly finishedAt: Date | null;
+  readonly evidence?: AnalysisAttemptEvidence | null;
 }
 
 export interface MealImageAnalysis {
@@ -59,4 +70,5 @@ export interface AnalysisWorkItem extends MealImageAnalysis {
   readonly mediaId: string;
   readonly objectKey: string;
   readonly contentType: string;
+  readonly mediaStatus?: "available" | "deletion_pending" | "deleted" | "missing";
 }

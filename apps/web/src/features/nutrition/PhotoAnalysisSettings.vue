@@ -26,7 +26,7 @@ async function save() {
 <template>
   <details class="reference-details photo-settings">
     <summary>拍照识别设置</summary>
-    <p class="field-help">识别时会把所选餐食照片发送给服务器配置的模型服务，用于估算食物和营养；不会发送其他餐食或账号资料。照片仅临时保留，食物记录长期保存。</p>
+    <p class="field-help">识别时会把所选餐食照片发送给服务器配置的模型服务，用于估算食物和营养；不会发送其他餐食或账号资料。已上传照片、识别结果及修改过程保留到你主动删除，用于回看和后续优化；不会因此自动再次调用模型或对外分享。</p>
     <p class="field-help">关闭自动识别后，后续照片只保存到餐食，你可以逐张发起识别。开关不会处理历史照片，也不会取消已经发起的任务。</p>
     <p v-if="error" class="form-error" role="alert">{{ error }} <button type="button" class="text-action" @click="load">重新读取设置</button></p>
     <form v-if="settings" @submit.prevent="save">
