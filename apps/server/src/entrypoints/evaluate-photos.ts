@@ -40,7 +40,7 @@ try {
       // No dish IDs, ground-truth names, weights or nutrition labels enter the model input.
       const result = await analyzer.analyze(sample.contentType, images[index]!);
       row = { id: sample.id, truth: sample.truth, prediction: predictionValues(result.candidate), error: null };
-      await file.write(JSON.stringify({ type: "prediction", ...row, foods: result.candidate.foods ?? null, usage: result.usage ?? null, durationMs: result.durationMs ?? null, providerModel: result.providerModel ?? null }) + "\n");
+      await file.write(JSON.stringify({ type: "prediction", ...row, foods: result.candidate.foods ?? null, candidate: result.candidate, usage: result.usage ?? null, durationMs: result.durationMs ?? null, providerModel: result.providerModel ?? null }) + "\n");
     } catch (error) {
       row = { id: sample.id, truth: sample.truth, prediction: null, error: error instanceof DeepSeekImageAnalyzerError ? error.code : "evaluation_request_failed" };
       await file.write(JSON.stringify({ type: "prediction", ...row }) + "\n");

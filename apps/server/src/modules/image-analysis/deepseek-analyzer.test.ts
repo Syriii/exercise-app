@@ -195,6 +195,14 @@ describe("DeepSeekImageAnalyzer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("honors a single-call evaluation budget even for transient errors", async () => {
+    const fetchMock = vi.fn(async () => new Response("overloaded", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const analyzer = new DeepSeekImageAnalyzer({ apiKey: "test-only", baseUrl: "https://api.deepseek.com", model: "test-model", timeoutMs: 1000, retryLimit: 0 });
+    await expect(analyzer.analyze("image/png", Buffer.from("test"))).rejects.toMatchObject({ code: "deepseek_overloaded" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("classifies an exhausted request deadline as a timeout", async () => {
     vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
