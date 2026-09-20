@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 import { addPersonalFood, createMeal } from "./helpers/nutrition";
@@ -75,6 +76,7 @@ test("expired original images never promise retry and food details still work", 
 test("reopening a photo draft keeps the attachment visible and removable", async ({ page }) => {
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
   const composer = page.getByRole("region", { name: "快速记餐", exact: true });
+  await reveal(composer.getByLabel("餐次名称（可选）"));
   await composer.getByLabel("餐次名称（可选）").fill("保留的草稿");
   await composer.getByLabel("从相册选择餐食照片").setInputFiles({ name: "draft.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
   await expect(composer.getByText(/draft.png/)).toBeVisible();
@@ -93,13 +95,16 @@ test("opening another correction never replaces unsaved nutrition values", async
   await addPersonalFood(meal, "豆浆", "250", "g", { energy: "80" });
   const egg = meal.locator(".food-item").filter({ has: page.locator("strong", { hasText: /^鸡蛋$/ }) });
   const soy = meal.locator(".food-item").filter({ has: page.locator("strong", { hasText: /^豆浆$/ }) });
+  await reveal(egg.getByRole("button", { includeHidden: true, name: "修正", exact: true }));
   await egg.getByRole("button", { name: "修正", exact: true }).click();
   const correction = meal.getByRole("form", { name: "修正食物", exact: true });
   await correction.getByLabel("能量 kcal").fill("130");
+  await reveal(soy.getByRole("button", { includeHidden: true, name: "修正", exact: true }));
   await soy.getByRole("button", { name: "修正", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("请先保存或取消");
   await expect(correction.getByLabel("食物名称")).toHaveValue("鸡蛋");
   await expect(correction.getByLabel("能量 kcal")).toHaveValue("130");
+  await reveal(egg.getByRole("button", { includeHidden: true, name: "修正", exact: true }));
   await egg.getByRole("button", { name: "修正", exact: true }).click();
   await expect(correction.getByLabel("能量 kcal")).toHaveValue("130");
   await correction.getByRole("button", { name: "保存修正" }).click();

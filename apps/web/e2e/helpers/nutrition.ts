@@ -1,8 +1,10 @@
+import { reveal } from "./disclosure";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 export async function createMeal(page: Page, name: string) {
   // Explicit blank photo draft used by legacy feature fixtures; manual-first flow has its own tests.
   await page.getByRole("group", { name: "记录餐食" }).getByRole("button", { name: "拍照记一餐", exact: true }).click();
+  await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill(name);
   await page.getByRole("button", { name: "建立餐次", exact: true }).click();
   const meal = page.locator("article.meal-card").filter({ has: page.locator("header strong", { hasText: name }) });

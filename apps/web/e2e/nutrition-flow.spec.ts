@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 import { addPersonalFood, createMeal, openPicker } from "./helpers/nutrition";
@@ -107,8 +108,10 @@ test("a person can reuse matching foods, search public products, and manage comm
   const yesterdayMeal = await createMeal(page, "早餐");
   await addPersonalFood(yesterdayMeal, "包子", "1", "个", { energy: "230" });
   await addPersonalFood(yesterdayMeal, "鸡蛋", "2", "个", { energy: "140" });
+  await reveal(yesterdayMeal.locator(".meal-items > li").filter({ hasText: "鸡蛋" }).getByRole("button", { includeHidden: true, name: "设为常用" }));
   await yesterdayMeal.locator(".meal-items > li").filter({ hasText: "鸡蛋" }).getByRole("button", { name: "设为常用" }).click();
   await addPersonalFood(yesterdayMeal, "豆浆", "1", "碗", { energy: "90" });
+  await reveal(yesterdayMeal.locator(".meal-items > li").filter({ hasText: "豆浆" }).getByRole("button", { includeHidden: true, name: "设为常用" }));
   await yesterdayMeal.locator(".meal-items > li").filter({ hasText: "豆浆" }).getByRole("button", { name: "设为常用" }).click();
 
   await page.goto("/nutrition");
@@ -180,12 +183,14 @@ test("a person can record, correct, and review a meal without treating unknown n
   await expect(page.getByRole("region", { name: "我的饮食安排" })).toHaveCount(0);
   const meal = await createMeal(page, "午饭");
   await addPersonalFood(meal, "米饭", "200", "g", { energy: "232", protein: "5.2", carbs: "51.8" });
+  await reveal(meal.locator(".meal-items > li").getByRole("button", { includeHidden: true, name: "设为常用" }));
   await meal.locator(".meal-items > li").getByRole("button", { name: "设为常用" }).click();
 
   await expect(page.getByText("已记录 232 kcal")).toBeVisible();
   await expect(page.getByText("部分食物有未知营养，合计仅包含已知数值。")).toBeVisible();
   await expect(meal.locator(".meal-items").getByText(/脂肪 未知/)).toBeVisible();
 
+  await reveal(meal.getByRole("button", { includeHidden: true, name: "修正" }));
   await meal.getByRole("button", { name: "修正" }).click();
   await meal.getByLabel("能量 kcal").fill("250");
   await meal.getByRole("button", { name: "保存修正" }).click();

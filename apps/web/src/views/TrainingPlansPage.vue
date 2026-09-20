@@ -7,6 +7,8 @@ const router = useRouter();
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
 import ExerciseNameField from "../components/ExerciseNameField.vue";
+import PlanTargetFields from '../features/training/PlanTargetFields.vue';
+import ExercisePicker from '../features/training/ExercisePicker.vue';
 import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
 import {
@@ -87,6 +89,11 @@ function moveItem(items: TemplateItemForm[], index: number, offset: number) {
   const next = index + offset;
   if (next < 0 || next >= items.length) return;
   const [item] = items.splice(index, 1); items.splice(next, 0, item!);
+}
+function pickPlanAction(items: TemplateItemForm[], name: string) {
+  const empty = items.find(item => !item.exerciseName.trim());
+  if (empty) empty.exerciseName = name;
+  else if (items.length < 50) items.push({ ...emptyTemplateItem(), exerciseName: name });
 }
 
 function currentLocalDate(): string {
@@ -581,7 +588,8 @@ onActivated(() => void load());
             </div>
             <form class="template-form" @submit.prevent="saveTemplate">
               <label><span>计划名称</span><input v-model="templateForm.name" required maxlength="80" placeholder="例如：胸部 A" /></label>
-              <label><span>计划备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label>
+              <details><summary>计划备注{{ templateForm.note ? ' · 已填' : '' }}</summary><label><span>计划备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label></details>
+              <details class="wide-field"><summary>选择计划动作</summary><ExercisePicker :disabled="saving" @select="name => pickPlanAction(templateForm.items, name)" /></details>
 
               <div class="template-items">
                 <article v-for="(item, index) in templateForm.items" :key="index" class="template-item-form">
@@ -590,14 +598,9 @@ onActivated(() => void load());
                     <button v-if="templateForm.items.length > 1" class="text-action" type="button" @click="templateForm.items.splice(index, 1)">移除</button>
                   </div>
                   <ExerciseNameField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
-                  <label><span>目标组数</span><input v-model="item.targetSets" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>最低次数</span><input v-model="item.targetRepsMin" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>最高次数</span><input v-model="item.targetRepsMax" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>目标重量 kg</span><input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
-                  <label><span>目标时长（秒）</span><input v-model="item.targetDurationSeconds" type="number" min="1" placeholder="可不填" /></label>
-                  <label><span>目标距离（米）</span><input v-model="item.targetDistanceMeters" inputmode="decimal" placeholder="可不填" /></label>
+                  <PlanTargetFields :item="item" />
                   <div class="form-actions"><button class="text-action" type="button" :disabled="index === 0" @click="moveItem(templateForm.items,index,-1)">上移</button><button class="text-action" type="button" :disabled="index === templateForm.items.length-1" @click="moveItem(templateForm.items,index,1)">下移</button></div>
-                  <label class="wide-field"><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="节奏、器械或注意事项" /></label>
+                  <details class="wide-field"><summary>动作备注{{ item.note ? ' · 已填' : '' }}</summary><label><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="节奏、器械或注意事项" /></label></details>
                 </article>
               </div>
 
@@ -728,14 +731,9 @@ onActivated(() => void load());
                           <button v-if="unitForm.items.length > 1" class="text-action" type="button" @click="unitForm.items.splice(index, 1)">移除</button>
                         </div>
                         <ExerciseNameField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
-                        <label><span>目标组数</span><input v-model="item.targetSets" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
-                        <label><span>最低次数</span><input v-model="item.targetRepsMin" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
-                        <label><span>最高次数</span><input v-model="item.targetRepsMax" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
-                        <label><span>目标重量 kg</span><input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
-                        <label><span>目标时长（秒）</span><input v-model="item.targetDurationSeconds" type="number" min="1" placeholder="可不填" /></label>
-                        <label><span>目标距离（米）</span><input v-model="item.targetDistanceMeters" inputmode="decimal" placeholder="可不填" /></label>
+                        <PlanTargetFields :item="item" />
                         <div class="form-actions"><button class="text-action" type="button" :disabled="index === 0" @click="moveItem(unitForm.items,index,-1)">上移</button><button class="text-action" type="button" :disabled="index === unitForm.items.length-1" @click="moveItem(unitForm.items,index,1)">下移</button></div>
-                        <label class="wide-field"><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="可不填" /></label>
+                        <details class="wide-field"><summary>动作备注{{ item.note ? ' · 已填' : '' }}</summary><label><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="可不填" /></label></details>
                       </article>
                     </div>
                     <button class="text-action wide-field unit-add-action" type="button" @click="unitForm.items.push(emptyTemplateItem())">添加动作 →</button>

@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { expect, test, type Page } from "@playwright/test";
 import { completeSetup } from "./helpers/setup";
 import { randomUUID } from "node:crypto";
@@ -11,6 +12,7 @@ async function selectedBreakfast(page: Page) {
   await page.goto("/nutrition?date=2026-09-20");
   await page.getByRole("button", { name: "手动添加食物", exact: true }).click();
   const composer = page.getByRole("region", { name: "快速记餐" });
+  await reveal(composer.getByLabel("餐次名称（可选）"));
   await composer.getByLabel("餐次名称（可选）").fill("手选早餐");
   const picker = composer.getByRole("region", { name: "添加食物", exact: true });
   await picker.getByLabel("搜索食物", { exact: true }).fill("豆浆(无糖)");

@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
@@ -26,12 +27,14 @@ test("independent dated plan accumulates two post-workout records and recomputes
   const plan = page.getByRole("article", { name: "当天计划" });
   await expect(plan).toContainText("卧推"); await expect(plan).not.toContainText("夹胸");
   await plan.getByRole("button", { name: "从当天计划记录" }).click();
+  await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await expect(page.getByLabel("组数", { exact: true })).toHaveValue("3");
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toHaveLength(0);
   await page.getByLabel("组数", { exact: true }).fill("2");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(plan).toContainText("已记录 2／3 组");
   await plan.getByRole("button", { name: "从当天计划记录" }).click();
+  await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await page.getByLabel("组数", { exact: true }).fill("1");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(plan).toContainText("已记录 3／3 组");
@@ -66,6 +69,7 @@ test("independent dated plan accumulates two post-workout records and recomputes
 test("stale linked drafts preserve input and can detach without creating a duplicate record", async ({ page }) => {
   const { schedule } = await setup(page);
   await page.getByRole("button", { name: "从当天计划记录" }).click();
+  await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await page.getByLabel("组数", { exact: true }).fill("2");
   const response = await page.request.post(`/api/v1/training/schedules/${schedule.id}/cancel`, { data: { revision: schedule.revision } });
   expect(response.ok()).toBe(true);
@@ -83,9 +87,11 @@ test("stale linked drafts preserve input and can detach without creating a dupli
 test("rescheduling leaves facts in place and copying last actual content drops the old association", async ({ page }) => {
   await setup(page);
   await page.getByRole("button", { name: "从当天计划记录" }).click();
+  await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByRole("article", { name: "当天计划" })).toContainText("已记录 3／3 组");
   await page.getByRole("button", { name: "修改当天计划／改期" }).click();
+  await reveal(page.getByLabel("安排日期"));
   await page.getByLabel("安排日期").fill("2027-01-01");
   await page.getByRole("button", { name: "保存当天计划" }).click();
   await expect(page.getByRole("article", { name: "当天计划" })).toContainText("已记录 0／3 组");

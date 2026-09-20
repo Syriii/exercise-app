@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, useId } from "vue";
 import { ApiError } from "../../api/client";
 import { foodCatalogApi, type CatalogFood, type FoodCatalogPage } from "../../api/food-catalog";
 import { nutritionApi, type Meal } from "../../api/nutrition";
 import { submissionId } from "../../support/submission-id";
 import type { FoodPickerDraft, FoodReplacementTarget } from "./food-picker-draft";
 import FoodArt from "../../components/FoodArt.vue";
+import AppIcon from "../../components/AppIcon.vue";
 const categoryArt = { grains: "rice", vegetables: "vegetable", fruit: "fruit", meat_eggs: "egg", dairy: "drink", beans: "drink", fats: "rice", other: "rice" };
 
 const props = defineProps<{ meal?: Meal; createMeal?: () => Promise<Meal>; standalone?: boolean; draft: FoodPickerDraft; disabled: boolean; replacement?: FoodReplacementTarget }>();
@@ -14,6 +15,8 @@ const latestReplacementMeal = ref<Meal | null>(null);
 const replacementConflict = ref(false);
 const page = ref<FoodCatalogPage | null>(null);
 const loading = ref(false), saving = ref(false), error = ref("");
+const selectionId = `food-selection-${useId()}`;
+function chooseCategory(category: FoodPickerDraft['category']) { props.draft.category = category; void load(false, online); }
 let generation = 0;
 let lastQuery = "", lastCategory = props.draft.category, online = false;
 const amountText = (value: number | null, unit: string) => value === null ? "未知" : `${value} ${unit}`;
@@ -126,13 +129,14 @@ onBeforeUnmount(() => { generation++; });
     <template v-if="replacement"><strong>替换：{{ replacement.label }}</strong><p class="field-help">只替换这一项，其他食物保留。请按新食物的单位填写份量，不沿用照片估算的营养。</p><button class="text-action" type="button" :disabled="saving || disabled" @click="emit('cancel')">取消替换</button></template>
     <button v-else-if="!standalone" class="action-button" type="button" :aria-expanded="draft.open" :disabled="saving || disabled" @click="toggle">{{ draft.open ? '收起食物选择' : '添加食物' }}<template v-if="draft.selected.length"> · 已选 {{ draft.selected.length }} 项</template></button>
     <div v-if="draft.open" class="food-picker-content">
-      <form class="catalog-search" @submit.prevent="load(false, true)">
-        <label>搜索食物<input v-model="draft.query" maxlength="100" placeholder="例如：西兰花、鸡蛋、豆奶" :disabled="saving" /></label>
-        <label>食物分类<select v-model="draft.category" aria-label="食物分类" :disabled="saving" @change="load(false, online)"><option value="all">全部分类</option><option v-for="(name, key) in page?.categories" :key="key" :value="key">{{ name }}</option></select></label>
+      <form class="catalog-search catalog-search--compact" @submit.prevent="load(false, true)">
+        <label><span class="sr-only">搜索食物</span><input v-model="draft.query" maxlength="100" placeholder="搜索食物，例如鸡蛋、豆浆" :disabled="saving" /></label>
         <button class="action-button" type="submit" :disabled="loading || saving">搜索</button>
       </form>
-      <p class="field-help">常用食物优先显示，插图仅表示类别。</p>
-      <details><summary>食物来源与搜索说明</summary><p class="field-help">不输入可浏览全部已接入食物。搜索至少两个字时也会查询 Open Food Facts，发送搜索词但不发送账号信息。食物包含台湾食药署样品与 USDA 参考，请核对生熟、含糖和加工状态。</p></details>
+      <div class="category-chips" role="group" aria-label="食物分类">
+        <button class="category-chip" type="button" :aria-pressed="draft.category === 'all'" :disabled="saving" @click="chooseCategory('all')">全部</button>
+        <button v-for="(name, key) in page?.categories" :key="key" class="category-chip" type="button" :aria-pressed="draft.category === key" :disabled="saving" @click="chooseCategory(key)">{{ name }}</button>
+      </div>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <p v-if="replacement && replacementConflict && !error" class="field-help">餐食已有变化，请重新查看并确认当前食物，所选内容仍保留。</p>
       <button v-if="replacement && (error || replacementConflict)" class="text-action" type="button" :disabled="saving || disabled" @click="refreshReplacement">重新查看餐食</button>
@@ -152,19 +156,19 @@ onBeforeUnmount(() => { generation++; });
               <a v-if="food.sourceUrl" :href="food.sourceUrl" target="_blank" rel="noreferrer">来源记录 · {{ food.license }}</a>
             </details>
           </div>
-          <div class="row-actions"><button class="text-action" type="button" :aria-label="`${food.isFavorite ? '取消常用' : '设为常用'}：${food.label}`" :aria-pressed="food.isFavorite" :disabled="saving || disabled" @click="favorite(food)">{{ food.isFavorite ? '已常用' : '设为常用' }}</button>
-            <button class="action-button" type="button" :aria-label="`选择：${food.label}`" :disabled="saving || disabled || draft.selected.some(item => item.food.id === food.id)" @click="select(food)">{{ draft.selected.some(item => item.food.id === food.id) ? '已选择' : '选择' }}</button></div>
+          <div class="catalog-item-actions"><button class="text-action" type="button" :aria-label="`${food.isFavorite ? '取消常用' : '设为常用'}：${food.label}`" :aria-pressed="food.isFavorite" :disabled="saving || disabled" @click="favorite(food)">{{ food.isFavorite ? '★' : '☆' }}</button>
+            <button class="action-button" type="button" :aria-label="`选择：${food.label}`" :aria-pressed="draft.selected.some(item => item.food.id === food.id)" :disabled="saving || disabled || draft.selected.some(item => item.food.id === food.id)" @click="select(food)"><AppIcon :name="draft.selected.some(item => item.food.id === food.id) ? 'check' : 'plus'" /></button></div>
         </li>
       </ul>
       <button v-if="page?.nextCursor" class="text-action" type="button" :disabled="loading || saving" @click="load(true)">加载更多食物</button>
-      <form v-if="draft.selected.length" class="catalog-selection" aria-label="已选食物" @submit.prevent="save">
+      <form v-if="draft.selected.length" :id="selectionId" class="catalog-selection" aria-label="已选食物" @submit.prevent="save">
         <strong>已选 {{ draft.selected.length }} 项</strong>
         <div v-for="(item, index) in draft.selected" :key="item.food.id" class="catalog-selection-row">
-          <label>{{ item.food.label }}份量（{{ item.food.basisUnit ?? '单位未知' }}）<input v-model="item.amount" type="number" min="0.001" max="100000" step="0.001" required :disabled="saving" /></label>
-          <span>{{ scaledEnergy(item.food, item.amount) }}</span><button class="text-action" type="button" :disabled="saving" :aria-label="`取消选择：${item.food.label}`" @click="draft.selected.splice(index, 1)">移除</button>
+          <div class="selection-food-name"><strong>{{ item.food.label }}</strong><small>{{ scaledEnergy(item.food, item.amount) }}</small></div>
+          <label class="portion-inline"><span class="sr-only">{{ item.food.label }}份量（{{ item.food.basisUnit ?? '单位未知' }}）</span><input v-model="item.amount" type="number" min="0.001" max="100000" step="0.001" required :disabled="saving" /><span aria-hidden="true">{{ item.food.basisUnit ?? '单位未知' }}</span></label>
+          <button class="text-action" type="button" :disabled="saving" :aria-label="`取消选择：${item.food.label}`" @click="draft.selected.splice(index, 1)"><AppIcon name="trash" /></button>
         </div>
         <p v-if="!replacement && meal && draft.mealRevision !== null && draft.mealRevision !== meal.revision" class="field-help">这顿饭有其他更新，所选食物仍保留。<button class="text-action" type="button" @click="draft.mealRevision = meal!.revision">按当前餐食重试</button></p>
-        <button class="primary-button" type="submit" :disabled="saving || disabled || (!!replacement && replacementConflict)">{{ saving ? '保存中…' : replacement ? '替换这一项' : `加入这顿饭（${draft.selected.length}项）` }}</button>
       </form>
       <details class="catalog-personal"><summary>找不到？补充个人食物</summary>
         <form @submit.prevent="createPersonal">
@@ -182,6 +186,11 @@ onBeforeUnmount(() => { generation++; });
           <button class="action-button" type="submit" :disabled="saving || disabled">{{ draft.personalPending ? '重试上次保存' : '保存个人食物并选择' }}</button>
         </form>
       </details>
+      <details><summary>食物来源与搜索说明</summary><p class="field-help">常用食物优先显示，插图仅表示类别。不输入可浏览全部已接入食物。搜索至少两个字时也会查询 Open Food Facts，发送搜索词但不发送账号信息。食物包含台湾食药署样品与 USDA 参考，请核对生熟、含糖和加工状态。</p></details>
+      <div v-if="draft.selected.length" class="selection-save-bar">
+        <a :href="`#${selectionId}`">已选 {{ draft.selected.length }} 项 · 改份量</a>
+        <button class="primary-button" type="submit" :form="selectionId" :disabled="saving || disabled || (!!replacement && replacementConflict)">{{ saving ? '保存中…' : replacement ? '替换这一项' : `加入这顿饭（${draft.selected.length}项）` }}</button>
+      </div>
     </div>
   </section>
 </template>
@@ -194,14 +203,20 @@ onBeforeUnmount(() => { generation++; });
 label { display: grid; gap: .3rem; }
 input, select { width: 100%; min-width: 0; min-height: 44px; }
 .catalog-results { margin: 0; padding: 0; list-style: none; }
-.catalog-results > li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; padding-block: .8rem; border-bottom: 1px solid currentColor; border-color: color-mix(in srgb, currentColor 15%, transparent); }
+.food-picker .catalog-results > li { display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; gap: var(--space-xs); padding-block: var(--space-sm); border-bottom: 1px solid var(--color-rule); }
+.food-picker .catalog-results .food-art { width:44px; height:44px; }
+.catalog-item-actions { display:grid; align-content:start; }
+.catalog-item-actions button { min-width:44px; padding-inline:var(--space-xs); }
+.catalog-search--compact { display:grid; grid-template-columns:minmax(0,1fr) auto; }
 .catalog-results > li > div:first-child { flex: 1 1 14rem; min-width: 0; }
 .catalog-results strong, small { display: block; overflow-wrap: anywhere; }
 small, details p, .field-help { font-size: .85rem; line-height: 1.5; }
 summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .catalog-selection { display: grid; gap: .75rem; padding-block: .75rem; }
-.catalog-selection-row { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
-.catalog-selection-row label { flex: 1 1 13rem; min-width: 0; }
-.catalog-selection-row span { padding-bottom: .5rem; }
+.catalog-selection-row { display:grid; grid-template-columns:minmax(0,1fr) auto 44px; align-items:center; gap:var(--space-xs); }
+.catalog-selection-row label { display:flex; gap:var(--space-2xs); align-items:center; min-width:0; }
+.catalog-selection-row input { width:4.5rem; padding-inline:var(--space-xs); }
+.selection-food-name { min-width:0; }
+.catalog-selection { padding-inline:var(--space-xs); scroll-margin-block:var(--space-lg); }
 fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: .75rem; min-width: 0; }
 </style>

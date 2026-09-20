@@ -3,7 +3,7 @@ import { submissionId } from "../../support/submission-id";
 
 export type Measurement = "sets" | "activity" | "count" | "unknown" | "mixed";
 export interface SetDraft { reps: string; weightKg: string; durationSeconds: string; distanceMeters: string; note: string }
-export interface ActionDraft { id: string; name: string; note: string; measurement: Measurement; count: string; expanded: boolean; sets: SetDraft[]; planLink?: import("../../api/training").TrainingPlanLink | null }
+export interface ActionDraft { id: string; name: string; note: string; measurement: Measurement; count: string; expanded: boolean; sets: SetDraft[]; included?: boolean; planLink?: import("../../api/training").TrainingPlanLink | null }
 export interface RecordDraft { id: string; revision: number; localDate: string; timeZone: string; time: string; note: string; items: ActionDraft[] }
 export const blankSet = (): SetDraft => ({ reps: "", weightKg: "", durationSeconds: "", distanceMeters: "", note: "" });
 export const blankAction = (name = ""): ActionDraft => ({ id: submissionId(), name, note: "", measurement: "sets", count: "", expanded: false, sets: [blankSet()] });
@@ -29,6 +29,7 @@ export function recordFromActual(session: TrainingSession): RecordDraft {
 }
 export function actionFromPlan(item: TrainingTemplateItem): ActionDraft {
   const action = blankAction(item.exerciseName);
+  action.included = false;
   const unit = "progressUnit" in item ? item.progressUnit : undefined;
   action.measurement = unit === "sets" ? "sets" : unit === "seconds" || unit === "meters" ? "activity"
     : item.targetSets !== null ? "sets" : item.targetDurationSeconds !== null || item.targetDistanceMeters !== null ? "activity" : "sets";
@@ -56,9 +57,10 @@ function integer(value: string, label: string): number | null {
 }
 function decimal(value: string): string | null { return value.trim() || null; }
 export function recordPayload(draft: RecordDraft): TrainingRecordInput {
-  if (!draft.items.length) throw new Error("请至少添加一个实际做过的动作。");
+  const included = draft.items.filter(item => item.included !== false);
+  if (!included.length) throw new Error("请至少选择一个实际做过的动作。");
   return { revision: draft.revision, localDate: draft.localDate, timeZone: draft.timeZone, recordedTime: draft.time || null,
-    note: draft.note.trim() || null, items: draft.items.map(item => {
+    note: draft.note.trim() || null, items: included.map(item => {
       if (!item.name.trim()) throw new Error("请为每个动作填写名称；输入已保留。");
       let sets: SetDraft[] = [];
       if (item.measurement !== "unknown") {

@@ -527,7 +527,7 @@ onBeforeUnmount(stopPolling);
 
 <template>
   <AppShell page-class="nutrition-page" rail-note="记录吃了什么，查看已记录的营养。">
-    <header class="view-header">
+    <header v-show="!creatingMeal" class="view-header">
       <div><h1>饮食</h1><p>记录吃了什么，查看当天营养。</p></div>
       <nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作">
         <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
@@ -560,12 +560,17 @@ onBeforeUnmount(stopPolling);
         <button class="text-action" type="button" :disabled="saving" @click="openMealComposer('food')"><AppIcon name="plus" />手动添加食物</button>
       </div>
       <section v-if="creatingMeal" tabindex="-1" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
-        <div class="panel-heading"><div><h2 id="quick-meal-title">快速记餐</h2><p>{{ composerIntent === 'photo' ? '选张照片，时间和名称可以修改。' : '确认用餐时间，再从食物列表选择。' }}</p></div><button class="text-action" type="button" :disabled="saving" @click="closeMealComposer">收起</button></div>
+        <div class="panel-heading"><h2 id="quick-meal-title">快速记餐</h2><button class="text-action" type="button" :disabled="saving" @click="closeMealComposer">收起</button></div>
         <form class="inline-form meal-create-form" @submit.prevent="createMeal">
           <fieldset :disabled="saving || preparingImage || uploadingMealId !== null || (composerIntent === 'food' && !!pendingManualMeal)">
-            <label>餐次名称（可选）<input ref="mealNameInput" v-model="mealForm.name" placeholder="例如：午饭" /></label>
-            <label>用餐时间<input v-model="mealForm.time" type="time" required /></label>
-            <label>备注（可选）<input v-model="mealForm.note" placeholder="例如：豆浆只喝了一半" /></label>
+            <details class="compact-metadata">
+              <summary><AppIcon name="calendar" />{{ selectedDate }} · {{ mealForm.time }}<span>{{ mealForm.name || '修改信息' }}</span></summary>
+              <div class="compact-metadata-fields">
+                <label>用餐时间<input v-model="mealForm.time" type="time" required /></label>
+                <label>餐次名称（可选）<input ref="mealNameInput" v-model="mealForm.name" maxlength="100" placeholder="例如：午饭" /></label>
+                <label>备注（可选）<input v-model="mealForm.note" maxlength="1000" placeholder="例如：公司食堂" /></label>
+              </div>
+            </details>
             <MealPhotoPicker v-if="composerIntent === 'photo'" :file="quickMealImage?.file" :disabled="saving" @change="selectQuickMealImage" />
             <small v-if="quickMealImage"><template v-if="quickMealImage.compressed">已压缩 {{ formatFileSize(quickMealImage.originalBytes) }} → {{ formatFileSize(quickMealImage.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(quickMealImage.uploadBytes) }}</template></small>
             <button v-if="quickMealImage" class="text-action" type="button" @click="quickMealImage = undefined">移除待上传照片</button>
@@ -573,7 +578,6 @@ onBeforeUnmount(stopPolling);
           </fieldset>
         </form>
         <template v-if="composerIntent === 'food'">
-          <p class="field-help">先选择吃过的食物，确认份量后一起保存。</p>
           <p v-if="pendingManualMeal" class="field-help">餐食已建立，当前只重试保存食物。名称和时间可在保存后修改。</p>
           <div v-if="manualCreationUnknown" class="form-error" role="alert">
             <p>建立结果待确认，不会自动重复建立。</p>

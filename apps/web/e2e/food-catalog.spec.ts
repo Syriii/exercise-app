@@ -46,7 +46,7 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   await picker.getByRole("button", { name: "加载更多食物" }).click();
   await expect(list.getByRole("listitem")).toHaveCount(24);
   await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
-  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("group", { name: "食物分类", exact: true }).getByRole("button", { name: "肉鱼蛋", exact: true }).click();
   await picker.getByRole("button", { name: "设为常用：鸡蛋（水煮全蛋）", exact: true }).click();
   await expect(list.getByRole("listitem").first()).toContainText("鸡蛋（水煮全蛋）");
   await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
@@ -68,7 +68,7 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
     await page.setViewportSize(original);
   }
   await picker.getByLabel("搜索食物", { exact: true }).fill("西兰花（水煮、沥干、无盐）");
-  await picker.getByLabel("食物分类", { exact: true }).selectOption("vegetables");
+  await picker.getByRole("group", { name: "食物分类", exact: true }).getByRole("button", { name: "蔬菜", exact: true }).click();
   await picker.getByRole("button", { name: "选择：西兰花（水煮、沥干、无盐）", exact: true }).click();
   await picker.getByLabel("西兰花（水煮、沥干、无盐）份量（g）").fill("50");
   await picker.getByLabel("搜索食物", { exact: true }).fill("不存在的个人菜名");
@@ -97,7 +97,7 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
 
   await picker.getByRole("button", { name: "添加食物", exact: true }).click();
   await picker.getByLabel("搜索食物", { exact: true }).fill("");
-  await picker.getByLabel("食物分类", { exact: true }).selectOption("all");
+  await picker.getByRole("group", { name: "食物分类", exact: true }).getByRole("button", { name: "全部", exact: true }).click();
   await expect(list.getByRole("listitem").first()).toContainText("鸡蛋（水煮全蛋）");
   await picker.getByRole("button", { name: "取消常用：鸡蛋（水煮全蛋）", exact: true }).click();
   await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");

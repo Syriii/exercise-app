@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 import { addPersonalFood, createMeal } from "./helpers/nutrition";
@@ -39,6 +40,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await page.goto("/nutrition");
   await enableAutomaticPhotos(page);
   await page.getByRole("button", { name: "拍照记一餐" }).click();
+  await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill("食堂午饭");
   await page.getByLabel("从相册选择餐食照片").setInputFiles({
     name: "canteen.png",
@@ -75,9 +77,11 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(page.getByText("已记录 500 kcal")).toBeVisible();
   await expect(rice.getByText(/120 kcal/)).toBeVisible();
   await expect(chicken.getByText(/380 kcal/)).toBeVisible();
+  await reveal(rice.getByRole("button", { includeHidden: true, name: "设为常用" }));
   await rice.getByRole("button", { name: "设为常用" }).click();
   await expect(page.getByText("已设为常用，下次可以单独添加这项食物")).toBeVisible();
   await page.getByRole("button", { name: "拍照记一餐" }).click();
+  await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill("复用晚饭");
   await page.getByRole("button", { name: "建立餐次", exact: true }).click();
   const dinner = page.locator("article.meal-card").filter({ hasText: "复用晚饭" });
@@ -91,6 +95,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(rice.getByText(/120 kcal/)).toBeVisible();
   await expect(page.getByText("已记录 560 kcal")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
+  await reveal(chicken.getByRole("button", { includeHidden: true, name: "移除" }));
   await chicken.getByRole("button", { name: "移除" }).click();
   await expect(items).toHaveCount(1);
   await expect(page.getByText("已记录 180 kcal")).toBeVisible();
@@ -143,6 +148,7 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
   await page.goto("/nutrition");
   await enableAutomaticPhotos(page);
   await page.getByRole("button", { name: "拍照记一餐" }).click();
+  await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill("上传重试餐");
   await page.getByLabel("从相册选择餐食照片").setInputFiles({
     name: "retry.png",

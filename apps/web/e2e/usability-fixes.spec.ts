@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -28,6 +29,7 @@ test('completion saves all draft actions; a lost response can be retried without
   await items.nth(0).getByLabel('每组次数').fill('10');
   await items.nth(1).getByLabel('组数',{exact:true}).fill('2');
   await items.nth(1).getByLabel('每组次数').fill('12');
+  await reveal(items.nth(2).getByLabel('记录方式'));
   await items.nth(2).getByLabel('记录方式').selectOption('unknown');
   await navigate(page,'历史');
   await navigate(page,'训练');
@@ -62,6 +64,7 @@ test('food draft survives tab navigation; account actions are discoverable and l
   expect(profile.ok()).toBeTruthy();
   await navigate(page,'饮食');
   await page.getByRole('button',{name:'拍照记一餐',exact:true}).click();
+  await reveal(page.getByLabel('餐次名称（可选）'));
   await page.getByLabel('餐次名称（可选）').fill('待保存早餐');
   await navigate(page,'历史');
   await navigate(page,'饮食');

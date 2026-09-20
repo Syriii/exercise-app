@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -17,6 +18,7 @@ async function photoMeal(page: Page, suffix: string) {
   await expect(page.getByText("已保存，仅影响后续上传的照片。")).toBeVisible();
   await page.goto("/nutrition");
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
+  await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill("替换早餐");
   await page.getByLabel("从相册选择餐食照片").setInputFiles({ name: "fixed.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]) });
   await page.getByRole("button", { name: "建立餐次并上传" }).click();
@@ -30,11 +32,12 @@ async function photoMeal(page: Page, suffix: string) {
 test("single photo food replacement reuses catalog, keeps drafts and reconciles a lost response", async ({ page }, testInfo) => {
   const { meal, data } = await photoMeal(page, testInfo.project.name[0]!);
   const chicken = meal.locator(".meal-items > li").filter({ hasText: "鸡腿" });
+  await reveal(chicken.getByRole("button", { includeHidden: true, name: "换食物", exact: true }));
   await chicken.getByRole("button", { name: "换食物", exact: true }).click();
   const picker = meal.getByRole("region", { name: "替换单项食物" });
   await expect(picker.getByRole("list", { name: "食物列表" }).getByRole("listitem")).toHaveCount(12);
   await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
-  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("group", { name: "食物分类", exact: true }).getByRole("button", { name: "肉鱼蛋", exact: true }).click();
   await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
   // New basis is grams, not the old photo's one piece.
   const amount = picker.getByLabel("鸡蛋（水煮全蛋）份量（g）");
@@ -78,6 +81,7 @@ test("single photo food replacement reuses catalog, keeps drafts and reconciles 
 test("stale replacement refreshes the server, requires renewed confirmation and cannot restore a removed item", async ({ page }, testInfo) => {
   const { meal, data } = await photoMeal(page, `conflict_${testInfo.project.name[0]}`);
   const rice = data.contributions.find((value: { label: string }) => value.label === "米饭");
+  await reveal(meal.locator(".meal-items > li").filter({ hasText: "米饭" }).getByRole("button", { includeHidden: true, name: "换食物", exact: true }));
   await meal.locator(".meal-items > li").filter({ hasText: "米饭" }).getByRole("button", { name: "换食物", exact: true }).click();
   const picker = meal.getByRole("region", { name: "替换单项食物" });
   await picker.getByText("找不到？补充个人食物", { exact: true }).click();
@@ -91,7 +95,7 @@ test("stale replacement refreshes the server, requires renewed confirmation and 
   await picker.getByRole("button", { name: "替换这一项", exact: true }).click();
   await expect(picker.getByRole("button", { name: "替换这一项", exact: true })).toBeDisabled();
   // Browsing again must not hide the only recovery action after a conflict.
-  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("group", { name: "食物分类", exact: true }).getByRole("button", { name: "肉鱼蛋", exact: true }).click();
   await expect(picker.getByLabel("未知配菜份量（碗）")).toHaveValue("2");
   await picker.getByRole("button", { name: "重新查看餐食", exact: true }).click();
   await expect(picker.getByText("当前：米饭 · 150 g")).toBeVisible();
@@ -101,9 +105,10 @@ test("stale replacement refreshes the server, requires renewed confirmation and 
   await expect(unknown).toContainText("2 碗");
   await expect(unknown).toContainText("蛋白质 未知");
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
+  await reveal(unknown.getByRole("button", { includeHidden: true, name: "换食物", exact: true }));
   await unknown.getByRole("button", { name: "换食物", exact: true }).click();
   await picker.getByLabel("搜索食物", { exact: true }).fill("鸡蛋（水煮全蛋）");
-  await picker.getByLabel("食物分类", { exact: true }).selectOption("meat_eggs");
+  await picker.getByRole("group", { name: "食物分类", exact: true }).getByRole("button", { name: "肉鱼蛋", exact: true }).click();
   await picker.getByRole("button", { name: "搜索", exact: true }).click();
   await picker.getByRole("button", { name: "选择：鸡蛋（水煮全蛋）", exact: true }).click();
   const changed = await (await page.request.get(`/api/v1/nutrition/meals?from=${data.localDate}&to=${data.localDate}`)).json();

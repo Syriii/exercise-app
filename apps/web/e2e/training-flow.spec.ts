@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test, type Page } from "@playwright/test";
 async function register(page: Page, suffix: string) {
@@ -33,9 +34,11 @@ test("a person records multiple actual actions without creating a live workout",
   await actions.nth(0).getByLabel("重量 kg（可选）").fill("40");
   await actions.nth(0).getByRole("button", { name: "各组不同，展开调整" }).click();
   await actions.nth(0).getByLabel("次数", { exact: true }).nth(2).fill("8");
+  await reveal(actions.nth(1).getByLabel("记录方式"));
   await actions.nth(1).getByLabel("记录方式").selectOption("activity");
   await actions.nth(1).getByLabel("时长（秒）").fill("1800");
   await actions.nth(1).getByLabel("距离（米）").fill("3000");
+  await reveal(actions.nth(2).getByLabel("记录方式"));
   await actions.nth(2).getByLabel("记录方式").selectOption("unknown");
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
   await page.locator('.app-main').evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
@@ -58,14 +61,19 @@ test("a reusable plan is copied into a draft and can be changed without modifyin
   await card.getByRole("button", { name: "动作预览" }).click();
   await expect(card.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
   await page.getByRole("button", { name: "参考这份记录" }).click();
+  await expect(page.getByRole('checkbox', { name: '记录已做：深蹲' })).not.toBeChecked();
+  await page.getByRole('checkbox', { name: '记录已做：深蹲' }).check();
   await expect(page.getByLabel("组数", { exact: true })).toHaveValue("3");
+  await page.getByText('动作选项', { exact: true }).click();
   await page.getByRole('region', { name: '动作填写' }).getByRole('button', { name: '动作预览' }).click();
   await expect(page.getByRole('region', { name: '深蹲动作预览' })).toContainText('内容草案');
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
   await page.getByLabel("每组次数").fill("8");
+  await page.getByText('一次添加多个动作', { exact: true }).click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
   const extra = page.getByRole("region", { name: "动作填写" }).last();
   await extra.getByLabel("动作名称", { exact: true }).fill("平板支撑");
+  await reveal(extra.getByLabel("记录方式"));
   await extra.getByLabel("记录方式").selectOption("activity");
   await extra.getByLabel("时长（秒）").fill("60");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
@@ -94,7 +102,7 @@ test("a person copies a plan into a cycle and references its day without marking
   await page.getByLabel("从训练计划复制（可选）").selectOption({ label: "胸部 A" });
   await page.getByRole("button", { name: "保存训练日", exact: true }).click();
   await page.getByRole("button", { name: "参考这天记录", exact: true }).click();
-  await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
+  await page.getByRole('checkbox', { name: '记录已做：深蹲' }).check();
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
 });
@@ -107,14 +115,17 @@ test("a scheduled plan opens the same editor and history edits and deletes the w
   await page.goto("/today");
   await page.getByRole("region", { name: "今天的训练" }).getByRole("button", { name: "查看／修改今天计划 →", exact: true }).click();
   await page.getByRole("button", { name: "从当天计划记录", exact: true }).click();
-  await expect(page.getByLabel("动作名称", { exact: true })).toHaveValue("深蹲");
+  await page.getByRole('checkbox', { name: '记录已做：深蹲' }).check();
+  await reveal(page.getByLabel("大致时间（可选）"));
   await page.getByLabel("大致时间（可选）").fill("18:30");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
   await page.goto("/history");
   await expect(page.getByText("训练 · 18:30", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "查看／修改训练" }).click();
+  await reveal(page.getByLabel("训练日期"));
   await page.getByLabel("训练日期").fill("2026-09-01");
+  await reveal(page.getByLabel("本次备注（可选）"));
   await page.getByLabel("本次备注（可选）").fill("更正日期");
   await page.getByLabel("每组次数").fill("12");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
@@ -136,7 +147,7 @@ test("old unfinished records import only confirmed actual actions and keep corre
   await page.goto('/history');
   await page.getByRole('button', { name: '查看／修改训练' }).click();
   await expect(page.getByRole('region', { name: '动作填写' })).toHaveCount(1);
-  await expect(page.getByLabel('动作名称', { exact: true })).toHaveValue('徒手深蹲');
+  await expect(page.getByRole('button', { name: '徒手深蹲 改名' })).toBeVisible();
   await expect(page.getByLabel('组数', { exact: true })).toHaveValue('1');
   await page.getByLabel('每组次数').fill('9');
   await page.getByRole('button', { name: '保存训练记录', exact: true }).click();
@@ -151,12 +162,15 @@ test("old unfinished records import only confirmed actual actions and keep corre
 test("concurrent edits require review and a deleted record is not resurrected", async ({ page }) => {
   await page.goto("/training");
   await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
+  await page.getByText('一次添加多个动作', { exact: true }).click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
   await page.getByLabel("动作名称", { exact: true }).fill("拉伸");
+  await reveal(page.getByLabel("记录方式"));
   await page.getByLabel("记录方式").selectOption("unknown");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "修改整条记录" }).click();
+  await reveal(page.getByLabel("本次备注（可选）"));
   await page.getByLabel("本次备注（可选）").fill("本机输入");
   const saved = (await (await page.request.get("/api/v1/training/sessions")).json())[0];
   const url = "/api/v1/training/records/" + saved.id;

@@ -36,16 +36,17 @@ async function savePortion() {
       <span>{{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }}<template v-if="item.source === 'model_adopted' || item.basisDescription?.startsWith('照片估算')"> · 照片估算</template></span>
       <small>{{ nutrient(item.energyKcal, 'kcal') }} · 蛋白质 {{ nutrient(item.proteinGrams, 'g') }} · 碳水 {{ nutrient(item.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrient(item.fatGrams, 'g') }}</small>
     </div>
-    <span class="row-actions">
+    <div class="row-actions">
       <button v-if="item.mode === 'item' && item.portionAmount !== null && item.portionUnit" class="text-action" type="button" :disabled="disabled || saving" @click="startPortion">改份量</button>
-      <button class="text-action" type="button" :disabled="disabled || saving" @click="emit('edit')">修正</button>
-      <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('replace')">换食物</button>
-      <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('favorite')">设为常用</button>
-      <button class="text-action danger-text" type="button" :disabled="disabled || saving" @click="emit('remove')"><AppIcon name="trash" />移除</button>
-    </span>
+      <details class="food-more"><summary>更多</summary><div class="row-actions">
+        <button class="text-action" type="button" :disabled="disabled || saving" @click="emit('edit')">修正</button>
+        <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('replace')">换食物</button>
+        <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('favorite')">设为常用</button>
+        <button class="text-action danger-text" type="button" :disabled="disabled || saving" @click="emit('remove')"><AppIcon name="trash" />移除</button>
+      </div></details>
+    </div>
     <form v-if="draft" class="portion-editor" @submit.prevent="savePortion">
-      <label>{{ item.label }}份量（{{ draft.item.portionUnit }}）<input v-model="draft.amount" type="number" min="0" max="100000" step="any" required :disabled="saving" /></label>
-      <p>营养将按份量同比调整，未知的营养仍保持未知。</p>
+      <label class="portion-inline"><span class="sr-only">{{ item.label }}份量（{{ draft.item.portionUnit }}）</span><input v-model="draft.amount" type="number" min="0" max="100000" step="any" required :disabled="saving" /><span aria-hidden="true">{{ draft.item.portionUnit }}</span></label>
       <button class="action-button" type="submit" :disabled="saving || disabled">{{ saving ? '保存中…' : '保存份量' }}</button>
       <button class="text-action" type="button" :disabled="saving" @click="draft = null">取消</button>
       <p v-if="error" role="alert">{{ error }}<template v-if="meal.revision !== draft.meal.revision"> 这顿饭已有其他修改，请取消后重新打开份量编辑。</template></p>

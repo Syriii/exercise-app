@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { expect, test } from "@playwright/test";
 
 test("a person can create an evidence-backed daily nutrition reference", async ({ page }, testInfo) => {
@@ -44,6 +45,7 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await expect(page.getByText("这是群体方程形成的饮食规划参考，不是个人代谢测量。")).toBeVisible();
 
   await page.goto("/settings/measurement");
+  await reveal(page.getByRole("button", { includeHidden: true, name: "修正" }));
   await page.getByRole("button", { name: "修正" }).click();
   await page.getByLabel("体重（kg）").fill("64");
   await page.getByRole("button", { name: "保存修正" }).click();
