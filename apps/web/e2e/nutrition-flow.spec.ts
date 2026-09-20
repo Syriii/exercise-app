@@ -36,7 +36,7 @@ test("an empty history page shows one useful state instead of an empty trend rep
   await expect(page).toHaveURL(/\/today$/);
 
   await page.goto("/history");
-  await expect(page.getByText("这段时间没有符合筛选的记录。未记录不代表没有运动或进食。")).toBeVisible();
+  await expect(page.getByText("这段时间没有符合筛选的记录。")).toBeVisible();
   await expect(page.getByRole("region", { name: "90 天概览" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "回到今天" })).toBeVisible();
 });
@@ -79,6 +79,7 @@ test("a body measurement is a first-class history record", async ({ page }, test
   await page.goto("/settings/measurement");
   const measurements = page.getByRole("region", { name: "身体测量" });
   await measurements.getByLabel("体重（kg）").fill("63");
+  await reveal(measurements.getByLabel("腰围（cm，可选）"));
   await measurements.getByLabel("腰围（cm，可选）").fill("72");
   await measurements.getByRole("button", { name: "记录这次测量" }).click();
 
@@ -186,7 +187,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await reveal(meal.locator(".meal-items > li").getByRole("button", { includeHidden: true, name: "设为常用" }));
   await meal.locator(".meal-items > li").getByRole("button", { name: "设为常用" }).click();
 
-  await expect(page.getByText("已记录 232 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("232 kcal")).toBeVisible();
   await expect(page.getByText("部分食物有未知营养，合计仅包含已知数值。")).toBeVisible();
   await expect(meal.locator(".meal-items").getByText(/脂肪 未知/)).toBeVisible();
 
@@ -194,7 +195,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await meal.getByRole("button", { name: "修正" }).click();
   await meal.getByLabel("能量 kcal").fill("250");
   await meal.getByRole("button", { name: "保存修正" }).click();
-  await expect(page.getByText("已记录 250 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("250 kcal")).toBeVisible();
   await expect(page.getByText("食物已修正，当天营养已更新")).toBeVisible();
 
   const foodSearch = meal.getByRole("region", { name: "添加食物", exact: true });
@@ -217,7 +218,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   if (testInfo.project.name === "mobile-chromium" && process.env.UX_POINTER_MOUSE !== 'true') await adjustButton.tap();
   else await adjustButton.click();
   await expect(foodSearch.getByRole("form", { name: "已选食物" }).getByText("232 kcal", { exact: true })).toBeVisible();
-  await expect(page.getByText("已记录 250 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("250 kcal")).toBeVisible();
 
   await page.goto("/history");
   await page.locator(".history-filters").getByRole("button", { name: "饮食", exact: true }).click();

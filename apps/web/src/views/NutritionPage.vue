@@ -539,11 +539,11 @@ onBeforeUnmount(stopPolling);
     <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
     <div v-else class="view-stack">
       <section v-show="!creatingMeal" class="recommendation-panel nutrition-overview" aria-labelledby="nutrition-overview-title">
-        <div class="panel-heading"><h2 id="nutrition-overview-title">当天营养</h2></div>
-        <div class="hero-energy"><dl><dt>能量</dt><dd>已记录 {{ nutrientText(recordedValue('energyKcal'), 'kcal') }}</dd><span class="field-help">每日参考 {{ targetValue('energyKcal') === null ? '暂不可用' : nutrientText(targetValue('energyKcal'), 'kcal') }}</span></dl><FoodArt kind="rice" /></div>
+        <div class="panel-heading"><h2 id="nutrition-overview-title"><AppIcon name="food" />当天营养</h2><span class="field-help">已记录</span></div>
+        <div class="hero-energy"><dl><dt>能量</dt><dd>{{ nutrientText(recordedValue('energyKcal'), 'kcal') }}</dd><span class="field-help">每日参考 {{ targetValue('energyKcal') === null ? '暂不可用' : nutrientText(targetValue('energyKcal'), 'kcal') }}</span></dl><FoodArt kind="rice" /></div>
         <dl class="macro-grid">
           <div v-for="metric in nutrients.slice(1)" :key="metric.key">
-            <dt>{{ metric.label }}</dt><dd>已记录 {{ nutrientText(recordedValue(metric.key), metric.unit) }}</dd>
+            <dt>{{ metric.label }}</dt><dd>{{ nutrientText(recordedValue(metric.key), metric.unit) }}</dd>
           </div>
         </dl>
         <p class="field-help" v-if="summary?.mealCount === 0">尚未记录餐食。</p>
@@ -588,7 +588,7 @@ onBeforeUnmount(stopPolling);
         </template>
       </section>
       <section v-show="!creatingMeal" class="work-panel meal-log" aria-labelledby="meal-log-title">
-        <div class="panel-heading"><div><h2 id="meal-log-title">这一天吃了什么</h2><p>{{ meals.length === 0 ? '还没有餐食记录。' : `共 ${meals.length} 顿，打开餐食可以修改或补充。` }}</p></div></div>
+        <div class="panel-heading"><h2 id="meal-log-title">这一天吃了什么</h2><span class="status-chip">{{ meals.length }} 餐</span></div><p v-if="!meals.length" class="field-help">还没有餐食记录。</p>
         <article v-for="meal in meals" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card">
           <header><div><MealThumbnail :analysis-id="(analysesByMeal[meal.id] ?? []).find(item => item.imageAvailable)?.id" /><div><strong>{{ meal.name ?? '餐食' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div></div><button class="text-action" type="button" :aria-expanded="!!openMeals[meal.id]" @click="openMeals[meal.id] = !openMeals[meal.id]">{{ openMeals[meal.id] ? '收起餐食' : '打开餐食' }}</button><button class="text-action danger-text" type="button" :disabled="saving" @click="deleteMeal(meal)"><AppIcon name="trash" />删除整顿</button></header>
           <p class="meal-summary">{{ meal.contributions.map(item => item.label).join('、') || '还未添加食物' }}</p>

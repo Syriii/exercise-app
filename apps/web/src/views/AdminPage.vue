@@ -142,11 +142,11 @@ onMounted(load);
 
 <template>
   <main class="admin-page">
-    <header class="admin-heading"><div><p class="date-line">仅管理员可见</p><h1>账号管理</h1><p>管理注册、账号状态和基础服务运行情况。</p></div><button class="text-action" type="button" @click="router.push('/settings')">返回设置 →</button></header>
+    <header class="admin-heading"><div><p class="date-line">仅管理员可见</p><h1>账号管理</h1></div><button class="text-action" type="button" @click="router.push('/settings')">返回设置 →</button></header>
     <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
     <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
     <section class="admin-accounts operations-health" aria-labelledby="operations-title">
-      <div class="panel-heading"><div><h2 id="operations-title">运行状态</h2><p>显示服务探测结果，任务状态见下方统计。</p></div><button class="text-action" type="button" :disabled="loading" @click="load">刷新</button></div>
+      <div class="panel-heading"><h2 id="operations-title">运行状态</h2><button class="text-action" type="button" :disabled="loading" @click="load">刷新</button></div>
       <p v-if="loading">正在检查…</p>
       <div v-else-if="operationsHealth" class="health-grid">
         <article v-for="component in ([['API', operationsHealth.api], ['PostgreSQL', operationsHealth.database], ['后台任务', operationsHealth.worker]] as const)" :key="component[0]" class="health-item">
@@ -154,14 +154,14 @@ onMounted(load);
           <span class="status-chip" :data-status="component[1].status">{{ statusLabels[component[1].status] }}</span>
         </article>
       </div>
-      <div v-if="operationsSummary" class="operations-summary-grid">
+      <details v-if="operationsSummary"><summary>任务、媒体与备份</summary><div class="operations-summary-grid">
         <article class="health-item"><div><strong>视觉模型</strong><p>{{ operationsSummary.model.configured ? operationsSummary.model.model : '未配置，手工记餐仍可用' }}</p></div><span class="status-chip">{{ operationsSummary.model.configured ? '已配置' : '未配置' }}</span></article>
         <article class="health-item"><div><strong>后台任务</strong><p>等待 {{ operationsSummary.tasks.pending }} · 执行中 {{ operationsSummary.tasks.running }} · 失败 {{ operationsSummary.tasks.failed }}</p></div><span class="status-chip" :data-tone="operationsSummary.tasks.failed > 0 ? 'danger' : undefined">{{ operationsSummary.tasks.failed > 0 ? '需检查' : '无失败' }}</span></article>
         <article class="health-item"><div><strong>临时媒体</strong><p>可用 {{ operationsSummary.media.available }} · 待删除 {{ operationsSummary.media.deletion_pending }} · 缺失 {{ operationsSummary.media.missing }}</p></div><span class="status-chip" :data-tone="operationsSummary.media.expiredAvailable > 0 ? 'danger' : undefined">过期未删 {{ operationsSummary.media.expiredAvailable }}</span></article>
         <article class="health-item"><div><strong>临时媒体磁盘</strong><p>{{ formatBytes(operationsSummary.disk.availableBytes) }}</p></div><span class="status-chip">主机实际值</span></article>
         <article class="health-item"><div><strong>最近备份</strong><p>成功：{{ formatEvent(operationsSummary.backup.lastSucceededAt) }}<br />失败：{{ formatEvent(operationsSummary.backup.lastFailedAt) }}</p></div><span class="status-chip">不含临时原图</span></article>
         <article class="health-item"><div><strong>恢复验证</strong><p>成功：{{ formatEvent(operationsSummary.restoreVerification.lastSucceededAt) }}<br />失败：{{ formatEvent(operationsSummary.restoreVerification.lastFailedAt) }}</p></div><span class="status-chip">还需异机演练</span></article>
-      </div>
+      </div></details>
     </section>
     <section class="settings-list" aria-labelledby="registration-title">
       <article><div><strong id="registration-title">开放注册</strong><p>关闭后，已有账号仍可正常登录。</p></div><label class="switch-row"><input :checked="registrationOpen" type="checkbox" @change="setRegistration(($event.target as HTMLInputElement).checked)" /><span>{{ registrationOpen ? "已开启" : "已关闭" }}</span></label></article>
@@ -171,11 +171,11 @@ onMounted(load);
       <p v-if="loading">正在读取…</p>
       <article v-for="account in accounts" v-else :key="account.id" class="account-row">
         <div><strong>{{ account.username }}</strong><p>{{ account.role === "admin" ? "管理员" : "普通用户" }} · {{ account.status === "active" ? "正常" : "已停用" }}</p></div>
-        <div v-if="account.id !== session.account?.id" class="account-actions">
+        <details v-if="account.id !== session.account?.id"><summary>管理账号</summary><div class="account-actions">
           <button class="text-action" type="button" @click="revokeSessions(account)">退出所有设备</button>
           <button class="text-action" type="button" @click="beginPasswordReset(account)">设置临时密码</button>
           <button class="text-action" type="button" @click="toggleAccount(account)">{{ account.status === "active" ? "停用" : "恢复" }}</button>
-        </div>
+        </div></details>
         <span v-else class="status-chip">当前账号</span>
         <form v-if="passwordResetTargetId === account.id" class="admin-password-reset" @submit.prevent="resetPassword(account)">
           <label><span>一次性临时密码</span><input v-model="temporaryPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" :aria-label="`为 ${account.username} 设置临时密码`" required /><small>请通过安全渠道交给对方；提交后页面不会保存或再次显示。</small></label>

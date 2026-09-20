@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { readFile } from "node:fs/promises";
 
@@ -97,7 +98,9 @@ test("account deletion requires explicit confirmation and immediately ends the s
   await page.goto("/settings/data");
 
   const dataSection = page.getByRole("region", { name: "我的数据" });
+  await reveal(dataSection.getByLabel("输入当前用户名"));
   await dataSection.getByLabel("输入当前用户名").fill(username);
+  await reveal(dataSection.getByLabel("当前密码"));
   await dataSection.getByLabel("当前密码").fill(password);
   await dataSection.getByRole("checkbox", { name: /我理解这是整个账号的永久删除/ }).check();
   await dataSection.getByRole("button", { name: "永久删除我的账号" }).click();

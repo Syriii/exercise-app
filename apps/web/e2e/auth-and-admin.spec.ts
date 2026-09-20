@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 
@@ -26,6 +27,7 @@ test("an administrator can inspect runtime health", async ({ page }, testInfo) =
   await expect(page.getByRole("heading", { name: "运行状态" })).toBeVisible();
   await expect(page.getByText("PostgreSQL")).toBeVisible();
   await expect(page.getByText("尚未确认")).toBeVisible();
+  await page.getByText('任务、媒体与备份', { exact: true }).click();
   await expect(page.getByText("test-vision-model")).toBeVisible();
   await expect(page.getByText("最近备份")).toBeVisible();
   await expect(page.getByText("还需异机演练")).toBeVisible();
@@ -54,7 +56,9 @@ test("an administrator can issue a one-time password without seeing it again", a
   await page.goto("/admin");
 
   const account = page.locator(".account-row").filter({ hasText: username });
+  await reveal(account.getByRole("button", { includeHidden: true, name: "设置临时密码" }));
   await account.getByRole("button", { name: "设置临时密码" }).click();
+  await reveal(account.getByLabel(`为 ${username} 设置临时密码`));
   await account.getByLabel(`为 ${username} 设置临时密码`).fill(temporaryPassword);
   await account.getByRole("button", { name: "确认设置并退出旧会话" }).click();
   await expect(page.getByRole("status")).toContainText("下次登录必须改密");

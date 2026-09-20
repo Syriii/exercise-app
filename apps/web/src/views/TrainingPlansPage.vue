@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { onActivated, reactive, ref } from "vue";
+import { nextTick, onActivated, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 const router = useRouter();
 
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
-import ExerciseNameField from "../components/ExerciseNameField.vue";
-import PlanTargetFields from '../features/training/PlanTargetFields.vue';
+import AppIcon from '../components/AppIcon.vue';
+import PlanActionEditor from '../features/training/PlanActionEditor.vue';
 import ExercisePicker from '../features/training/ExercisePicker.vue';
 import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
@@ -18,6 +18,7 @@ import {
   type TrainingProgramUnit,
   type TrainingTemplate,
   type TrainingTemplateInput,
+  type TrainingTarget,
 } from "../api/training";
 
 interface TemplateItemForm {
@@ -31,6 +32,20 @@ interface TemplateItemForm {
   note: string;
 }
 
+function targetSummary(item: TrainingTarget): string {
+  const parts: string[] = [];
+  if (item.targetSets !== null) parts.push(`${item.targetSets} 组`);
+  const min = item.targetRepsMin;
+  const max = item.targetRepsMax;
+  if (min !== null && max !== null) parts.push(min === max ? `${min} 次` : `${min}–${max} 次`);
+  else if (min !== null) parts.push(`至少 ${min} 次`);
+  else if (max !== null) parts.push(`至多 ${max} 次`);
+  if (item.targetWeightKg !== null) parts.push(`${item.targetWeightKg} kg`);
+  if (item.targetDurationSeconds !== null) parts.push(`${item.targetDurationSeconds} 秒`);
+  if (item.targetDistanceMeters !== null) parts.push(`${item.targetDistanceMeters} 米`);
+  return parts.join(' · ') || '未设目标量';
+}
+
 const templates = ref<TrainingTemplate[]>([]);
 const programs = ref<TrainingProgram[]>([]);
 const suggestions = ref<TrainingSuggestion[]>([]);
@@ -42,11 +57,12 @@ const saving = ref(false);
 const errorMessage = ref("");
 const notice = ref("");
 const editorOpen = ref(false);
+const planPickerOpen = ref(false);
 const editingTemplate = ref<TrainingTemplate | null>(null);
 const templateForm = reactive({
   name: "",
   note: "",
-  items: [emptyTemplateItem()] as TemplateItemForm[],
+  items: [] as TemplateItemForm[],
 });
 const programEditorOpen = ref(false);
 const editingProgram = ref<TrainingProgram | null>(null);
@@ -60,7 +76,7 @@ const unitForm = reactive({
   name: "",
   note: "",
   sourceTemplateId: "",
-  items: [emptyTemplateItem()] as TemplateItemForm[],
+  items: [] as TemplateItemForm[],
 });
 const scheduleEditorOpen = ref(false);
 const scheduleSource = reactive({
@@ -71,6 +87,15 @@ const scheduleSource = reactive({
 const scheduleForm = reactive({ localDate: currentLocalDate(), title: "", note: "" });
 const guidanceOpenItemId = ref<string | null>(null);
 const guidanceByItem = reactive<Record<string, ExerciseGuidance | null>>({});
+const itemKeys = new WeakMap<TemplateItemForm, number>();
+let nextItemKey = 0;
+function itemKey(item: TemplateItemForm) { if (!itemKeys.has(item)) itemKeys.set(item, ++nextItemKey); return itemKeys.get(item)!; }
+watch([editorOpen, programEditorOpen, scheduleEditorOpen], async (values) => {
+  if (!values.some(Boolean)) return;
+  await nextTick();
+  document.querySelector('.app-main')?.scrollTo({ top: 0 });
+  window.scrollTo({ top: 0 });
+});
 
 function emptyTemplateItem(): TemplateItemForm {
   return {
@@ -94,6 +119,7 @@ function pickPlanAction(items: TemplateItemForm[], name: string) {
   const empty = items.find(item => !item.exerciseName.trim());
   if (empty) empty.exerciseName = name;
   else if (items.length < 50) items.push({ ...emptyTemplateItem(), exerciseName: name });
+  planPickerOpen.value = false;
 }
 
 function currentLocalDate(): string {
@@ -308,7 +334,7 @@ function openAddUnit(program: TrainingProgram) {
   unitForm.name = "";
   unitForm.note = "";
   unitForm.sourceTemplateId = "";
-  unitForm.items.splice(0, unitForm.items.length, emptyTemplateItem());
+  unitForm.items.splice(0);
   unitEditorOpen.value = true;
 }
 
@@ -418,7 +444,8 @@ function openCreateTemplate() {
   editingTemplate.value = null;
   templateForm.name = "";
   templateForm.note = "";
-  templateForm.items.splice(0, templateForm.items.length, emptyTemplateItem());
+  templateForm.items.splice(0);
+  planPickerOpen.value = false;
   editorOpen.value = true;
 }
 
@@ -517,8 +544,8 @@ onActivated(() => void load());
 
 <template>
   <AppShell page-class="training-page" rail-note="看计划、改计划；记录实际内容时再参考。" show-footer>
-        <header class="view-header"><div><h1>训练计划</h1><p>查看和调整计划；实际做过什么，在训练记录中填写。</p></div>
-          <div class="form-actions"><button class="action-button" @click="router.push('/training')">返回训练</button><button class="action-button" @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()">{{ planTab === "templates" ? "新建计划" : "新建多周编排" }}</button></div>
+        <header class="view-header"><div class="page-title-row"><button class="text-action icon-action" aria-label="返回训练" @click="router.push('/training')"><AppIcon name="back" /></button><h1>训练计划</h1></div>
+          <button v-if="!editorOpen && !programEditorOpen && !scheduleEditorOpen" class="action-button action-button--primary" @click="planTab === 'templates' ? openCreateTemplate() : openCreateProgram()"><AppIcon name="plus" />{{ planTab === "templates" ? "新建计划" : "新建多周编排" }}</button>
         </header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
@@ -527,8 +554,9 @@ onActivated(() => void load());
           <strong>正在读取训练内容…</strong>
         </section>
 
-        <div v-else class="view-stack">
-          <section class="work-panel training-suggestion-panel" aria-labelledby="training-suggestion-title">
+        <div v-else class="view-stack plan-workspace" :class="{ 'is-editing': editorOpen || programEditorOpen || scheduleEditorOpen }">
+          <details v-if="!editorOpen && !programEditorOpen && !scheduleEditorOpen" class="work-panel training-suggestion-panel secondary-plan-tool" role="region" aria-label="帮我排一份">
+            <summary><AppIcon name="leaf" />帮我排一份 <span class="field-help">{{ suggestions.filter(item => item.status === 'active').length || '' }}</span></summary>
             <div class="panel-heading">
               <div><h2 id="training-suggestion-title">帮我排一份</h2><p>填写可用时间和器械，先生成一份草案。</p></div>
               <button class="action-button" type="button" @click="suggestionFormOpen = !suggestionFormOpen">{{ suggestionFormOpen ? '收起' : '填写条件' }}</button>
@@ -547,131 +575,118 @@ onActivated(() => void load());
               <p v-for="message in suggestion.candidate.messages" :key="message">{{ message }}</p>
               <template v-if="suggestion.candidate.template !== null">
                 <p><strong>建议频率：</strong>每周 {{ suggestion.candidate.weeklyResistanceDays }} 次抗阻训练；具体日期由你安排。</p>
-                <ul class="suggestion-exercises"><li v-for="item in suggestion.candidate.template.items" :key="item.exerciseName"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span>{{ item.targetSets ?? '—' }} 组<span v-if="item.targetRepsMin !== null"> · {{ item.targetRepsMin }}–{{ item.targetRepsMax }} 次</span></span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('suggestion', suggestion.id, item.exerciseName), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('suggestion', suggestion.id, item.exerciseName)]" /></li></ul>
+                <ul class="suggestion-exercises"><li v-for="item in suggestion.candidate.template.items" :key="item.exerciseName"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span>{{ targetSummary(item) }}</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('suggestion', suggestion.id, item.exerciseName), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('suggestion', suggestion.id, item.exerciseName)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('suggestion', suggestion.id, item.exerciseName)]" /></li></ul>
                 <ul class="suggestion-baseline"><li v-for="item in suggestion.candidate.publicHealthBaseline" :key="item">{{ item }}</li></ul>
               </template>
               <details><summary>适用范围和依据</summary><p>依据 {{ suggestion.evidenceIds.join('、') }}；生成于 {{ suggestion.inputSnapshot.generatedOn }}。</p><ul><li v-for="item in suggestion.candidate.limitations" :key="item">{{ item }}</li></ul></details>
               <div class="recommendation-actions"><button v-if="suggestion.candidate.template !== null" class="action-button action-button--primary" type="button" :disabled="saving" @click="adoptSuggestion(suggestion)">存成训练计划</button><button class="text-action" type="button" :disabled="saving" @click="dismissSuggestion(suggestion)">移除草案</button></div>
             </article>
-          </section>
+          </details>
 
-          <div class="form-actions"><button v-if="planTab === 'programs'" class="text-action" @click="planTab = 'templates'">返回我的计划</button>
-            <details v-else><summary>更多安排方式</summary><p>需要连续安排时，可以逐周设置不同内容，再为各训练日安排日期。</p><button class="action-button" @click="planTab = 'programs'">按周编排</button></details>
+          <div v-if="!editorOpen && !programEditorOpen && !scheduleEditorOpen" class="form-actions secondary-plan-tool"><button v-if="planTab === 'programs'" class="text-action" @click="planTab = 'templates'">返回我的计划</button>
+            <details v-else><summary><AppIcon name="calendar" />更多安排方式</summary><div class="form-actions"><button class="action-button" @click="planTab = 'programs'">按周编排</button><button class="action-button" type="button" @click="openScheduleEditor({ title: '' })">安排训练主题</button></div></details>
           </div>
 
-          <div class="schedule-toolbar">
-            <p>也可以只安排一个训练主题。</p>
-            <button class="action-button" type="button" @click="openScheduleEditor({ title: '' })">安排训练主题</button>
-          </div>
 
           <section v-if="scheduleEditorOpen" class="work-panel schedule-editor" aria-labelledby="schedule-editor-title">
             <div class="panel-heading">
-              <div><h2 id="schedule-editor-title">安排训练日期</h2><p>这只是当天安排，不会改变原计划。</p></div>
+              <div><h2 id="schedule-editor-title">安排训练日期</h2></div>
               <button class="text-action" type="button" @click="scheduleEditorOpen = false">取消</button>
             </div>
             <form class="template-form schedule-form" @submit.prevent="saveSchedule">
               <label><span>日期</span><input v-model="scheduleForm.localDate" required type="date" /></label>
               <label><span>当天显示名称</span><input v-model="scheduleForm.title" required maxlength="80" placeholder="例如：轻量恢复训练" /></label>
-              <label class="wide-field"><span>备注（可选）</span><input v-model="scheduleForm.note" maxlength="1000" placeholder="时间、场地或当天提醒" /></label>
+              <details class="wide-field"><summary>备注与安排说明</summary><label><span>备注（可选）</span><input v-model="scheduleForm.note" maxlength="1000" /></label><p class="field-help">保存独立日期内容，不改变原计划。</p></details>
               <button class="action-button action-button--primary wide-field schedule-submit" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存安排" }}</button>
             </form>
           </section>
 
-          <template v-if="planTab === 'templates'">
+          <template v-if="planTab === 'templates' && !scheduleEditorOpen">
           <section v-if="editorOpen" class="work-panel template-editor" aria-labelledby="template-editor-title">
             <div class="panel-heading">
               <div>
                 <h2 id="template-editor-title">{{ editingTemplate === null ? "新建训练计划" : "编辑训练计划" }}</h2>
-                <p>安排日期时保存独立内容；之后修改本计划，不影响已安排日期和实际记录。</p>
               </div>
               <button class="text-action" type="button" @click="editorOpen = false">收起</button>
             </div>
             <form class="template-form" @submit.prevent="saveTemplate">
               <label><span>计划名称</span><input v-model="templateForm.name" required maxlength="80" placeholder="例如：胸部 A" /></label>
               <details><summary>计划备注{{ templateForm.note ? ' · 已填' : '' }}</summary><label><span>计划备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label></details>
-              <details class="wide-field"><summary>选择计划动作</summary><ExercisePicker :disabled="saving" @select="name => pickPlanAction(templateForm.items, name)" /></details>
+              <ExercisePicker v-if="planPickerOpen || !templateForm.items.some(item => item.exerciseName)" class="wide-field" :disabled="saving" @select="name => pickPlanAction(templateForm.items, name)" />
 
               <div class="template-items">
-                <article v-for="(item, index) in templateForm.items" :key="index" class="template-item-form">
-                  <div class="template-item-form__heading">
-                    <strong>动作 {{ index + 1 }}</strong>
-                    <button v-if="templateForm.items.length > 1" class="text-action" type="button" @click="templateForm.items.splice(index, 1)">移除</button>
-                  </div>
-                  <ExerciseNameField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
-                  <PlanTargetFields :item="item" />
-                  <div class="form-actions"><button class="text-action" type="button" :disabled="index === 0" @click="moveItem(templateForm.items,index,-1)">上移</button><button class="text-action" type="button" :disabled="index === templateForm.items.length-1" @click="moveItem(templateForm.items,index,1)">下移</button></div>
-                  <details class="wide-field"><summary>动作备注{{ item.note ? ' · 已填' : '' }}</summary><label><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="节奏、器械或注意事项" /></label></details>
-                </article>
+                <PlanActionEditor v-for="(item, index) in templateForm.items" :key="itemKey(item)" :item="item" :index="index" :count="templateForm.items.length" @remove="templateForm.items.splice(index, 1)" @move="moveItem(templateForm.items, index, $event)" />
               </div>
 
               <div class="form-actions">
-                <button class="text-action" type="button" @click="templateForm.items.push(emptyTemplateItem())">添加动作 →</button>
+                <button class="text-action" type="button" @click="planPickerOpen = !planPickerOpen"><AppIcon name="plus" />选择计划动作</button>
                 <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存计划" }}</button>
               </div>
             </form>
           </section>
 
+          <template v-if="!editorOpen">
           <section class="split-heading" aria-labelledby="templates-title">
             <div><h2 id="templates-title">我的训练计划</h2></div>
-            <p>把常练的动作放在一起，下次直接选。</p>
           </section>
 
           <section v-if="templates.length === 0" class="work-panel training-empty">
             <strong>还没有训练计划</strong>
-            <p>创建常用计划，或从空白训练开始。</p>
+            <p>把常练的动作放在一起。</p>
             <div class="form-actions">
               <button class="action-button action-button--primary" type="button" @click="openCreateTemplate">建立第一份计划</button>
-              <button class="action-button" type="button" :disabled="saving" @click="startTraining(null)">直接开始</button>
+              <button class="action-button" type="button" :disabled="saving" @click="startTraining(null)">直接记训练</button>
             </div>
           </section>
 
           <div v-else class="template-grid">
             <article v-for="template in templates" :key="template.id" class="work-panel template-card">
-              <div class="panel-heading">
-                <div><h2>{{ template.name }}</h2><p>{{ template.note ?? `${template.items.length} 个动作` }}</p></div>
-                <span class="status-chip">{{ template.items.length }} 项</span>
-              </div>
+              <details class="record-detail">
+              <summary class="record-summary"><span class="section-symbol"><AppIcon name="train" /></span><span><h2>{{ template.name }}</h2><small>{{ template.items.length }} 个动作 · {{ template.items.slice(0, 3).map(item => item.exerciseName).join('、') }}</small></span><AppIcon name="arrow" /></summary>
+              <p v-if="template.note">{{ template.note }}</p>
               <ol class="plain-list template-preview">
                 <li v-for="item in template.items" :key="item.id">
-                  <div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('template', template.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('template', template.id, item.id) ? '收起预览' : '动作预览' }}</button></div>
+                  <div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span>{{ targetSummary(item) }}</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('template', template.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('template', template.id, item.id) ? '收起预览' : '动作预览' }}</button></div>
                   <ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('template', template.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('template', template.id, item.id)]" />
                 </li>
               </ol>
               <div class="form-actions">
-                <button class="action-button action-button--primary" type="button" :disabled="saving" @click="startTraining(template.id)">参考这份记录</button>
+                <button class="action-button action-button--primary" type="button" :aria-label="`安排${template.name}`" @click="openScheduleEditor({ title: template.name, templateId: template.id })"><AppIcon name="calendar" />安排日期</button>
+                <button class="action-button" type="button" :disabled="saving" @click="startTraining(template.id)"><AppIcon name="plus" />用来记录</button>
+              </div>
+              <details><summary><AppIcon name="more" />管理计划</summary><div class="form-actions">
                 <button class="text-action" type="button" @click="openEditTemplate(template)">编辑</button>
                 <button class="text-action" type="button" :aria-label="`复制${template.name}`" :disabled="saving" @click="copyTemplate(template)">复制</button>
-                <button class="text-action" type="button" :aria-label="`安排${template.name}`" @click="openScheduleEditor({ title: template.name, templateId: template.id })">安排日期</button>
                 <button class="text-action" type="button" :disabled="saving" @click="archiveTemplate(template)">归档</button>
-              </div>
+              </div></details></details>
             </article>
           </div>
 
           <button v-if="templates.length > 0" class="action-button blank-start" type="button" :disabled="saving" @click="startTraining(null)">不使用计划，直接记录</button>
           </template>
+          </template>
 
-          <template v-else>
+          <template v-else-if="planTab === 'programs' && !scheduleEditorOpen">
             <section v-if="programEditorOpen" class="work-panel template-editor" aria-labelledby="program-editor-title">
               <div class="panel-heading">
                 <div>
                   <h2 id="program-editor-title">{{ editingProgram === null ? "新建多周编排" : "编辑多周编排" }}</h2>
-                  <p>周期只负责整理训练日，不会替你规定具体日期。</p>
                 </div>
                 <button class="text-action" type="button" @click="programEditorOpen = false">收起</button>
               </div>
               <form class="template-form program-form" @submit.prevent="saveProgram">
                 <label><span>计划名称</span><input v-model="programForm.name" required maxlength="80" placeholder="例如：四周增肌计划" /></label>
                 <label><span>包含几周</span><input v-model="programForm.weekCount" required type="number" inputmode="numeric" min="1" max="52" /></label>
-                <label class="wide-field"><span>备注（可选）</span><input v-model="programForm.note" maxlength="1000" placeholder="训练目标、使用场景或注意事项" /></label>
+                <details class="wide-field"><summary>备注（可选）</summary><label><span>备注（可选）</span><input v-model="programForm.note" maxlength="1000" /></label></details>
                 <div class="form-actions wide-field">
                   <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存多周编排" }}</button>
                 </div>
               </form>
             </section>
 
+            <template v-if="!programEditorOpen">
             <section class="split-heading" aria-labelledby="programs-title">
               <div><h2 id="programs-title">我的多周编排</h2></div>
-              <p>按周编排训练，每周都可以不同。</p>
             </section>
 
             <section v-if="programs.length === 0" class="work-panel training-empty">
@@ -692,13 +707,12 @@ onActivated(() => void load());
                 <button class="action-button" type="button" @click="selectedProgramId = selectedProgramId === program.id ? null : program.id">
                   {{ selectedProgramId === program.id ? "收起" : "查看训练日" }}
                 </button>
-                <button class="text-action" type="button" @click="openEditProgram(program)">编辑计划</button>
-                <button class="text-action" type="button" :disabled="saving" @click="archiveProgram(program)">归档</button>
+                <details><summary>管理编排</summary><div class="form-actions"><button class="text-action" type="button" @click="openEditProgram(program)">编辑计划</button><button class="text-action" type="button" :disabled="saving" @click="archiveProgram(program)">归档</button></div></details>
               </div>
 
               <div v-if="selectedProgramId === program.id" class="program-detail">
                 <div class="program-detail__heading">
-                  <div><strong>周期内容</strong><p>可以从空白添加，也可以复制一份训练计划。</p></div>
+                  <strong>训练日</strong>
                   <button class="action-button action-button--primary" type="button" @click="openAddUnit(program)">添加训练日</button>
                 </div>
 
@@ -723,20 +737,11 @@ onActivated(() => void load());
                   </p>
                   <template v-if="editingUnit !== null || !unitForm.sourceTemplateId">
                     <label class="wide-field"><span>训练日名称</span><input v-model="unitForm.name" required maxlength="80" placeholder="例如：胸部训练 A" /></label>
-                    <label class="wide-field"><span>备注（可选）</span><input v-model="unitForm.note" maxlength="1000" placeholder="当天的安排或注意事项" /></label>
+                    <details class="wide-field"><summary>备注（可选）</summary><label><span>备注（可选）</span><input v-model="unitForm.note" maxlength="1000" /></label></details>
                     <div class="template-items wide-field">
-                      <article v-for="(item, index) in unitForm.items" :key="index" class="template-item-form">
-                        <div class="template-item-form__heading">
-                          <strong>动作 {{ index + 1 }}</strong>
-                          <button v-if="unitForm.items.length > 1" class="text-action" type="button" @click="unitForm.items.splice(index, 1)">移除</button>
-                        </div>
-                        <ExerciseNameField v-model="item.exerciseName" class="wide-field" label="动作名称" required placeholder="例如：杠铃卧推或 barbell bench press" />
-                        <PlanTargetFields :item="item" />
-                        <div class="form-actions"><button class="text-action" type="button" :disabled="index === 0" @click="moveItem(unitForm.items,index,-1)">上移</button><button class="text-action" type="button" :disabled="index === unitForm.items.length-1" @click="moveItem(unitForm.items,index,1)">下移</button></div>
-                        <details class="wide-field"><summary>动作备注{{ item.note ? ' · 已填' : '' }}</summary><label><span>动作备注</span><input v-model="item.note" maxlength="500" placeholder="可不填" /></label></details>
-                      </article>
+                      <PlanActionEditor v-for="(item, index) in unitForm.items" :key="itemKey(item)" :item="item" :index="index" :count="unitForm.items.length" @remove="unitForm.items.splice(index, 1)" @move="moveItem(unitForm.items, index, $event)" />
                     </div>
-                    <button class="text-action wide-field unit-add-action" type="button" @click="unitForm.items.push(emptyTemplateItem())">添加动作 →</button>
+                    <details class="wide-field" :open="!unitForm.items.length"><summary>选择计划动作</summary><ExercisePicker :disabled="saving" @select="name => pickPlanAction(unitForm.items, name)" /></details>
                   </template>
                   <div class="form-actions wide-field">
                     <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存训练日" }}</button>
@@ -754,7 +759,7 @@ onActivated(() => void load());
                         <p>{{ unit.items.length }} 个动作<span v-if="sourceTemplateName(unit)"> · 复制自 {{ sourceTemplateName(unit) }}</span></p>
                       </div>
                       <ol class="plain-list template-preview">
-                        <li v-for="item in unit.items" :key="item.id"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span v-if="item.targetSets !== null">{{ item.targetSets }} 组</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('unit', unit.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('unit', unit.id, item.id) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('unit', unit.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('unit', unit.id, item.id)]" /></li>
+                        <li v-for="item in unit.items" :key="item.id"><div class="guidance-list-row"><strong>{{ item.exerciseName }}</strong><span>{{ targetSummary(item) }}</span><button class="text-action" type="button" @click="toggleGuidance(guidanceKey('unit', unit.id, item.id), item.exerciseName)">{{ guidanceOpenItemId === guidanceKey('unit', unit.id, item.id) ? '收起预览' : '动作预览' }}</button></div><ExerciseGuidanceCard v-if="guidanceOpenItemId === guidanceKey('unit', unit.id, item.id)" :exercise-name="item.exerciseName" :guidance="guidanceByItem[guidanceKey('unit', unit.id, item.id)]" /></li>
                       </ol>
                       <p v-if="sourceUpdated(unit) && !unit.started" class="source-update-note">来源计划有更新。当前内容不会自动改变。</p>
                       <div class="form-actions">
@@ -768,6 +773,7 @@ onActivated(() => void load());
                 </div>
               </div>
             </section>
+            </template>
           </template>
         </div>
 

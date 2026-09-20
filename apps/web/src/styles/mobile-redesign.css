@@ -202,3 +202,76 @@ summary { cursor: pointer; min-height: 48px; padding-block: 12px; font-size: 14p
 .nutrition-page .food-item .portion-editor { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
 .nutrition-page .food-item .portion-editor > label { display: inline-flex; flex: none; }
 .nutrition-page .food-item .portion-editor > label input { width: 5.5rem; }
+
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: apps/web/design.md · designed-as-app
+ * Whole-app: summaries first, edit one task at a time. */
+.page-title-row, .compact-action-heading { display:flex; align-items:center; gap:var(--space-xs); min-width:0; }
+.view-header > .page-title-row { display:flex; flex-direction:row; flex-wrap:nowrap; }
+.view-header > .page-title-row h1 { font-size:var(--text-md); }
+.panel-heading { flex-direction:row; flex-wrap:wrap; align-items:center; }
+.panel-heading > div { min-width:0; }
+.plan-workspace .split-heading h2 { font-size:var(--text-md); }
+.record-summary h2 { font-size:var(--text-base); }
+.nutrition-overview.recommendation-panel { gap:var(--space-xs); }
+.nutrition-overview .hero-energy .food-art { width:72px; height:72px; flex-basis:72px; }
+.history-filters { border:0; background:transparent; padding:0; }
+.icon-action { width:44px; height:44px; padding:var(--space-xs); flex:0 0 44px; }
+.compact-action-heading > strong, .compact-action-heading > div { flex:1; min-width:0; overflow-wrap:anywhere; }
+.compact-action-heading .section-symbol { width:36px; height:36px; margin:0; flex:0 0 36px; }
+.plan-action-editor { display:grid; gap:var(--space-xs); padding-block:var(--space-sm); border-bottom:1px solid var(--color-rule); min-width:0; }
+.plan-action-editor label { display:grid; gap:var(--space-xs); min-width:0; }
+.plan-action-editor input { width:100%; min-width:0; }
+.action-options > summary, .secondary-plan-tool > summary { display:flex; align-items:center; gap:var(--space-xs); }
+.record-summary { display:flex; align-items:center; gap:var(--space-sm); list-style:none; min-width:0; padding-block:var(--space-xs); }
+.record-summary::-webkit-details-marker { display:none; }
+.record-summary > span:not(.section-symbol) { flex:1; min-width:0; }
+.record-summary strong { display:block; font-size:var(--text-base); color:var(--color-ink); overflow-wrap:anywhere; }
+.record-summary small { display:block; font-size:var(--text-sm); color:var(--color-muted); margin-top:var(--space-2xs); overflow-wrap:anywhere; }
+.record-summary .section-symbol { margin:0; flex:0 0 44px; }
+.record-detail[open] > .record-summary > .icon:last-child { transform:rotate(90deg); }
+.record-detail[open] > .record-summary { margin-bottom:var(--space-sm); border-bottom:1px solid var(--color-rule); }
+.record-detail ul, .record-detail ol { padding-inline-start:var(--space-md); }
+.record-detail .form-actions { margin-block:var(--space-xs); }
+.plan-workspace { display:flex; flex-direction:column; }
+.secondary-plan-tool { order:2; }
+.plan-workspace .template-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-sm); }
+.plan-workspace .template-form { grid-template-columns:minmax(0,1fr); }
+.plan-workspace .template-card, .saved-training.work-panel { padding:var(--space-sm); }
+.plan-workspace .split-heading { padding:0; border:0; }
+.plan-workspace .blank-start { align-self:start; }
+.plan-workspace .template-items { gap:var(--space-xs); }
+.plan-workspace .suggestion-form { padding-top:var(--space-sm); }
+.body-summary { display:flex; gap:var(--space-lg); }
+.body-summary dt, .body-summary small { color:var(--color-muted); font-size:var(--text-sm); }
+.body-summary dd { font-size:var(--text-lg); font-weight:650; }
+.settings-page .field-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.settings-page .field-grid input, .settings-page .field-grid select { width:100%; min-width:0; }
+.settings-page .strategy-options:has(.compact-strategy) { display:flex; flex-wrap:wrap; gap:var(--space-xs); }
+.settings-page .compact-strategy { display:flex; flex:1; align-items:center; justify-content:center; gap:var(--space-xs); padding:var(--space-sm); min-height:56px; }
+.compact-strategy input { width:16px; height:16px; }
+.compact-strategy .icon { width:20px; height:20px; flex-basis:20px; }
+.danger-details > summary { color:var(--color-error); }
+.history-filters button { display:inline-flex; align-items:center; gap:var(--space-xs); }
+.history-page .history-session > strong { display:flex; align-items:center; gap:var(--space-xs); }
+.panel-heading h2 > .icon { margin-right:var(--space-xs); }
+.admin-page details { min-width:0; }
+@media(max-width:599px) {
+ .view-header h1 { font-size:var(--text-lg); }
+ .settings-overview > button { padding:var(--space-md); border-radius:var(--radius-md); }
+ .settings-page .compact-strategy { flex:0 1 auto; }
+ .settings-page .work-panel { gap:var(--space-sm); }
+ .settings-page .reminder-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .settings-page .reminder-form > details, .settings-page .reminder-form > button { grid-column:1/-1; }
+ .training-page .action-button, .training-page .text-action { font-size:var(--text-sm); }
+ .admin-page { padding:var(--space-md); }
+ .admin-page .account-row, .admin-page .health-item { flex-wrap:wrap; gap:var(--space-xs); }
+ .admin-page .health-grid, .admin-page .operations-summary-grid { grid-template-columns:minmax(0,1fr); }
+ .access-card { gap:var(--space-md); padding:var(--space-lg); }
+ .history-trend-table { display:block; min-width:0; width:100%; }
+ .history-trend-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+ .history-trend-table tbody { display:grid; gap:var(--space-md); }
+ .history-trend-table tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-xs); }
+ .history-trend-table th { grid-column:1/-1; }
+ .history-trend-table td { border:0; padding:var(--space-xs); background:var(--color-paper-2); border-radius:var(--radius-sm); white-space:normal; }
+ .history-trend-table td::before { content:attr(data-label); display:block; font-size:var(--text-sm); color:var(--color-muted); }
+}

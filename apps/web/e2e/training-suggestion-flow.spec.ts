@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { completeSetup } from "./helpers/setup";
 import { expect, test } from "@playwright/test";
 
@@ -20,12 +21,14 @@ test("a person can turn an evidence-backed system suggestion into their own plan
 
   await page.goto("/training/plans");
   const suggestionPanel = page.getByRole("region", { name: "帮我排一份" });
+  await reveal(suggestionPanel.getByRole("button", { includeHidden: true, name: "填写条件" }));
   await suggestionPanel.getByRole("button", { name: "填写条件" }).click();
   await suggestionPanel.getByLabel("主要目标").selectOption("hypertrophy");
   await suggestionPanel.getByLabel("每周可练几天").fill("3");
   await suggestionPanel.getByRole("button", { name: "按这些条件生成" }).click();
 
   await expect(suggestionPanel.getByText("全身训练草案", { exact: true })).toBeVisible();
+  await reveal(suggestionPanel.getByRole("button", { includeHidden: true, name: "动作预览" }).first());
   await suggestionPanel.getByRole("button", { name: "动作预览" }).first().click();
   await expect(suggestionPanel.getByRole("region", { name: /动作预览/ }).first()).toBeVisible();
   await suggestionPanel.getByText("适用范围和依据").click();

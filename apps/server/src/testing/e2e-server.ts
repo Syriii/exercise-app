@@ -31,6 +31,9 @@ import { createTestConfig } from "./test-config.js";
 const port = Number.parseInt(process.env.E2E_PORT ?? "4174", 10);
 const config = createTestConfig({
   port,
+  // The full two-device browser suite registers over 100 independent fake users.
+  // This limit applies only to this ephemeral in-memory E2E entrypoint.
+  maxAccounts: 300,
   webDistDirectory: resolve(import.meta.dirname, "../../../web/dist"),
 });
 const identityRepository = new MemoryIdentityRepository();

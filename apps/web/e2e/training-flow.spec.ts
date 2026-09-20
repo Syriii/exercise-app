@@ -13,9 +13,10 @@ async function plan(page: Page, name = "全身简易") {
   await page.goto("/training/plans");
   await page.getByRole("button", { name: "新建计划", exact: true }).click();
   await page.getByLabel("计划名称").fill(name);
-  await page.getByLabel("动作名称", { exact: true }).fill("深蹲");
+  await page.getByRole('button', { name: '添加动作：深蹲', exact: true }).click();
   await page.getByLabel("目标组数").fill("3");
   await page.getByLabel("最低次数").fill("10");
+  await reveal(page.getByLabel("最高次数"));
   await page.getByLabel("最高次数").fill("10");
   await page.getByRole("button", { name: "保存计划", exact: true }).click();
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
@@ -25,6 +26,7 @@ test.beforeEach(async ({ page }, info) => register(page, info.project.name[0]!))
 test("a person records multiple actual actions without creating a live workout", async ({ page }, info) => {
   await page.goto("/training");
   await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
+  await reveal(page.getByText("一次添加多个动作", { exact: true }));
   await page.getByText("一次添加多个动作", { exact: true }).click();
   await page.getByLabel("动作名称，每行一个").fill("深蹲\n跑步\n拉伸");
   await page.getByRole("button", { name: "加入这些动作" }).click();
@@ -32,6 +34,7 @@ test("a person records multiple actual actions without creating a live workout",
   await actions.nth(0).getByLabel("组数", { exact: true }).fill("3");
   await actions.nth(0).getByLabel("每组次数").fill("10");
   await actions.nth(0).getByLabel("重量 kg（可选）").fill("40");
+  await reveal(actions.nth(0).getByRole("button", { includeHidden: true, name: "各组不同，展开调整" }));
   await actions.nth(0).getByRole("button", { name: "各组不同，展开调整" }).click();
   await actions.nth(0).getByLabel("次数", { exact: true }).nth(2).fill("8");
   await reveal(actions.nth(1).getByLabel("记录方式"));
@@ -58,17 +61,21 @@ test("a person records multiple actual actions without creating a live workout",
 test("a reusable plan is copied into a draft and can be changed without modifying the plan", async ({ page }) => {
   await plan(page);
   const card = page.getByRole("article").filter({ hasText: "全身简易" }).first();
+  await reveal(card.getByRole("button", { includeHidden: true, name: "动作预览" }));
   await card.getByRole("button", { name: "动作预览" }).click();
   await expect(card.getByRole("region", { name: "深蹲动作预览" })).toContainText("内容草案");
-  await page.getByRole("button", { name: "参考这份记录" }).click();
+  await reveal(page.getByRole("button", { includeHidden: true, name: "用来记录" }));
+  await page.getByRole("button", { name: "用来记录" }).click();
   await expect(page.getByRole('checkbox', { name: '记录已做：深蹲' })).not.toBeChecked();
   await page.getByRole('checkbox', { name: '记录已做：深蹲' }).check();
   await expect(page.getByLabel("组数", { exact: true })).toHaveValue("3");
   await page.getByText('动作选项', { exact: true }).click();
+  await reveal(page.getByRole('region', { name: '动作填写' }).getByRole('button', { includeHidden: true, name: '动作预览' }));
   await page.getByRole('region', { name: '动作填写' }).getByRole('button', { name: '动作预览' }).click();
   await expect(page.getByRole('region', { name: '深蹲动作预览' })).toContainText('内容草案');
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
   await page.getByLabel("每组次数").fill("8");
+  await reveal(page.getByText('一次添加多个动作', { exact: true }));
   await page.getByText('一次添加多个动作', { exact: true }).click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
   const extra = page.getByRole("region", { name: "动作填写" }).last();
@@ -89,6 +96,7 @@ test("a reusable plan is copied into a draft and can be changed without modifyin
 
 test("a person copies a plan into a cycle and references its day without marking it started", async ({ page }) => {
   await plan(page, "胸部 A");
+  await reveal(page.getByRole("button", { includeHidden: true, name: "复制胸部 A" }));
   await page.getByRole("button", { name: "复制胸部 A" }).click();
   await expect(page.getByRole("heading", { name: "胸部 A 副本" })).toBeVisible();
   await page.getByText("更多安排方式", { exact: true }).click();
@@ -109,11 +117,13 @@ test("a person copies a plan into a cycle and references its day without marking
 
 test("a scheduled plan opens the same editor and history edits and deletes the whole record", async ({ page }) => {
   await plan(page, "今天的力量训练");
+  await reveal(page.getByRole("button", { includeHidden: true, name: "安排今天的力量训练" }));
   await page.getByRole("button", { name: "安排今天的力量训练" }).click();
   await page.getByRole("button", { name: "保存安排" }).click();
   await expect(page.getByRole("status")).toContainText("已安排到");
   await page.goto("/today");
   await page.getByRole("region", { name: "今天的训练" }).getByRole("button", { name: "查看／修改今天计划 →", exact: true }).click();
+  await reveal(page.getByRole("button", { includeHidden: true, name: "从当天计划记录", exact: true }));
   await page.getByRole("button", { name: "从当天计划记录", exact: true }).click();
   await page.getByRole('checkbox', { name: '记录已做：深蹲' }).check();
   await reveal(page.getByLabel("大致时间（可选）"));
@@ -147,7 +157,7 @@ test("old unfinished records import only confirmed actual actions and keep corre
   await page.goto('/history');
   await page.getByRole('button', { name: '查看／修改训练' }).click();
   await expect(page.getByRole('region', { name: '动作填写' })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: '徒手深蹲 改名' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '动作填写' }).getByText('徒手深蹲', { exact: true })).toBeVisible();
   await expect(page.getByLabel('组数', { exact: true })).toHaveValue('1');
   await page.getByLabel('每组次数').fill('9');
   await page.getByRole('button', { name: '保存训练记录', exact: true }).click();
@@ -162,6 +172,7 @@ test("old unfinished records import only confirmed actual actions and keep corre
 test("concurrent edits require review and a deleted record is not resurrected", async ({ page }) => {
   await page.goto("/training");
   await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
+  await reveal(page.getByText('一次添加多个动作', { exact: true }));
   await page.getByText('一次添加多个动作', { exact: true }).click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
   await page.getByLabel("动作名称", { exact: true }).fill("拉伸");
@@ -169,6 +180,7 @@ test("concurrent edits require review and a deleted record is not resurrected", 
   await page.getByLabel("记录方式").selectOption("unknown");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
+  await reveal(page.getByRole("button", { includeHidden: true, name: "修改整条记录" }));
   await page.getByRole("button", { name: "修改整条记录" }).click();
   await reveal(page.getByLabel("本次备注（可选）"));
   await page.getByLabel("本次备注（可选）").fill("本机输入");
@@ -183,6 +195,7 @@ test("concurrent edits require review and a deleted record is not resurrected", 
   await page.getByRole("button", { name: "已核对，用我的内容替换" }).click();
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
+  await reveal(page.getByRole("button", { includeHidden: true, name: "修改整条记录" }));
   await page.getByRole("button", { name: "修改整条记录" }).click();
   expect((await page.request.delete(url, { data: { revision: 3 } })).ok()).toBeTruthy();
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();

@@ -4,18 +4,19 @@ import { trainingApi, type TrainingSchedule, type TrainingProgressUnit } from ".
 import { submissionId } from "../../support/submission-id";
 import PlanTargetFields from './PlanTargetFields.vue';
 import ExercisePicker from './ExercisePicker.vue';
+import AppIcon from '../../components/AppIcon.vue';
 const props = defineProps<{ schedule: TrainingSchedule }>();
 const emit = defineEmits<{ saved: [TrainingSchedule]; close: [] }>();
 const title = ref(props.schedule.title), date = ref(props.schedule.localDate), note = ref(props.schedule.note ?? "");
 const fields = ["targetSets", "targetRepsMin", "targetRepsMax", "targetWeightKg", "targetDurationSeconds", "targetDistanceMeters"] as const;
 type Field = typeof fields[number];
-interface Item { key: string; id?: string; exerciseName: string; note: string; progressUnit: TrainingProgressUnit; values: Record<Field, string> }
+interface Item { key: string; id?: string; nameInitiallyOpen: boolean; exerciseName: string; note: string; progressUnit: TrainingProgressUnit; values: Record<Field, string> }
 const items = ref<Item[]>((props.schedule.items ?? []).map(item => ({ key: item.id, id: item.id,
-  exerciseName: item.exerciseName, note: item.note ?? "", progressUnit: item.progressUnit,
+  nameInitiallyOpen: false, exerciseName: item.exerciseName, note: item.note ?? "", progressUnit: item.progressUnit,
   values: Object.fromEntries(fields.map(key => [key, item[key]?.toString() ?? ""])) as Record<Field, string> })));
 const busy = ref(false), error = ref("");
-function add() { if (items.value.length < 50) items.value.push({ key: submissionId(), exerciseName: "", note: "", progressUnit: "none", values: Object.fromEntries(fields.map(key => [key, ""])) as Record<Field, string> }); }
-function pick(name: string) { if (items.value.length >= 50) return; add(); items.value[items.value.length - 1]!.exerciseName = name; }
+function add() { if (items.value.length < 50) items.value.push({ key: submissionId(), nameInitiallyOpen: true, exerciseName: "", note: "", progressUnit: "none", values: Object.fromEntries(fields.map(key => [key, ""])) as Record<Field, string> }); }
+function pick(name: string) { if (items.value.length >= 50) return; add(); const item = items.value[items.value.length - 1]!; item.exerciseName = name; item.nameInitiallyOpen = false; }
 function move(index: number, offset: number) { const other = index + offset; if (other < 0 || other >= items.value.length) return; const [item] = items.value.splice(index, 1); items.value.splice(other, 0, item!); }
 async function save() {
   if (busy.value) return; busy.value = true; error.value = "";
@@ -48,13 +49,14 @@ window.addEventListener("beforeunload", unload); onBeforeUnmount(() => window.re
     <form @submit.prevent="save"><fieldset :disabled="busy">
       <details class="compact-metadata"><summary>{{ date }} · {{ title }} · 修改信息</summary><div class="fields"><label>安排日期<input v-model="date" type="date" required /></label><label>计划名称<input v-model="title" required maxlength="80" /></label><label>计划备注<textarea v-model="note" maxlength="1000" /></label></div></details>
       <article v-for="(item,index) in items" :key="item.key" class="plan-item">
-        <label>动作名称<input v-model="item.exerciseName" required maxlength="100" /></label>
+        <div class="compact-action-heading"><span class="section-symbol"><AppIcon name="train" /></span><strong>{{ item.exerciseName || '自定义动作' }}</strong><button type="button" class="text-action icon-action" aria-label="移除动作" @click="items.splice(index,1)"><AppIcon name="close" /></button></div>
+        <details :open="item.nameInitiallyOpen"><summary>修改名称</summary><label>动作名称<input v-model="item.exerciseName" required maxlength="100" /></label></details>
         <PlanTargetFields :item="item.values" minimum-label="每组最少次数" maximum-label="每组最多次数" weight-label="目标重量（kg）" />
         <details><summary>进度与备注{{ item.note ? ' · 已填' : '' }}</summary>
         <label>进度依据<select v-model="item.progressUnit"><option value="none">只展示内容</option><option value="sets">组数</option><option value="seconds">时长（秒）</option><option value="meters">距离（米）</option></select></label>
         <label>动作备注<input v-model="item.note" maxlength="500" /></label>
+        <div class="form-actions"><button type="button" class="text-action" :disabled="index === 0" @click="move(index,-1)">上移</button><button type="button" class="text-action" :disabled="index === items.length-1" @click="move(index,1)">下移</button></div>
         </details>
-        <div class="form-actions"><button type="button" class="text-action" :disabled="index === 0" @click="move(index,-1)">上移</button><button type="button" class="text-action" :disabled="index === items.length-1" @click="move(index,1)">下移</button><button type="button" class="text-action" @click="items.splice(index,1)">移除动作</button></div>
       </article>
       <details :open="!items.length"><summary>添加计划动作</summary><ExercisePicker :disabled="busy || items.length >= 50" @select="pick" /><button type="button" class="text-action" :disabled="items.length >= 50" @click="add">填写自定义动作</button></details>
       <div class="form-actions"><button type="submit" class="action-button action-button--primary">{{ busy ? '保存中…' : '保存当天计划' }}</button><button type="button" class="text-action" @click="close">关闭修改</button></div>

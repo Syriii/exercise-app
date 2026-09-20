@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { expect, test } from '@playwright/test';
 import { completeSetup } from './helpers/setup';
 
@@ -65,6 +66,7 @@ test('training picks actions, uses compact amounts and preserves hidden notes an
   await squat.getByText('动作选项', { exact: true }).click();
   await squat.getByLabel('动作备注（可选）').fill('保留说明');
   await squat.getByText('动作选项', { exact: true }).click();
+  await reveal(squat.getByRole('button', { includeHidden: true, name: '各组不同，展开调整' }));
   await squat.getByRole('button', { name: '各组不同，展开调整' }).click();
   await squat.getByLabel('次数', { exact: true }).nth(2).fill('8');
   await page.getByRole('button', { name: '继续选择动作', exact: true }).click();

@@ -204,7 +204,7 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
 
 <template>
   <AppShell page-class="training-page" rail-note="计划是参考，记录只写实际做过的内容。" show-footer>
-    <header v-if="!draft && !editingPlan" class="view-header"><div><h1>训练</h1><p>看计划，或一次记下练过的内容。</p></div><button class="action-button" @click="router.push('/training/plans')"><AppIcon name="calendar" />查看／管理计划</button></header>
+    <header v-if="!draft && !editingPlan" class="view-header"><h1>训练</h1><button class="action-button" aria-label="查看／管理计划" @click="router.push('/training/plans')"><AppIcon name="calendar" />我的计划</button></header>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p><p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
     <ScheduleEditor v-if="editingPlan" :key="editingPlan.id" :schedule="editingPlan" @saved="planSaved" @close="editingPlan = null" />
     <section v-else-if="draft" class="work-panel" aria-label="训练记录编辑">
@@ -216,14 +216,14 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
             <label><span>大致时间（可选）</span><input v-model="draft.time" type="time" /></label>
             <label><span>本次备注（可选）</span><textarea v-model="draft.note" rows="2" maxlength="1000" /></label>
           </div></details>
-          <p v-if="draft.items.some(item => item.planLink)">关联当天计划：{{ [...new Set(draft.items.flatMap(item => item.planLink ? [item.planLink.title] : []))].join('、') }}。改动作名称会取消该动作关联。<button type="button" class="text-action" @click="detachPlan">取消计划关联，独立记录</button></p>
+          <details v-if="draft.items.some(item => item.planLink)"><summary><AppIcon name="calendar" />关联计划 · {{ [...new Set(draft.items.flatMap(item => item.planLink ? [item.planLink.title] : []))].join('、') }}</summary><p>改动作名称会取消该动作关联。</p><button type="button" class="text-action" @click="detachPlan">取消计划关联，独立记录</button></details>
           <p v-if="planConflict" role="alert">日期计划已变化，输入仍保留。<button type="button" class="text-action" @click="detachPlan">保留实际内容，取消关联后保存</button></p>
           <details><summary>参考计划或上次内容</summary><div class="record-source"><label><span>选择计划</span><select v-model="selectedTemplate"><option value="">请选择</option><option v-for="plan in templates" :key="plan.id" :value="plan.id">{{ plan.name }}</option></select></label><button type="button" class="action-button" :disabled="!selectedTemplate" @click="importTemplate">加入参考内容</button><button type="button" class="action-button" :disabled="!previousRecord" @click="copyPrevious">使用上次实际内容</button></div><p>参考内容不是本次完成量。请移除未做的动作并核对数量。</p></details>
           <ExercisePicker v-if="pickerOpen || !draft.items.length" :recent="recentActions" :disabled="saving || draft.items.length >= 50" @select="pickAction" />
+          <p v-if="draft.items.some(item => item.included === false)" class="field-help">勾选已做的动作，核对实际量。</p>
           <RecordActionFields v-for="(item, index) in draft.items" :key="item.id" v-model="draft.items[index]!" @remove="draft.items.splice(index, 1)" />
           <button v-if="draft.items.length" type="button" class="text-action" @click="pickerOpen = !pickerOpen">{{ pickerOpen ? '收起动作列表' : '继续选择动作' }}</button>
-          <details><summary>一次添加多个动作</summary><label><span>动作名称，每行一个</span><textarea v-model="names" rows="3" placeholder="深蹲&#10;俯卧撑&#10;跑步" /></label><button type="button" class="action-button" @click="addNames">加入这些动作</button><button type="button" class="text-action" :disabled="draft.items.length >= 50" @click="addAction">添加动作</button></details>
-          <details><summary>记录说明</summary><p class="data-note">数量不清楚可以留空。切换页面会保留输入；刷新或关闭应用不会保存草稿。</p></details>
+          <details><summary><AppIcon name="more" />更多记录方式</summary><details><summary>一次添加多个动作</summary><label><span>动作名称，每行一个</span><textarea v-model="names" rows="3" placeholder="深蹲&#10;俯卧撑&#10;跑步" /></label><button type="button" class="action-button" @click="addNames">加入这些动作</button><button type="button" class="text-action" :disabled="draft.items.length >= 50" @click="addAction">添加动作</button></details><p class="data-note">数量不清楚可以留空。切换页面会保留输入；刷新或关闭应用不会保存草稿。</p></details>
           <div class="selection-save-bar"><span>已选 {{ draft.items.filter(item => item.included !== false).length }} 个动作</span><button class="action-button action-button--primary" type="submit" :disabled="conflicting">{{ saving ? "保存中…" : "保存训练记录" }}</button></div>
           <button class="text-action" type="button" @click="discard">放弃未保存内容</button>
           <button v-if="draft.revision > 0" type="button" class="text-action" @click="remove({ id: draft.id, revision: draft.revision, localDate: draft.localDate })">删除这条已存记录</button>
@@ -240,20 +240,21 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
       <section class="work-panel"><div class="panel-heading"><h2>{{ date === today() ? "今天的训练" : "训练记录" }}</h2><label><span class="sr-only">查看日期</span><input v-model="date" type="date" aria-label="查看日期" /></label></div>
         <button class="action-button action-button--primary" @click="begin"><AppIcon name="plus" />记录训练内容</button>
         <div v-if="todayPlans.length" class="record-plans"><article v-for="plan in todayPlans" :key="plan.id" class="date-plan" aria-label="当天计划">
-          <strong>{{ plan.title }}</strong><p>{{ progressSummary(plan) }}</p>
+          <details class="record-detail"><summary class="record-summary"><span class="section-symbol"><AppIcon name="calendar" /></span><span><strong>{{ plan.title }}</strong><small>{{ progressSummary(plan) }}</small></span><AppIcon name="arrow" /></summary>
           <ul><li v-for="item in plan.items ?? []" :key="item.id"><strong>{{ item.exerciseName }}</strong><span>{{ itemProgressText(plan.progress?.find(value => value.itemId === item.id)) }}</span><button class="text-action" @click="showGuidance(item.exerciseName)">动作指导</button></li></ul>
-          <div class="form-actions"><button class="action-button" @click="referenceSchedule(plan)">从当天计划记录</button><button class="text-action" @click="editingPlan = plan">修改当天计划／改期</button><button class="text-action" :disabled="saving" @click="cancelPlan(plan)">取消安排</button></div>
+          <div class="form-actions"><button class="action-button" @click="referenceSchedule(plan)">从当天计划记录</button><button class="text-action" aria-label="修改当天计划／改期" @click="editingPlan = plan"><AppIcon name="edit" />修改计划</button></div><details><summary>更多</summary><button class="text-action" :disabled="saving" @click="cancelPlan(plan)">取消安排</button></details></details>
         </article></div>
         <ExerciseGuidanceCard v-if="guidanceName" :exercise-name="guidanceName" :guidance="guidance" />
-        <p v-if="!visibleRecords.length && !loading">这一天还没有训练记录。练完后，一次记下来就好。</p>
+        <p v-if="!visibleRecords.length && !loading" class="field-help">还没有训练记录</p>
       </section>
       <p v-if="loading" role="status">正在读取训练内容…</p>
       <article v-for="record in visibleRecords" :key="record.id" class="work-panel saved-training" aria-label="已存训练记录">
-        <div class="panel-heading"><h2>{{ record.status === 'in_progress' ? '旧版未完成记录' : '已记录的训练' }}</h2><span>{{ record.recordedTime ?? '时间未记录' }}</span></div>
+        <details class="record-detail"><summary class="record-summary"><span class="section-symbol"><AppIcon name="train" /></span><span><strong>{{ record.status === 'in_progress' ? '旧版未完成记录' : '已记录的训练' }}</strong><small>{{ record.recordedTime ?? '时间未记录' }} · {{ record.items.filter(i => i.status === 'completed').map(i => i.performedExerciseName ?? i.exerciseName).join('、') || '没有已确认动作' }}</small></span><AppIcon name="arrow" /></summary>
         <ul><li v-for="item in record.items.filter(i => i.status === 'completed')" :key="item.id"><strong>{{ item.performedExerciseName ?? item.exerciseName }}</strong><span>{{ actionSummary(item) }}</span><p v-if="item.actualNote">{{ item.actualNote }}</p></li></ul>
         <p v-if="!record.items.some(i => i.status === 'completed')">尚无已确认完成的动作。</p><p v-if="record.note">{{ record.note }}</p>
         <div class="form-actions"><button class="action-button" :disabled="saving" @click="edit(record)">修改整条记录</button><button class="text-action" :disabled="saving" @click="remove(record)">删除记录</button></div>
         <details v-if="record.items.some(item => item.status === 'completed')"><summary>更多</summary><button class="text-action" :disabled="saving" @click="saveAsPlan(record)">存为我的计划</button><TrainingReview :key="record.id" :record="record" @saved="loadData" /></details>
+        </details>
       </article>
     </template>
   </AppShell>

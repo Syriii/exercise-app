@@ -60,7 +60,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(items).toHaveCount(2);
   const rice = items.filter({ hasText: "米饭" });
   const chicken = items.filter({ hasText: "鸡腿" });
-  await expect(page.getByText("已记录 620 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("620 kcal")).toBeVisible();
   await rice.getByRole("button", { name: "改份量" }).click();
   await rice.getByLabel("米饭份量（g）").fill("100");
   let failOnce = true;
@@ -74,7 +74,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(rice.getByRole("alert")).toBeVisible();
   await expect(rice.getByLabel("米饭份量（g）")).toHaveValue("100");
   await rice.getByRole("button", { name: "保存份量" }).click();
-  await expect(page.getByText("已记录 500 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("500 kcal")).toBeVisible();
   await expect(rice.getByText(/120 kcal/)).toBeVisible();
   await expect(chicken.getByText(/380 kcal/)).toBeVisible();
   await reveal(rice.getByRole("button", { includeHidden: true, name: "设为常用" }));
@@ -93,12 +93,12 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(dinner.locator(".meal-items > li")).toHaveCount(1);
   await expect(dinner.locator(".meal-items").getByText(/60 kcal/)).toBeVisible();
   await expect(rice.getByText(/120 kcal/)).toBeVisible();
-  await expect(page.getByText("已记录 560 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("560 kcal")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await reveal(chicken.getByRole("button", { includeHidden: true, name: "移除" }));
   await chicken.getByRole("button", { name: "移除" }).click();
   await expect(items).toHaveCount(1);
-  await expect(page.getByText("已记录 180 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("180 kcal")).toBeVisible();
   await analysis.getByText("查看已保存照片", { exact: true }).click();
   await expect.poll(() => analysis.getByRole("img", { name: "本次识别使用的餐食照片" }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1);
   const originalUrl = await analysis.getByRole("img", { name: "本次识别使用的餐食照片" }).getAttribute("src");
@@ -114,7 +114,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await expect(analysis.getByText("查看已保存照片", { exact: true })).toHaveCount(0);
   expect((await page.request.get(originalUrl!)).status()).toBe(404);
   await expect(items).toHaveCount(1);
-  await expect(page.getByText("已记录 180 kcal")).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("180 kcal")).toBeVisible();
   await analysis.getByText("查看原始识别结果", { exact: true }).click();
   await expect(analysis.locator(".observed-foods").getByText("米饭", { exact: true })).toBeVisible();
   await rice.scrollIntoViewIfNeeded();

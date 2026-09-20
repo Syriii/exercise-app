@@ -70,9 +70,8 @@ async function submit() {
     <section class="access-card" aria-labelledby="access-title">
       <header class="access-brand"><span class="brand-mark"><AppIcon name="leaf" /></span><strong>Exercise App</strong></header>
       <div class="access-copy">
-        <p class="date-line">训练和饮食，按实际记录</p>
         <h1 id="access-title">{{ mode === "login" ? "登录" : "创建账号" }}</h1>
-        <p>{{ mode === "login" ? "回到今天的安排。" : "账号只用于保存你自己的训练和饮食记录。" }}</p>
+        <p v-if="mode === 'register'">保存你的训练和饮食记录。</p>
       </div>
 
       <p v-if="mode === 'login' && route.query.accountDeletion === 'requested'" class="form-notice" role="status">账号删除请求已提交。所有设备已退出，后台会继续清理该账号的数据和临时照片。</p>
@@ -80,14 +79,14 @@ async function submit() {
       <form class="access-form" @submit.prevent="submit">
         <label><span>用户名</span><input v-model="username" name="username" autocomplete="username" minlength="3" maxlength="32" required :disabled="authenticated || submitting" /></label>
         <label v-if="!authenticated"><span>密码</span><input v-model="password" name="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" type="password" :minlength="mode === 'register' ? 8 : 1" maxlength="128" required :disabled="submitting" /></label>
-        <p v-if="mode === 'register'" class="field-note">至少 8 个字符。密码不会以明文保存。</p>
+        <p v-if="mode === 'register'" class="field-note">密码至少 8 个字符</p>
         <fieldset v-if="mode === 'register'" class="registration-photo-options" :disabled="submitting">
           <label class="checkbox-row"><input v-model="automaticPhoto" type="checkbox" />拍照后自动识别（可选）</label>
           <template v-if="automaticPhoto">
             <p class="field-help">所选照片会发送给配置的模型服务估算食物和营养，不发送其他餐食或账号资料。上传照片、识别结果和修改过程保留到你主动删除，用于回看和后续优化；不会自动对外分享或训练。</p>
             <label class="checkbox-row"><input v-model="photoConsent" type="checkbox" required />我了解并同意上述照片发送范围</label>
           </template>
-          <p class="field-help">不启用也可以记录饮食，之后可在“我的 → 应用设置”修改。</p>
+          <p class="field-help">之后可在应用设置中开启。</p>
         </fieldset>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
         <button class="action-button action-button--primary" type="submit" :disabled="submitting || (mode === 'register' && !registrationOpen)">

@@ -56,13 +56,13 @@ function clearProblemDiagnostics() {
 <template>
   <AppShell page-class="feedback-page" rail-note="遇到问题时，从这里生成报告。">
     <header class="view-header">
-      <div><h1>帮助与反馈</h1><p>写下问题，检查报告后再分享给应用维护者。</p></div>
+      <div><h1>帮助与反馈</h1></div>
       <button class="action-button" type="button" @click="router.push({ name: 'settings' })">返回设置</button>
     </header>
 
     <section class="work-panel problem-report-panel" aria-labelledby="problem-report-title">
-      <div class="panel-heading"><div><h2 id="problem-report-title">发生了什么</h2><p>说明刚才的操作、看到的结果和你原本的预期。</p></div><span class="status-chip">不会自动上传</span></div>
-      <label class="problem-description"><span>问题描述（可选）</span><textarea v-model="problemDescription" rows="5" maxlength="2000" placeholder="例如：保存体重后页面提示服务器暂时无法处理。不要填写密码、Key 或其他敏感信息。" /></label>
+      <div class="panel-heading"><h2 id="problem-report-title">发生了什么</h2><span class="status-chip">不会自动上传</span></div>
+      <label class="problem-description"><span>问题描述（可选）</span><textarea v-model="problemDescription" rows="3" maxlength="2000" placeholder="刚才的操作和遇到的问题，请勿填写密码或密钥。" /></label>
       <div class="form-actions">
         <button class="action-button action-button--primary" type="button" :disabled="generating" @click="generateProblemReport">{{ generating ? '正在生成…' : '生成问题报告' }}</button>
         <button v-if="problemReport" class="action-button" type="button" @click="copyProblemReport">复制报告</button>
@@ -70,7 +70,7 @@ function clearProblemDiagnostics() {
       </div>
       <p v-if="notice" :class="reportFailed ? 'form-error' : 'data-note'" :role="reportFailed ? 'alert' : 'status'">{{ notice }}</p>
       <label v-if="problemReport" class="problem-report-preview"><span>报告预览</span><textarea :value="problemReport" rows="16" readonly spellcheck="false" @focus="($event.target as HTMLTextAreaElement).select()" /></label>
-      <p class="data-note">本页不会自动提交反馈。复制或下载后，请通过你与应用维护者已有的联系方式发送。</p>
+      <p v-if="problemReport" class="data-note">检查报告后，复制或下载发给应用维护者。</p>
       <details class="feedback-privacy"><summary>报告包含什么</summary><p>自动附加的信息仅包含当前页面、浏览器环境、服务状态和近期错误，不读取密码、照片或训练饮食明细。你填写的问题描述也会加入报告，分享前请检查是否包含个人信息。</p><button class="text-action" type="button" @click="clearProblemDiagnostics">清除本机错误记录</button></details>
     </section>
   </AppShell>

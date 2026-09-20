@@ -11,31 +11,27 @@ const extra = ref(!!props.item.targetSets && !!(props.item.targetDurationSeconds
 </script>
 <template>
   <div class="plan-target-fields">
-    <div class="measurement-chips" role="group" aria-label="目标类型">
-      <button class="category-chip" type="button" :aria-pressed="!activity" @click="activity = false">按组目标</button>
-      <button class="category-chip" type="button" :aria-pressed="activity" @click="activity = true">时长／距离目标</button>
-      <button class="text-action" type="button" :aria-expanded="extra" @click="extra = !extra">{{ extra ? '收起其他量' : '其他量' }}</button>
-    </div>
+    <label class="target-type"><span class="sr-only">目标类型</span><select v-model="activity"><option :value="false">组数 / 次数</option><option :value="true">时长 / 距离</option></select></label>
     <div class="target-quantities">
       <template v-if="!activity || extra">
-        <label>目标组数<input v-model="item.targetSets" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-        <label>{{ weightLabel }}<input v-model="item.targetWeightKg" inputmode="decimal" placeholder="可不填" /></label>
-        <label>{{ minimumLabel }}<input v-model="item.targetRepsMin" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
-        <label>{{ maximumLabel }}<input v-model="item.targetRepsMax" inputmode="numeric" type="number" min="1" placeholder="可不填" /></label>
+        <label>组数<input v-model="item.targetSets" aria-label="目标组数" inputmode="numeric" type="number" min="1" placeholder="—" /></label>
+        <label>{{ item.targetRepsMax ? '最少次数' : '次数' }}<input v-model="item.targetRepsMin" :aria-label="minimumLabel" inputmode="numeric" type="number" min="1" placeholder="—" /></label>
+        <label>重量 kg<input v-model="item.targetWeightKg" :aria-label="weightLabel" inputmode="decimal" placeholder="—" /></label>
       </template>
       <template v-if="activity || extra">
         <label>目标时长（秒）<input v-model="item.targetDurationSeconds" type="number" inputmode="numeric" min="1" placeholder="可不填" /></label>
         <label>目标距离（米）<input v-model="item.targetDistanceMeters" inputmode="decimal" placeholder="可不填" /></label>
       </template>
     </div>
+    <details :open="!!item.targetRepsMax"><summary>更多目标{{ item.targetRepsMax ? ' · 次数范围' : '' }}</summary><label>最多次数<input v-model="item.targetRepsMax" :aria-label="maximumLabel" inputmode="numeric" type="number" min="1" placeholder="—" /></label><button class="text-action" type="button" :aria-pressed="extra" @click="extra = !extra">其他量</button><p class="field-help">未知可留空；次数只填下限时不假定上限。收起字段保留已填值。</p></details>
     <small v-if="!extra && (activity ? !!(item.targetSets || item.targetRepsMin || item.targetRepsMax || item.targetWeightKg) : !!(item.targetDurationSeconds || item.targetDistanceMeters))">其他量已有填写，切换类型不会清空。</small>
   </div>
 </template>
 <style scoped>
 .plan-target-fields { grid-column: 1 / -1; display:grid; gap:var(--space-sm); min-width:0; }
 .measurement-chips { display:flex; flex-wrap:wrap; gap:var(--space-xs); }
-.target-quantities { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-sm); }
+.target-quantities { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-xs); }
+.target-type { justify-self:start; } .target-type select { min-height:44px; max-width:100%; }
 label { display:grid; gap:var(--space-xs); min-width:0; font-size:var(--text-sm); }
 input { width:100%; min-width:0; min-height:44px; padding:var(--space-xs); border:1px solid var(--color-rule-strong); border-radius:var(--radius-sm); background:var(--color-paper); color:var(--color-ink); }
-@media(min-width:40rem) { .target-quantities { grid-template-columns:repeat(4,minmax(0,1fr)); } }
 </style>

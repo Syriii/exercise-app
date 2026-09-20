@@ -1,3 +1,4 @@
+import { reveal } from "./helpers/disclosure";
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { completeSetup } from "./helpers/setup";
@@ -8,9 +9,11 @@ async function register(page: Page) {
   await page.getByRole("button", { name: "注册", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/setup$/);
 }
-test("mandatory setup resumes persisted steps and unknown values never become measurements", async ({ page }) => {
+test("mandatory setup resumes persisted steps and unknown values never become measurements", async ({ page }, info) => {
   await register(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("基础资料");
+  await expect(page.getByLabel('身高（cm）')).toBeVisible();
+  await page.screenshot({ animations: 'disabled', path: info.outputPath('setup-profile.png') });
   await expect(page.getByRole("button", { name: "以后再设置" })).toHaveCount(0);
   await page.getByLabel("身高（cm）").fill("172");
   await page.getByRole("button", { name: "下一步", exact: true }).click();
@@ -46,13 +49,17 @@ test("body corrections preserve actual time, retry safely, and return to filtere
   expect(first).toHaveLength(1);
   await page.getByLabel("测量日期", { exact: true }).fill("2026-08-01");
   await page.getByLabel("体重（kg）", { exact: true }).fill("80");
+  await reveal(page.getByLabel("腰围（cm，可选）", { exact: true }));
   await page.getByLabel("腰围（cm，可选）", { exact: true }).fill("85");
   await page.getByRole("button", { name: "记录这次测量" }).click();
-  await expect(page.getByText("当前体重 70 kg · 测量于 2026-09-10", { exact: true })).toBeVisible();
-  await expect(page.getByText("当前腰围 85 cm · 测量于 2026-08-01", { exact: true })).toBeVisible();
+  await expect(page.locator('.body-summary > div').filter({ hasText: '当前体重' })).toContainText('70 kg');
+  await expect(page.locator('.body-summary > div').filter({ hasText: '当前体重' })).toContainText('2026-09-10');
+  await expect(page.locator('.body-summary > div').filter({ hasText: '当前腰围' })).toContainText('85 cm');
+  await expect(page.locator('.body-summary > div').filter({ hasText: '当前腰围' })).toContainText('2026-08-01');
   await page.goto("/history?filter=measurement&from=2026-08-01&to=2026-09-16&date=2026-09-10");
   await page.getByRole("button", { name: "查看／修正身体记录" }).click();
   await expect(page.getByLabel("测量日期", { exact: true })).toHaveValue("2026-09-10");
+  await reveal(page.getByLabel("备注（可选）", { exact: true }));
   await page.getByLabel("备注（可选）", { exact: true }).fill("只改备注");
   await page.getByRole("button", { name: "保存修正", exact: true }).click();
   await expect(page).toHaveURL(/\/history\?/);
@@ -63,7 +70,7 @@ test("body corrections preserve actual time, retry safely, and return to filtere
   page.once("dialog", dialog => dialog.accept());
   await page.locator(".measurement-list li").filter({ hasText: "2026-09-10" }).getByRole("button", { name: "删除", exact: true }).click();
   await expect(page).toHaveURL(/\/history\?/);
-  await expect(page.getByText("这段时间没有符合筛选的记录。未记录不代表没有运动或进食。")).toBeVisible();
+  await expect(page.getByText("这段时间没有符合筛选的记录。")).toBeVisible();
   await page.getByRole("button", { name: "趋势", exact: true }).click();
   await expect(page.getByRole("heading", { name: "身体趋势" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

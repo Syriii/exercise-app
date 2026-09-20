@@ -77,15 +77,15 @@ onBeforeUnmount(() => { ++sequence; window.clearInterval(timer); window.removeEv
     <p v-if="loading" role="status">正在读取今天的内容…</p>
     <div v-else class="view-stack">
       <section class="balance-panel" aria-labelledby="today-food-title">
-        <div class="panel-heading"><h2 id="today-food-title">今天已记录的饮食</h2></div>
+        <div class="panel-heading"><h2 id="today-food-title"><AppIcon name="food" />今天已记录的饮食</h2></div>
         <p v-if="nutritionReminder?.state === 'due'" class="data-note">到记餐提醒时间了。 <button class="text-action" @click="dismiss('nutrition')">今天不再提醒</button></p>
         <div class="hero-energy"><dl><dt>已记录能量</dt><dd>{{ valueText(summary?.energyKcal, 'kcal') }}</dd></dl><FoodArt kind="rice" /></div>
         <dl class="macro-grid"><div v-for="nutrient in nutrients.slice(1)" :key="nutrient.key"><dt>{{ nutrient.label }}</dt><dd>{{ valueText(summary?.[nutrient.key], nutrient.unit) }}</dd></div></dl>
         <p class="data-note">{{ summary && summary.mealCount > 0 && nutrients.some(n => !summary![n.key].complete) ? '部分营养未知，合计仅含已知值。' : '仅统计已记录餐食，不代表全天摄入。' }}</p>
         <button class="action-button action-button--primary" @click="openNutrition(true)"><AppIcon name="camera" />拍照记一餐</button>
         <button class="today-last-meal text-action" @click="openNutrition()">
-          <template v-if="lastMeal">上一餐 {{ new Date(lastMeal.occurredAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }} · {{ lastMeal.name ?? '餐食' }} · 查看今天餐食 →</template>
-          <template v-else>{{ meals === null ? '餐食暂时无法读取' : '今天还没有餐食记录' }} · 进入饮食 →</template>
+          <AppIcon name="clock" /><span v-if="lastMeal">上一餐 {{ new Date(lastMeal.occurredAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }} · {{ lastMeal.name ?? '餐食' }}</span>
+          <span v-else>{{ meals === null ? '餐食暂时无法读取' : '查看今天餐食' }}</span><AppIcon name="arrow" />
         </button>
       </section>
       <section class="work-panel today-training-panel" aria-labelledby="today-training-title">
@@ -103,7 +103,7 @@ onBeforeUnmount(() => { ++sequence; window.clearInterval(timer); window.removeEv
 </template>
 
 <style scoped>
-.today-last-meal { display: block; text-align: left; width: 100%; }
+.today-last-meal { display: flex; text-align: left; width: 100%; } .today-last-meal span { flex:1; overflow-wrap:anywhere; }
 .metric-list dd { font-size: clamp(1rem, 2vw, 1.6rem); }
 .balance-panel, .today-training-panel { gap: .75rem; padding: 1rem; }
 .metric-list > div { padding-block: .5rem; }

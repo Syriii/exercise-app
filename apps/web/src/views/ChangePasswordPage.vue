@@ -35,7 +35,7 @@ async function submit() {
 <template>
   <main class="access-page">
     <section class="access-card" aria-labelledby="password-title">
-      <div class="access-copy"><p class="date-line">账号安全</p><h1 id="password-title">修改密码</h1><p>修改成功后，之前的登录状态都会失效，这台设备会自动换用新会话。</p></div>
+      <div class="access-copy"><h1 id="password-title">修改密码</h1><p>保存后其他设备将退出，本机保持登录。</p></div>
       <form class="access-form" @submit.prevent="submit">
         <label><span>当前密码</span><input v-model="currentPassword" type="password" autocomplete="current-password" required /></label>
         <label><span>新密码</span><input v-model="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required /></label>

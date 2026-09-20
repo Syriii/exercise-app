@@ -20,6 +20,7 @@ test("a person can create an evidence-backed daily nutrition reference", async (
 
   const measurements = page.getByRole("region", { name: "身体测量" });
   await measurements.getByLabel("体重（kg）").fill("63");
+  await reveal(measurements.getByLabel("腰围（cm，可选）"));
   await measurements.getByLabel("腰围（cm，可选）").fill("72");
   await page.getByRole("button", { name: "下一步" }).click();
 
@@ -37,7 +38,7 @@ test("a person can create an evidence-backed daily nutrition reference", async (
   await page.goto("/nutrition");
   const dailyReference = page.getByRole("region", { name: "当天营养" });
   await expect(dailyReference.getByText("每日参考 2275 kcal", { exact: true })).toBeVisible();
-  await expect(dailyReference.getByText("已记录 0 kcal", { exact: true })).toBeVisible();
+  await expect(dailyReference.getByText("0 kcal", { exact: true })).toBeVisible();
   await expect(dailyReference.getByText("尚未记录餐食。")).toBeVisible();
   await expect(page.getByRole("region", { name: "还可以吃" })).toHaveCount(0);
   await dailyReference.getByText("参考说明与计算依据", { exact: true }).click();

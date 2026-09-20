@@ -26,6 +26,7 @@ test("independent dated plan accumulates two post-workout records and recomputes
   await page.reload();
   const plan = page.getByRole("article", { name: "当天计划" });
   await expect(plan).toContainText("卧推"); await expect(plan).not.toContainText("夹胸");
+  await reveal(plan.getByRole("button", { includeHidden: true, name: "从当天计划记录" }));
   await plan.getByRole("button", { name: "从当天计划记录" }).click();
   await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await expect(page.getByLabel("组数", { exact: true })).toHaveValue("3");
@@ -33,12 +34,14 @@ test("independent dated plan accumulates two post-workout records and recomputes
   await page.getByLabel("组数", { exact: true }).fill("2");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(plan).toContainText("已记录 2／3 组");
+  await reveal(plan.getByRole("button", { includeHidden: true, name: "从当天计划记录" }));
   await plan.getByRole("button", { name: "从当天计划记录" }).click();
   await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await page.getByLabel("组数", { exact: true }).fill("1");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(plan).toContainText("已记录 3／3 组");
   await expect(page.getByRole("article", { name: "已存训练记录" })).toHaveCount(2);
+  await reveal(plan.getByRole("button", { includeHidden: true, name: "修改当天计划／改期" }));
   await plan.getByRole("button", { name: "修改当天计划／改期" }).click();
   await page.getByLabel("目标组数", { exact: true }).fill("5");
   await page.locator('.app-main').evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
@@ -50,11 +53,14 @@ test("independent dated plan accumulates two post-workout records and recomputes
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const records = page.getByRole("article", { name: "已存训练记录" });
   page.once("dialog", dialog => dialog.accept());
+  await reveal(records.first().getByRole("button", { includeHidden: true, name: "删除记录", exact: true }));
   await records.first().getByRole("button", { name: "删除记录", exact: true }).click();
   await expect(records).toHaveCount(1);
   await expect(plan).toContainText("已记录 2／5 组");
+  await reveal(records.first().getByText("更多", { exact: true }));
   await records.first().getByText("更多", { exact: true }).click();
   page.once("dialog", dialog => dialog.accept("实际内容存为计划"));
+  await reveal(records.first().getByRole("button", { includeHidden: true, name: "存为我的计划", exact: true }));
   await records.first().getByRole("button", { name: "存为我的计划", exact: true }).click();
   await expect(page.getByText("已存入我的计划，未安排日期；可在计划中继续调整。", { exact: true })).toBeVisible();
   const templates = await (await page.request.get("/api/v1/training/templates")).json();
@@ -68,6 +74,7 @@ test("independent dated plan accumulates two post-workout records and recomputes
 
 test("stale linked drafts preserve input and can detach without creating a duplicate record", async ({ page }) => {
   const { schedule } = await setup(page);
+  await reveal(page.getByRole("button", { includeHidden: true, name: "从当天计划记录" }));
   await page.getByRole("button", { name: "从当天计划记录" }).click();
   await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await page.getByLabel("组数", { exact: true }).fill("2");
@@ -86,10 +93,12 @@ test("stale linked drafts preserve input and can detach without creating a dupli
 
 test("rescheduling leaves facts in place and copying last actual content drops the old association", async ({ page }) => {
   await setup(page);
+  await reveal(page.getByRole("button", { includeHidden: true, name: "从当天计划记录" }));
   await page.getByRole("button", { name: "从当天计划记录" }).click();
   await page.getByRole('checkbox', { name: '记录已做：卧推' }).check();
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByRole("article", { name: "当天计划" })).toContainText("已记录 3／3 组");
+  await reveal(page.getByRole("button", { includeHidden: true, name: "修改当天计划／改期" }));
   await page.getByRole("button", { name: "修改当天计划／改期" }).click();
   await reveal(page.getByLabel("安排日期"));
   await page.getByLabel("安排日期").fill("2027-01-01");

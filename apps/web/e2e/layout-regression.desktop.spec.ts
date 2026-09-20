@@ -82,6 +82,7 @@ test("main pages stay readable and non-overlapping across supported widths", asy
     await page.goto("/login");
     await expect(page.locator("h1").first()).toBeVisible();
     await expectStableLayout(page, "/login", width);
+    if (width === 375) await page.screenshot({ path: testInfo.outputPath('login-375.png') });
   }
   await login(page);
   // The anonymous /auth/me probe intentionally returns 401 on the login page;
@@ -94,6 +95,7 @@ test("main pages stay readable and non-overlapping across supported widths", asy
       await expect(page.locator("h1").first()).toBeVisible();
       await page.waitForLoadState("networkidle");
       await expectStableLayout(page, route, width);
+      if (width === 375 && route === '/admin') await page.screenshot({ path: testInfo.outputPath('admin-375.png') });
       if (width === 414 && ["/today", "/training", "/nutrition", "/settings/data", "/feedback"].includes(route)) {
         await page.screenshot({path:testInfo.outputPath(`${route.replaceAll('/', '-')}-414.png`)});
       }

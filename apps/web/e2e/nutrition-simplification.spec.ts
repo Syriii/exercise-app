@@ -39,11 +39,11 @@ test("meals open on demand; metadata drafts survive failure and navigation, and 
   await form.getByRole("button", { name: "保存餐食信息" }).click();
   await expect(page.getByText("餐食已移至 2026-09-07，原日期不再重复计入")).toBeVisible();
   await expect(page.locator(".meal-card")).toHaveCount(0);
-  await expect(page.getByText("已记录 0 kcal", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("0 kcal", { exact: true })).toBeVisible();
   await page.getByLabel("查看日期").fill("2026-09-07");
   await page.getByLabel("查看日期").dispatchEvent("change");
   await expect(page.locator(".meal-card")).toHaveCount(1);
-  await expect(page.getByText("已记录 80 kcal", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("80 kcal", { exact: true })).toBeVisible();
   if (info.project.name === "mobile-chromium") {
     await page.locator(".app-main").evaluate(element => { element.scrollTop = 0; });
     const photo = await page.getByRole("button", { name: "拍照记一餐", exact: true }).boundingBox();
@@ -70,7 +70,7 @@ test("expired original images never promise retry and food details still work", 
   await expect(meal.getByRole("button", { name: "重新分析", exact: true })).toHaveCount(0);
   await expect(meal.getByText(/原图仍在/)).toHaveCount(0);
   await addPersonalFood(meal, "手动补记的青菜");
-  await expect(page.getByText("已记录 未知", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "当天营养" }).getByText("未知", { exact: true }).first()).toBeVisible();
 });
 
 test("reopening a photo draft keeps the attachment visible and removable", async ({ page }) => {

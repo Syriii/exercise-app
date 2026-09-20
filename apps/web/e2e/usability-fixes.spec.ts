@@ -21,6 +21,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('completion saves all draft actions; a lost response can be retried without duplication', async ({ page }) => {
   await navigate(page,'训练');
   await page.getByRole('button',{name:'记录训练内容',exact:true}).click();
+  await reveal(page.getByText('一次添加多个动作',{exact:true}));
   await page.getByText('一次添加多个动作',{exact:true}).click();
   await page.getByLabel('动作名称，每行一个').fill('深蹲\n卧推\n拉伸');
   await page.getByRole('button',{name:'加入这些动作'}).click();
@@ -92,7 +93,7 @@ test('food draft survives tab navigation; account actions are discoverable and l
 test('mobile headers leave the first feedback field visible and sharing remains explicit', async ({ page }, testInfo) => {
   await page.goto('/feedback');
   await expect(page.getByRole('heading',{name:'帮助与反馈',exact:true})).toBeVisible();
-  await expect(page.getByText('本页不会自动提交反馈。复制或下载后，请通过你与应用维护者已有的联系方式发送。')).toBeVisible();
+  await expect(page.getByText('不会自动上传', { exact: true })).toBeVisible();
   await expect(page.getByRole('button',{name:'清除本机错误记录'})).toBeHidden();
   if (testInfo.project.name === 'mobile-chromium') {
     const field = await page.getByLabel('问题描述（可选）').boundingBox();
