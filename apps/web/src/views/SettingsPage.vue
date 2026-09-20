@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
 import AppShell from "../app/AppShell.vue";
+import PhotoAnalysisSettings from "../features/nutrition/PhotoAnalysisSettings.vue";
+import AppIcon from "../components/AppIcon.vue";
 import {
   planningApi,
   type BodyMeasurement,
@@ -499,12 +501,13 @@ onDeactivated(() => { if (portabilityTimer !== undefined) window.clearInterval(p
           </ol>
 
           <section v-if="!setupActive && selectedSection === null" class="settings-overview" aria-label="设置项目">
-            <button type="button" @click="openSettingsSection('measurement')"><span><strong>身体数据</strong><small>{{ latestMeasurement ? `${latestMeasurement.weightKg} kg · 测量于 ${latestMeasurement.localDate}` : '还没有体重记录' }} · 记录、修正和趋势</small></span><b aria-hidden="true">›</b></button>
-            <button type="button" @click="openSettingsSection('profile')"><span><strong>基础资料</strong><small>出生日期、性别、身高和活动水平</small></span><b aria-hidden="true">›</b></button>
-            <button type="button" @click="openSettingsSection('strategy')"><span><strong>目标与营养</strong><small>{{ weightStrategyLabel }} · 系统据此计算每日参考</small></span><b aria-hidden="true">›</b></button>
-            <button type="button" @click="openSettingsSection('preferences')"><span><strong>应用设置</strong><small>提醒、账号、数据与帮助</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" class="body-overview-card" @click="openSettingsSection('measurement')"><AppIcon name="scale" /><span><strong>身体数据</strong><span class="body-weight">{{ latestMeasurement ? latestMeasurement.weightKg + ' kg' : '记录体重' }}</span><small>{{ latestMeasurement ? '测量于 ' + latestMeasurement.localDate : '有测量值时再记录' }} · 记录、修正和趋势</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('profile')"><AppIcon name="user" /><span><strong>基础资料</strong><small>出生日期、性别、身高和活动水平</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('strategy')"><AppIcon name="leaf" /><span><strong>目标与营养</strong><small>{{ weightStrategyLabel }} · 系统据此计算每日参考</small></span><b aria-hidden="true">›</b></button>
+            <button type="button" @click="openSettingsSection('preferences')"><AppIcon name="settings" /><span><strong>应用设置</strong><small>识别、提醒、账号、数据与帮助</small></span><b aria-hidden="true">›</b></button>
           </section>
           <section v-if="!setupActive && selectedSection === 'preferences'" class="settings-overview" aria-label="应用设置">
+            <PhotoAnalysisSettings />
             <button type="button" @click="openSettingsSection('reminders')"><span><strong>提醒</strong><small>已开启 {{ enabledReminderCount }} 项</small></span><b aria-hidden="true">›</b></button>
             <button type="button" @click="openSettingsSection('data')"><span><strong>数据与账号</strong><small>导出记录或管理账号</small></span><b aria-hidden="true">›</b></button>
             <button type="button" @click="router.push({ name: 'feedback' })"><span><strong>帮助与反馈</strong><small>生成问题报告，检查后分享给应用维护者</small></span><b aria-hidden="true">›</b></button>

@@ -95,7 +95,7 @@ test('mobile headers leave the first feedback field visible and sharing remains 
     const field = await page.getByLabel('问题描述（可选）').boundingBox();
     expect(field).not.toBeNull();
     expect(field!.y+field!.height).toBeLessThan(page.viewportSize()!.height-80);
-    await expect(page.locator('.mobile-brand')).toHaveText('EA');
+    await expect(page.locator('.mobile-brand')).toHaveText('Exercise App');
   }
   await page.getByLabel('问题描述（可选）').fill('保存后没有看到记录');
   await page.getByRole('button',{name:'生成问题报告'}).click();

@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { ApiError } from "../../api/client";
 import { nutritionApi, type Meal, type MealContribution } from "../../api/nutrition";
+import AppIcon from "../../components/AppIcon.vue";
 
 const props = defineProps<{ meal: Meal; item: MealContribution; disabled: boolean }>();
 const emit = defineEmits<{ saved: [meal: Meal]; edit: []; replace: []; remove: []; favorite: [] }>();
@@ -31,7 +32,7 @@ async function savePortion() {
 <template>
   <li class="food-item">
     <div>
-      <strong>{{ item.label }}</strong>
+      <strong><AppIcon name="food" />{{ item.label }}</strong>
       <span>{{ item.portionAmount ?? '份量未知' }} {{ item.portionUnit ?? '' }}<template v-if="item.source === 'model_adopted' || item.basisDescription?.startsWith('照片估算')"> · 照片估算</template></span>
       <small>{{ nutrient(item.energyKcal, 'kcal') }} · 蛋白质 {{ nutrient(item.proteinGrams, 'g') }} · 碳水 {{ nutrient(item.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrient(item.fatGrams, 'g') }}</small>
     </div>
@@ -40,7 +41,7 @@ async function savePortion() {
       <button class="text-action" type="button" :disabled="disabled || saving" @click="emit('edit')">修正</button>
       <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('replace')">换食物</button>
       <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('favorite')">设为常用</button>
-      <button class="text-action danger-text" type="button" :disabled="disabled || saving" @click="emit('remove')">移除</button>
+      <button class="text-action danger-text" type="button" :disabled="disabled || saving" @click="emit('remove')"><AppIcon name="trash" />移除</button>
     </span>
     <form v-if="draft" class="portion-editor" @submit.prevent="savePortion">
       <label>{{ item.label }}份量（{{ draft.item.portionUnit }}）<input v-model="draft.amount" type="number" min="0" max="100000" step="any" required :disabled="saving" /></label>

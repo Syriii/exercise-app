@@ -9,15 +9,16 @@ async function photoMeal(page: Page, suffix: string) {
   await page.getByRole("button", { name: "注册", exact: true }).click();
   await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
-  await page.goto("/nutrition");
+  await page.goto("/settings/preferences");
   await page.getByText("拍照识别设置", { exact: true }).click();
   await page.getByLabel("拍照后自动识别", { exact: true }).check();
   await page.getByLabel("我了解并同意上述照片发送范围").check();
   await page.getByRole("button", { name: "保存识别设置" }).click();
   await expect(page.getByText("已保存，仅影响后续上传的照片。")).toBeVisible();
+  await page.goto("/nutrition");
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
   await page.getByLabel("餐次名称（可选）").fill("替换早餐");
-  await page.getByLabel("餐食照片（可选）").setInputFiles({ name: "fixed.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]) });
+  await page.getByLabel("从相册选择餐食照片").setInputFiles({ name: "fixed.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]) });
   await page.getByRole("button", { name: "建立餐次并上传" }).click();
   const meal = page.locator("article.meal-card").filter({ has: page.locator("header strong", { hasText: "替换早餐" }) });
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);

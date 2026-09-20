@@ -3,11 +3,15 @@ import { expect, test, type Page } from "@playwright/test";
 import { addPersonalFood, createMeal } from "./helpers/nutrition";
 
 async function enableAutomaticPhotos(page: Page) {
+  const nav = page.locator(".mobile-dock, .rail-nav");
+  await nav.getByRole("button", { name: /^我的/ }).filter({ visible: true }).click();
+  await page.getByRole("button", { name: /^应用设置/ }).click();
   await page.getByText("拍照识别设置", { exact: true }).click();
   await page.getByLabel("拍照后自动识别", { exact: true }).check();
   await page.getByLabel("我了解并同意上述照片发送范围").check();
   await page.getByRole("button", { name: "保存识别设置" }).click();
   await expect(page.getByText("已保存，仅影响后续上传的照片。")).toBeVisible();
+  await nav.getByRole("button", { name: /^饮食/ }).filter({ visible: true }).click();
 }
 
 test("photo foods count automatically and can be scaled and reused independently", async ({ page }, testInfo) => {
@@ -36,7 +40,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await enableAutomaticPhotos(page);
   await page.getByRole("button", { name: "拍照记一餐" }).click();
   await page.getByLabel("餐次名称（可选）").fill("食堂午饭");
-  await page.getByLabel("餐食照片（可选）").setInputFiles({
+  await page.getByLabel("从相册选择餐食照片").setInputFiles({
     name: "canteen.png",
     mimeType: "image/png",
     buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
@@ -140,7 +144,7 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
   await enableAutomaticPhotos(page);
   await page.getByRole("button", { name: "拍照记一餐" }).click();
   await page.getByLabel("餐次名称（可选）").fill("上传重试餐");
-  await page.getByLabel("餐食照片（可选）").setInputFiles({
+  await page.getByLabel("从相册选择餐食照片").setInputFiles({
     name: "retry.png",
     mimeType: "image/png",
     buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -150,7 +154,7 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
   const meal = page.locator("article.meal-card").filter({ hasText: "上传重试餐" });
   await expect(page.getByText("服务器暂时无法处理请求，请稍后重试")).toBeVisible();
   await expect(page.locator("article.meal-card")).toHaveCount(1);
-  await expect(meal.getByText("retry.png")).toBeVisible();
+  await expect(meal.getByText("retry.png", { exact: true })).toBeVisible();
   await meal.getByRole("button", { name: "上传并识别" }).click();
   await expect(page.getByText("照片已上传；识别完成后会按食物计入，你可以直接修改份量。已有记录不会被覆盖")).toBeVisible();
   await expect(page.locator("article.meal-card")).toHaveCount(1);
@@ -169,7 +173,7 @@ test("manual photo recognition previews a partial replacement, retries safely an
   await addPersonalFood(meal, "原有主食", "100", "g", { energy: "200" });
   await addPersonalFood(meal, "保留豆浆", "200", "ml", { energy: "80" });
   await meal.getByRole("button", { name: "照片与识别" }).click();
-  await meal.getByLabel("拍照或选图", { exact: true }).setInputFiles({ name: "breakfast.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
+  await meal.getByLabel("从相册选择餐食照片", { exact: true }).setInputFiles({ name: "breakfast.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
   await meal.getByRole("button", { name: "上传照片", exact: true }).click();
   const analysis = meal.locator("article.image-analysis-card").first();
   await expect(analysis.getByRole("button", { name: "识别这张照片" })).toBeVisible();

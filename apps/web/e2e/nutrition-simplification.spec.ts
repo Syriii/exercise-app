@@ -76,10 +76,10 @@ test("reopening a photo draft keeps the attachment visible and removable", async
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
   const composer = page.getByRole("region", { name: "快速记餐", exact: true });
   await composer.getByLabel("餐次名称（可选）").fill("保留的草稿");
-  await composer.getByLabel("餐食照片（可选）").setInputFiles({ name: "draft.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
+  await composer.getByLabel("从相册选择餐食照片").setInputFiles({ name: "draft.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
   await expect(composer.getByText(/draft.png/)).toBeVisible();
   await composer.getByRole("button", { name: "收起", exact: true }).click();
-  await page.getByRole("group", { name: "记录餐食" }).getByRole("button", { name: "添加食物", exact: true }).click();
+  await page.getByRole("group", { name: "记录餐食" }).getByRole("button", { name: "手动添加食物", exact: true }).click();
   await expect(composer.getByText(/draft.png/)).toBeVisible();
   await expect(composer.getByLabel("餐次名称（可选）")).toHaveValue("保留的草稿");
   await composer.getByRole("button", { name: "移除待上传照片" }).click();

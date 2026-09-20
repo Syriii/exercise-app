@@ -72,7 +72,7 @@ test("body corrections preserve actual time, retry safely, and return to filtere
 test("today shows four recorded nutrients and opens the shared photo composer", async ({ page }, info) => {
   await register(page); await completeSetup(page);
   await expect(page.getByRole("heading", { name: "今天已记录的饮食" })).toBeVisible();
-  await expect(page.locator(".balance-panel dt")).toHaveText(["能量", "蛋白质", "碳水化合物", "脂肪"]);
+  await expect(page.locator(".balance-panel dt")).toHaveText(["已记录能量", "蛋白质", "碳水化合物", "脂肪"]);
   await expect(page.getByText("今天还可以吃", { exact: true })).toHaveCount(0);
   await expect(page.locator(".view-stack > section")).toHaveCount(2);
   await page.screenshot({ path: info.outputPath("today-empty.png"), fullPage: true });

@@ -2,6 +2,7 @@
 import { computed, onActivated, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppShell from "../app/AppShell.vue";
+import AppIcon from "../components/AppIcon.vue";
 import { ApiError } from "../api/client";
 import { trainingApi, type TrainingSession, type TrainingTemplate, type TrainingProgram, type TrainingSchedule } from "../api/training";
 import RecordActionFields from "../features/training/RecordActionFields.vue";
@@ -193,7 +194,7 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
 
 <template>
   <AppShell page-class="training-page" rail-note="计划是参考，记录只写实际做过的内容。" show-footer>
-    <header class="view-header"><div><h1>训练</h1><p>看计划，或一次记下练过的内容。</p></div><button class="action-button" @click="router.push('/training/plans')">查看／管理计划</button></header>
+    <header class="view-header"><div><h1>训练</h1><p>看计划，或一次记下练过的内容。</p></div><button class="action-button" @click="router.push('/training/plans')"><AppIcon name="calendar" />查看／管理计划</button></header>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p><p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
     <ScheduleEditor v-if="editingPlan" :key="editingPlan.id" :schedule="editingPlan" @saved="planSaved" @close="editingPlan = null" />
     <section v-else-if="draft" class="work-panel" aria-label="训练记录编辑">
@@ -225,6 +226,7 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
     </section>
     <template v-else>
       <section class="work-panel"><div class="panel-heading"><h2>{{ date === today() ? "今天的训练" : "训练记录" }}</h2><label><span class="sr-only">查看日期</span><input v-model="date" type="date" aria-label="查看日期" /></label></div>
+        <button class="action-button action-button--primary" @click="begin"><AppIcon name="plus" />记录训练内容</button>
         <div v-if="todayPlans.length" class="record-plans"><article v-for="plan in todayPlans" :key="plan.id" class="date-plan" aria-label="当天计划">
           <strong>{{ plan.title }}</strong><p>{{ progressSummary(plan) }}</p>
           <ul><li v-for="item in plan.items ?? []" :key="item.id"><strong>{{ item.exerciseName }}</strong><span>{{ itemProgressText(plan.progress?.find(value => value.itemId === item.id)) }}</span><button class="text-action" @click="showGuidance(item.exerciseName)">动作指导</button></li></ul>
@@ -232,7 +234,6 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
         </article></div>
         <ExerciseGuidanceCard v-if="guidanceName" :exercise-name="guidanceName" :guidance="guidance" />
         <p v-if="!visibleRecords.length && !loading">这一天还没有训练记录。练完后，一次记下来就好。</p>
-        <button class="action-button action-button--primary" @click="begin">记录训练内容</button>
       </section>
       <p v-if="loading" role="status">正在读取训练内容…</p>
       <article v-for="record in visibleRecords" :key="record.id" class="work-panel saved-training" aria-label="已存训练记录">

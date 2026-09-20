@@ -62,7 +62,7 @@ test("today opens nutrition with the quick meal form ready", async ({ page }, te
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
   await expect(page).toHaveURL(/\/nutrition/);
   await expect(page.getByRole("region", { name: "快速记餐" })).toBeVisible();
-  await expect(page.getByLabel("餐次名称（可选）")).toBeFocused();
+  await expect(page.getByRole("region", { name: "快速记餐", exact: true })).toBeFocused();
   await expect(page.locator("html")).toHaveAttribute("data-composer-scroll", "instant");
 });
 

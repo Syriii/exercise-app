@@ -5,6 +5,7 @@ import App from "./app/App.vue";
 import { router } from "./router";
 import { initializeDiagnostics } from "./support/diagnostics";
 import "./styles/app.css";
+import "./styles/mobile-redesign.css";
 
 const root = document.querySelector("#root");
 

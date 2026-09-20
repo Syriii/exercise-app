@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 
 import { useSessionStore } from "../stores/session";
 import { navigationItems, type AppSection } from "./modules";
+import AppIcon from "../components/AppIcon.vue";
+const sectionIcons = { today: "today", nutrition: "food", training: "train", history: "history", settings: "user" };
 
 withDefaults(
   defineProps<{
@@ -46,7 +48,7 @@ function openSection(section: AppSection) {
   <div class="prototype-shell" :class="pageClass">
     <aside class="desktop-rail" aria-label="主要导航">
       <div class="brand-block">
-        <span class="brand-mark" aria-hidden="true">EA</span>
+        <span class="brand-mark" aria-hidden="true"><AppIcon name="leaf" /></span>
         <div><strong>Exercise App</strong><small>训练与饮食记录</small></div>
       </div>
       <nav class="rail-nav">
@@ -59,16 +61,15 @@ function openSection(section: AppSection) {
           :aria-current="item.id === activeSection ? 'page' : undefined"
           @click="openSection(item.id)"
         >
-          <span class="nav-button__short" aria-hidden="true">{{ item.shortLabel }}</span>
+          <AppIcon :name="sectionIcons[item.id]" />
           <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
         </button>
       </nav>
-      <p class="rail-note">{{ railNote }}</p>
     </aside>
 
     <div class="app-column">
       <header class="mobile-header">
-        <strong class="mobile-brand" aria-label="Exercise App">EA</strong>
+        <strong class="mobile-brand" aria-label="Exercise App"><AppIcon name="leaf" /> Exercise App</strong>
         <span
           class="mobile-account-name"
           :title="username"
@@ -95,7 +96,7 @@ function openSection(section: AppSection) {
           :aria-current="item.id === activeSection ? 'page' : undefined"
           @click="openSection(item.id)"
         >
-          <span aria-hidden="true">{{ item.shortLabel }}</span>
+          <AppIcon :name="sectionIcons[item.id]" />
           <strong>{{ item.label }}</strong>
         </button>
       </nav>

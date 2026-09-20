@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppShell from "../app/AppShell.vue";
+import BodyTrendChart from "../components/BodyTrendChart.vue";
 import { nutritionApi, type Meal, type NutrientValues } from "../api/nutrition";
 import { planningApi, type BodyMeasurement } from "../api/planning";
 import { trainingApi, type TrainingSession } from "../api/training";
@@ -86,7 +87,7 @@ onMounted(() => void load());
     </template>
     <template v-else>
       <div class="history-filters" aria-label="趋势类型"><button :aria-pressed="metric === 'body'" @click="metric = 'body'">身体</button><button :aria-pressed="metric === 'training'" @click="metric = 'training'">训练</button><button :aria-pressed="metric === 'nutrition'" @click="metric = 'nutrition'">饮食</button></div>
-      <section v-if="metric === 'body'" class="work-panel"><h2>身体趋势</h2><p>仅列出真实测量日期，不补零或推算未测日期。</p><p v-if="!bodyAvailable">身体数据暂时不可用。</p><p v-else-if="!body.length">这段时间没有身体测量记录。</p><ul v-else class="measurement-list"><li v-for="item in body" :key="item.id"><div><strong>{{ item.localDate }}</strong><span>体重 {{ item.weightKg }} kg · 腰围 {{ item.waistCm === null ? '未记录' : item.waistCm + ' cm' }}</span></div><button class="text-action" @click="openRecord('measurement', item.id, item.localDate)">查看／修正</button></li></ul></section>
+      <section v-if="metric === 'body'" class="work-panel"><h2>身体趋势</h2><p>仅列出真实测量日期，不补零或推算未测日期。</p><p v-if="!bodyAvailable">身体数据暂时不可用。</p><p v-else-if="!body.length">这段时间没有身体测量记录。</p><BodyTrendChart v-if="bodyAvailable && body.length" :measurements="body" /><ul v-if="bodyAvailable && body.length" class="measurement-list"><li v-for="item in body" :key="item.id"><div><strong>{{ item.localDate }}</strong><span>体重 {{ item.weightKg }} kg · 腰围 {{ item.waistCm === null ? '未记录' : item.waistCm + ' cm' }}</span></div><button class="text-action" @click="openRecord('measurement', item.id, item.localDate)">查看／修正</button></li></ul></section>
       <section v-else-if="metric === 'training'" class="work-panel"><h2>训练趋势</h2><p v-if="!trainingAvailable">训练记录暂时不可用。</p><template v-else><p>这段时间已记录 {{ actual.length }} 次训练，分布在 {{ trainingDays }} 天。次数按实际训练记录计，不按动作数量计。</p><label>查看某个动作<select v-model="exercise"><option value="">请选择动作</option><option v-for="name in names" :key="name">{{ name }}</option></select></label><p>同一动作逐次回看组数、次数、重量或时长、距离；未记录的数量不当作零，不混合不同动作计算进步。</p><ul class="measurement-list"><li v-for="row in actionRows" :key="row.id"><div><strong>{{ row.date }} · {{ exercise }}</strong><span>{{ row.text }}</span></div><button class="text-action" @click="openRecord('training', row.recordId, row.date)">查看训练</button></li></ul></template></section>
       <section v-else class="work-panel"><h2>饮食趋势</h2><p>按天汇总已记录的四项营养，不等于全天摄入，不计算可能漏记日期的平均摄入。缺少的日期不补零。</p><p v-if="!mealsAvailable">饮食记录暂时不可用。</p><p v-else-if="!mealDates.length">这段时间没有餐食记录。</p><div v-else class="history-trend-table-wrap" tabindex="0" aria-label="饮食趋势，可左右滚动"><table class="history-trend-table"><thead><tr><th>日期</th><th v-for="n in nutrients" :key="n.key">{{ n.label }}</th></tr></thead><tbody><tr v-for="day in mealDates" :key="day"><th scope="row">{{ day }}</th><td v-for="n in nutrients" :key="n.key">{{ nutrientText(day, n.key, n.unit) }}</td></tr></tbody></table></div></section>
     </template>

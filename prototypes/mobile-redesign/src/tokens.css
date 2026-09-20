@@ -1,0 +1,48 @@
+/* Hallmark · pre-emit critique: P4 H4 E4 S5 R4 V4 · design-system: ../design.md */
+:root {
+ --color-paper: oklch(97.2% .009 110);
+ --color-surface: oklch(99.5% .003 110);
+ --color-paper-2: oklch(94.6% .014 145);
+ --color-ink: oklch(27% .025 150);
+ --color-ink-2: oklch(43% .018 150);
+ --color-muted: oklch(48% .015 140);
+ --color-rule: oklch(89% .013 140);
+ --color-control: oklch(64% .022 145);
+ --color-accent: oklch(44% .095 157);
+ --color-accent-hover: oklch(37% .085 157);
+ --color-accent-ink: oklch(99% .002 150);
+ --color-accent-soft: oklch(92% .037 145);
+ --color-focus: oklch(48% .15 255);
+ --color-error: oklch(45% .15 25);
+ --color-error-soft: oklch(95% .025 25);
+ --color-peach: oklch(94% .028 65);
+ --color-lavender: oklch(94% .024 290);
+ --color-protein: oklch(60% .11 155);
+ --color-carbs: oklch(73% .12 74);
+ --color-fat: oklch(65% .07 275);
+ --color-overlay: oklch(20% .02 150 / .32);
+ --color-shadow: oklch(25% .02 150 / .06);
+ --color-art-shadow: oklch(40% .015 140 / .1);
+ --color-art-cream: oklch(92% .06 85);
+ --color-art-white: oklch(99% .013 85);
+ --color-art-yolk: oklch(81% .16 80);
+ --color-art-bowl: oklch(76% .04 160);
+ --color-art-lines: oklch(57% .055 75);
+ --color-art-glass: oklch(88% .028 190);
+ --color-art-straw: oklch(53% .07 160);
+ --color-art-chicken: oklch(74% .1 62);
+ --color-art-grill: oklch(54% .095 60);
+ --color-art-fruit: oklch(66% .15 35);
+ --color-art-leaf: oklch(61% .13 140);
+ --color-art-light-leaf: oklch(84% .075 120);
+ --color-art-vein: oklch(88% .06 110);
+ --color-art-stem: oklch(80% .09 130);
+ --color-art-bread: oklch(81% .085 75);
+ --font-body: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+ --font-display: "Avenir Next", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+ --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 32px; --space-2xl: 48px;
+ --text-sm: 14px; --text-base: 16px; --text-md: 20px; --text-lg: 28px; --text-number: 48px;
+ --radius-sm: 8px; --radius-md: 16px; --radius-lg: 24px; --radius-pill: 999px;
+ --ease-out: cubic-bezier(.16,1,.3,1); --dur-micro: 100ms; --dur-short: 180ms;
+ --z-nav: 20; --z-modal: 40; --z-notice: 50;
+}
