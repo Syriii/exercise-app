@@ -9,6 +9,7 @@ import RecordActionFields from "../features/training/RecordActionFields.vue";
 import TrainingReview from "../features/training/TrainingReview.vue";
 import ScheduleEditor from "../features/training/ScheduleEditor.vue";
 import ExercisePicker from "../features/training/ExercisePicker.vue";
+import TrainingActionPreview from "../features/training/TrainingActionPreview.vue";
 import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { progressSummary, itemProgressText } from "../features/training/plan-progress";
 import { actionFromPlan, actionSummary, blankAction, emptyRecord, recordFromActual, recordPayload, type RecordDraft } from "../features/training/record-draft";
@@ -33,7 +34,7 @@ function pickAction(name: string, measurement: import('../features/training/reco
   if (!draft.value || draft.value.items.length >= 50) return;
   draft.value.items.push({ ...blankAction(name), measurement });
   pickerOpen.value = false;
-  void nextTick(() => recordFields.value?.querySelector<HTMLButtonElement>('.record-action:last-of-type .action-title')?.focus());
+  void nextTick(() => recordFields.value?.querySelector<HTMLElement>('.record-action:last-of-type .action-title')?.focus());
 }
 function report(e: unknown) { error.value = e instanceof Error ? e.message : "暂时保存不了，输入已保留。"; }
 function mayReplace() { return draft.value === null || window.confirm("当前还有未保存的训练内容。放弃这些输入并打开另一条记录吗？"); }
@@ -249,7 +250,7 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
       </section>
       <p v-if="loading" role="status">正在读取训练内容…</p>
       <article v-for="record in visibleRecords" :key="record.id" class="work-panel saved-training" aria-label="已存训练记录">
-        <details class="record-detail"><summary class="record-summary"><span class="section-symbol"><AppIcon name="train" /></span><span><strong>{{ record.status === 'in_progress' ? '旧版未完成记录' : '已记录的训练' }}</strong><small>{{ record.recordedTime ?? '时间未记录' }} · {{ record.items.filter(i => i.status === 'completed').map(i => i.performedExerciseName ?? i.exerciseName).join('、') || '没有已确认动作' }}</small></span><AppIcon name="arrow" /></summary>
+        <details class="record-detail"><summary class="record-summary"><span class="section-symbol"><AppIcon name="train" /></span><span><strong>{{ record.status === 'in_progress' ? '旧版未完成记录' : '已记录的训练' }}</strong><TrainingActionPreview :names="record.items.filter(i => i.status === 'completed').map(i => i.performedExerciseName ?? i.exerciseName)" :time="record.recordedTime ?? '时间未记录'" empty-label="没有已确认动作" /></span><AppIcon name="arrow" /></summary>
         <ul><li v-for="item in record.items.filter(i => i.status === 'completed')" :key="item.id"><strong>{{ item.performedExerciseName ?? item.exerciseName }}</strong><span>{{ actionSummary(item) }}</span><p v-if="item.actualNote">{{ item.actualNote }}</p></li></ul>
         <p v-if="!record.items.some(i => i.status === 'completed')">尚无已确认完成的动作。</p><p v-if="record.note">{{ record.note }}</p>
         <div class="form-actions"><button class="action-button" :disabled="saving" @click="edit(record)">修改整条记录</button><button class="text-action" :disabled="saving" @click="remove(record)">删除记录</button></div>

@@ -24,7 +24,7 @@ function expand() { try { expandSets(item.value); error.value = ""; } catch (e) 
   <section class="record-action" aria-label="动作填写">
     <div class="action-name-heading">
       <label v-if="item.included !== undefined" class="action-included"><input v-model="item.included" type="checkbox" :aria-label="`记录已做：${item.name}`" /><span>{{ item.name }}</span></label>
-      <strong v-else-if="!editingName" class="action-title">{{ item.name }}</strong>
+      <strong v-else-if="!editingName" class="action-title" tabindex="-1">{{ item.name }}</strong>
       <ExerciseNameField v-if="editingName" v-model="item.name" label="动作名称" required />
       <button class="text-action icon-action" aria-label="移除动作" type="button" @click="$emit('remove')"><AppIcon name="close" /></button>
     </div>
@@ -43,7 +43,7 @@ function expand() { try { expandSets(item.value); error.value = ""; } catch (e) 
       <label><span>重量 kg<span class="sr-only">（可选）</span></span><input v-model="item.sets[0]!.weightKg" inputmode="decimal" placeholder="未记录" /></label>
     </div>
     <div v-if="item.measurement !== 'unknown' && (item.measurement !== 'sets' || item.expanded)">
-      <div v-for="(set, index) in item.sets" :key="index" class="record-quantities">
+      <div v-for="(set, index) in item.sets" :key="index" class="record-quantities" :class="{ 'record-quantities--activity': item.measurement === 'activity' }">
         <strong v-if="item.measurement === 'sets'">第 {{ index + 1 }} 组</strong>
         <label v-if="item.measurement !== 'activity'"><span>次数</span><input v-model="set.reps" type="text" inputmode="numeric" min="0" placeholder="未记录" /></label>
         <label v-if="item.measurement !== 'activity'"><span>重量 kg<span class="sr-only">（可选）</span></span><input v-model="set.weightKg" inputmode="decimal" placeholder="未记录" /></label>
@@ -61,6 +61,7 @@ function expand() { try { expandSets(item.value); error.value = ""; } catch (e) 
 <style scoped>
 .record-action { display: grid; gap: var(--space-xs); padding-block: var(--space-sm); border-bottom: 1px solid var(--color-rule); min-width: 0; }
 .record-quantities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-xs); margin-block: var(--space-xs); }
+.record-quantities--activity { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .record-quantities > strong, .set-note { grid-column: 1 / -1; }
 .record-quantities label span { font-size: var(--text-sm); }
 .record-quantities input { padding-inline: var(--space-xs); }

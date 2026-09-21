@@ -31,11 +31,14 @@ test('plan selection, compact targets, reorder, independent schedule and summary
   }
   await reveal(actions.first().getByLabel('最高次数'));
   await actions.first().getByLabel('最高次数').fill('12');
+  await actions.first().getByLabel('最高次数').fill('');
+  await expect(actions.first().getByLabel('最高次数')).toBeVisible();
+  await actions.first().getByLabel('最高次数').fill('12');
   await reveal(actions.first().getByLabel('动作备注'));
   await actions.first().getByLabel('动作备注').fill('保留这条说明');
   await page.getByRole('button', { name: '选择计划动作', exact: true }).click();
   await page.getByRole('button', { name: '添加动作：跑步', exact: true }).click();
-  await actions.last().getByLabel('目标类型').selectOption('true');
+  await expect(actions.last().getByLabel('目标类型')).toHaveValue('true');
   await actions.last().getByLabel('目标时长（秒）').fill('1200');
   await reveal(actions.last().getByRole('button', { name: '上移', includeHidden: true }));
   await actions.last().getByRole('button', { name: '上移', exact: true }).click();

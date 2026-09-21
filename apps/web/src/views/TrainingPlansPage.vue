@@ -9,6 +9,8 @@ import AppShell from "../app/AppShell.vue";
 import AppIcon from '../components/AppIcon.vue';
 import PlanActionEditor from '../features/training/PlanActionEditor.vue';
 import ExercisePicker from '../features/training/ExercisePicker.vue';
+import TrainingActionPreview from '../features/training/TrainingActionPreview.vue';
+import type { Measurement } from '../features/training/record-draft';
 import ExerciseGuidanceCard from "../components/ExerciseGuidanceCard.vue";
 import { trainingSuggestionApi, type TrainingSuggestion, type TrainingSuggestionPreferences } from "../api/training-suggestions";
 import {
@@ -22,6 +24,7 @@ import {
 } from "../api/training";
 
 interface TemplateItemForm {
+  measurement?: Measurement;
   exerciseName: string;
   targetSets: string | number;
   targetRepsMin: string | number;
@@ -115,10 +118,10 @@ function moveItem(items: TemplateItemForm[], index: number, offset: number) {
   if (next < 0 || next >= items.length) return;
   const [item] = items.splice(index, 1); items.splice(next, 0, item!);
 }
-function pickPlanAction(items: TemplateItemForm[], name: string) {
+function pickPlanAction(items: TemplateItemForm[], name: string, measurement: Measurement) {
   const empty = items.find(item => !item.exerciseName.trim());
-  if (empty) empty.exerciseName = name;
-  else if (items.length < 50) items.push({ ...emptyTemplateItem(), exerciseName: name });
+  if (empty) { empty.exerciseName = name; empty.measurement = measurement; }
+  else if (items.length < 50) items.push({ ...emptyTemplateItem(), exerciseName: name, measurement });
   planPickerOpen.value = false;
 }
 
@@ -612,13 +615,13 @@ onActivated(() => void load());
             <form class="template-form" @submit.prevent="saveTemplate">
               <label><span>计划名称</span><input v-model="templateForm.name" required maxlength="80" placeholder="例如：胸部 A" /></label>
               <details><summary>计划备注{{ templateForm.note ? ' · 已填' : '' }}</summary><label><span>计划备注（可选）</span><input v-model="templateForm.note" maxlength="1000" placeholder="例如：时间充足时使用" /></label></details>
-              <ExercisePicker v-if="planPickerOpen || !templateForm.items.some(item => item.exerciseName)" class="wide-field" :disabled="saving" @select="name => pickPlanAction(templateForm.items, name)" />
+              <ExercisePicker v-if="planPickerOpen || !templateForm.items.some(item => item.exerciseName)" class="wide-field" :disabled="saving" @select="(name, measurement) => pickPlanAction(templateForm.items, name, measurement)" />
 
               <div class="template-items">
                 <PlanActionEditor v-for="(item, index) in templateForm.items" :key="itemKey(item)" :item="item" :index="index" :count="templateForm.items.length" @remove="templateForm.items.splice(index, 1)" @move="moveItem(templateForm.items, index, $event)" />
               </div>
 
-              <div class="form-actions">
+              <div class="form-actions selection-save-bar">
                 <button class="text-action" type="button" @click="planPickerOpen = !planPickerOpen"><AppIcon name="plus" />选择计划动作</button>
                 <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存计划" }}</button>
               </div>
@@ -642,7 +645,7 @@ onActivated(() => void load());
           <div v-else class="template-grid">
             <article v-for="template in templates" :key="template.id" class="work-panel template-card">
               <details class="record-detail">
-              <summary class="record-summary"><span class="section-symbol"><AppIcon name="train" /></span><span><h2>{{ template.name }}</h2><small>{{ template.items.length }} 个动作 · {{ template.items.slice(0, 3).map(item => item.exerciseName).join('、') }}</small></span><AppIcon name="arrow" /></summary>
+              <summary class="record-summary"><span class="section-symbol"><AppIcon name="train" /></span><span><h2>{{ template.name }}</h2><TrainingActionPreview :names="template.items.map(item => item.exerciseName)" /></span><AppIcon name="arrow" /></summary>
               <p v-if="template.note">{{ template.note }}</p>
               <ol class="plain-list template-preview">
                 <li v-for="item in template.items" :key="item.id">
@@ -741,9 +744,9 @@ onActivated(() => void load());
                     <div class="template-items wide-field">
                       <PlanActionEditor v-for="(item, index) in unitForm.items" :key="itemKey(item)" :item="item" :index="index" :count="unitForm.items.length" @remove="unitForm.items.splice(index, 1)" @move="moveItem(unitForm.items, index, $event)" />
                     </div>
-                    <details class="wide-field" :open="!unitForm.items.length"><summary>选择计划动作</summary><ExercisePicker :disabled="saving" @select="name => pickPlanAction(unitForm.items, name)" /></details>
+                    <details class="wide-field" :open="!unitForm.items.length"><summary>选择计划动作</summary><ExercisePicker :disabled="saving" @select="(name, measurement) => pickPlanAction(unitForm.items, name, measurement)" /></details>
                   </template>
-                  <div class="form-actions wide-field">
+                  <div class="form-actions wide-field selection-save-bar">
                     <button class="action-button action-button--primary" type="submit" :disabled="saving">{{ saving ? "保存中…" : "保存训练日" }}</button>
                   </div>
                 </form>

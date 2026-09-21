@@ -72,6 +72,7 @@ test('training picks actions, uses compact amounts and preserves hidden notes an
   await page.getByRole('button', { name: '继续选择动作', exact: true }).click();
   await page.getByRole('button', { name: '添加动作：跑步', exact: true }).click();
   const run = page.getByRole('region', { name: '动作填写' }).last();
+  await expect(run.locator('.action-title')).toBeFocused();
   await expect(run.getByLabel('组数', { exact: true })).toHaveCount(0);
   await run.getByLabel('时长（秒）').fill('1200');
   await run.getByLabel('距离（米）').fill('2000');
