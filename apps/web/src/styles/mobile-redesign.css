@@ -246,6 +246,18 @@ summary { cursor: pointer; min-height: 48px; padding-block: 12px; font-size: 14p
 .body-summary dd { font-size:var(--text-lg); font-weight:650; }
 .settings-page .field-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .settings-page .field-grid input, .settings-page .field-grid select { width:100%; min-width:0; }
+.settings-page .profile-fields-wide { grid-column:1/-1; }
+.profile-panel .planning-form, .profile-panel .field-grid { gap:var(--space-sm); }
+.profile-panel .safety-fieldset { border:0; padding:0; gap:var(--space-2xs); }
+.profile-panel .switch-row { min-height:48px; font-weight:400; }
+.setup-progress li.is-current > span, .setup-progress li.is-done > span { color:var(--color-accent); }
+.setup-load-error { align-content:start; max-width:36rem; }
+.setup-load-error h1 { font-size:var(--text-lg); overflow-wrap:anywhere; }
+.setup-load-error p { color:var(--color-ink-2); }
+.setup-load-error .form-error { color:var(--color-error); }
+.setup-load-error .action-button { justify-self:start; white-space:nowrap; }
+.settings-page .setup-navigation { padding-block:var(--space-sm); }
+.settings-page .setup-navigation button { white-space:nowrap; }
 .settings-page .strategy-options:has(.compact-strategy) { display:flex; flex-wrap:wrap; gap:var(--space-xs); }
 .settings-page .compact-strategy { display:flex; flex:1; align-items:center; justify-content:center; gap:var(--space-xs); padding:var(--space-sm); min-height:56px; }
 .compact-strategy input { width:16px; height:16px; }

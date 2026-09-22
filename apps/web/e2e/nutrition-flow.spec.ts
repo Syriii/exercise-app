@@ -173,7 +173,7 @@ test("a person can record, correct, and review a meal without treating unknown n
   await profile.getByLabel("出生日期").fill("2004-08-26");
   await profile.getByLabel("性别").selectOption("female");
   await profile.getByLabel("身高（cm）").fill("165");
-  await profile.getByLabel("日常活动水平").selectOption("low_active");
+  await profile.getByLabel("平时活动量").selectOption("low_active");
   await profile.getByRole("button", { name: "保存基础资料" }).click();
   await page.goto("/settings/measurement");
   const measurements = page.getByRole("region", { name: "身体测量" });

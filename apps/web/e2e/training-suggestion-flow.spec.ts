@@ -16,7 +16,7 @@ test("a person can turn an evidence-backed system suggestion into their own plan
   await profile.getByLabel("出生日期").fill("1995-05-01");
   await profile.getByLabel("性别").selectOption("male");
   await profile.getByLabel("身高（cm）").fill("175");
-  await profile.getByLabel("日常活动水平").selectOption("low_active");
+  await profile.getByLabel("平时活动量").selectOption("low_active");
   await profile.getByRole("button", { name: "保存基础资料" }).click();
 
   await page.goto("/training/plans");

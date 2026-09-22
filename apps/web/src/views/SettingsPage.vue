@@ -23,6 +23,7 @@ const route = useRoute();
 const router = useRouter();
 const sessionStore = useSessionStore();
 const loading = ref(true);
+const setupLoadFailed = ref(false);
 const saving = ref(false);
 const profileSaving = ref(false);
 const strategySaving = ref(false);
@@ -107,10 +108,10 @@ const setupRequested = computed(() => route.params.section === "setup");
 const setupActive = ref(false);
 const setupStep = ref(0);
 const setupSteps = [
-  { id: "profile", label: "基础资料" },
-  { id: "measurement", label: "身体数据" },
-  { id: "strategy", label: "目标方向" },
-  { id: "reminders", label: "提醒" },
+  { id: "profile", label: "基础资料", help: "用于估算营养参考，不确定的资料可留空。" },
+  { id: "measurement", label: "身体数据", help: "记录体重；暂时没测量也可以继续。" },
+  { id: "strategy", label: "目标方向", help: "选择当前方向，以后可以修改。" },
+  { id: "reminders", label: "提醒", help: "按需开启，也可以跳过。" },
 ] as const;
 const setupSaving = computed(() => setupCheckpointSaving.value || profileSaving.value || measurementSaving.value || strategySaving.value || saving.value || nutritionReminderSaving.value || measurementReminderSaving.value);
 const enabledReminderCount = computed(() => [form.enabled, nutritionReminderForm.enabled, measurementReminderForm.enabled].filter(Boolean).length);
@@ -161,6 +162,7 @@ function openDatePicker(event: MouseEvent) {
 
 async function load() {
   loading.value = true;
+  setupLoadFailed.value = false;
   errorMessage.value = "";
   try {
     const setup = await planningApi.getSetup();
@@ -170,7 +172,11 @@ async function load() {
       setupStep.value = !setup.profile ? 0 : !setup.measurement ? 1 : !setup.strategy ? 2 : 3;
     } else if (setupRequested.value) { await router.replace({ name: "settings" }); }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "首次设置进度读取失败，请重试";
+    setupLoadFailed.value = true;
+    if (error instanceof ApiError && error.status === 401) {
+      sessionStore.clearLocalSession();
+      await router.replace({ name: "login", query: { redirect: route.fullPath } });
+    }
     loading.value = false;
     return;
   }
@@ -452,6 +458,7 @@ async function advanceSetup(): Promise<void> {
   if ((setupStep.value === 0 && !profileAvailable.value) || (setupStep.value === 1 && !measurementsAvailable.value) || (setupStep.value === 2 && !strategyAvailable.value)) return;
   if (setupStep.value === 3 && (!trainingReminderAvailable.value || !nutritionReminderAvailable.value || !measurementReminderAvailable.value)) { errorMessage.value = "提醒设置尚未完整载入，请重试或跳过提醒。"; return; }
   setupCheckpointSaving.value = true;
+  errorMessage.value = "";
   try {
   let saved = true;
   if (setupStep.value === 0) saved = await saveProfile();
@@ -497,15 +504,20 @@ onDeactivated(() => { if (portabilityTimer !== undefined) window.clearInterval(p
 <template>
   <AppShell page-class="settings-page" rail-note="资料、提醒和数据都在这里。">
         <header class="view-header settings-header">
-          <div v-if="setupActive"><p class="date-line">首次设置 · {{ setupStep + 1 }}/{{ setupSteps.length }}</p><h1>{{ setupSteps[setupStep]!.label }}</h1><p>{{ setupStep === 3 ? '可跳过，之后随时开启。' : '不确定可留空，之后可修改。' }}</p></div>
+          <div v-if="setupLoadFailed"><h1>暂时无法读取设置</h1></div>
+          <div v-else-if="setupActive"><p class="date-line">首次设置 · {{ setupStep + 1 }}/{{ setupSteps.length }}</p><h1>{{ setupSteps[setupStep]!.label }}</h1><p>{{ setupSteps[setupStep]!.help }}</p></div>
           <div v-else-if="selectedSection !== null"><h1>{{ sectionTitle }}</h1></div>
           <div v-else><h1>我的</h1><p>{{ sessionStore.account?.username }}</p></div>
           <button v-if="!setupActive && selectedSection !== null" class="text-action" type="button" @click="returnToSettings"><AppIcon name="back" />返回我的</button>
-          <button v-if="setupActive && setupStep === 3" class="text-action" type="button" :disabled="setupSaving" @click="skipSetup">跳过提醒，完成设置</button>
+          <button v-if="!setupLoadFailed && setupActive && setupStep === 3" class="text-action" type="button" :disabled="setupSaving" @click="skipSetup">跳过提醒，完成设置</button>
         </header>
         <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }} <button v-if="!profileAvailable && !loading" class="text-action" @click="load">重试读取</button><button v-else-if="!loading" class="text-action" @click="reloadAfterError">重新读取已保存内容</button></p>
         <p v-if="notice" class="training-notice" role="status">{{ notice }}</p>
         <section v-if="loading" class="work-panel training-empty"><strong>正在读取设置…</strong></section>
+        <section v-else-if="setupLoadFailed" class="work-panel setup-load-error" role="alert">
+          <p>请检查网络后重试，无需重新填写资料。</p>
+          <button class="action-button action-button--primary" type="button" @click="load">重试读取</button>
+        </section>
         <div v-else class="view-stack">
           <ol v-if="setupActive" class="setup-progress" aria-label="设置进度">
             <li v-for="(step, index) in setupSteps" :key="step.id" :class="{ 'is-current': index === setupStep, 'is-done': index < setupStep }"><span>{{ index + 1 }}</span><strong>{{ step.label }}</strong></li>
@@ -525,20 +537,21 @@ onDeactivated(() => { if (portabilityTimer !== undefined) window.clearInterval(p
             <button v-if="adminVisible" type="button" @click="router.push({ name: 'admin' })"><AppIcon name="settings" /><span><strong>系统管理</strong></span><b aria-hidden="true">›</b></button>
           </section>
 
-          <section v-if="setupActive ? setupStep === 0 : selectedSection === 'profile'" class="work-panel" aria-labelledby="profile-settings-title">
+          <section v-if="setupActive ? setupStep === 0 : selectedSection === 'profile'" class="work-panel profile-panel" aria-labelledby="profile-settings-title">
             <h2 id="profile-settings-title" class="sr-only">基础资料</h2>
             <p v-if="!profileAvailable" class="field-help">个人档案尚未载入，当前不能保存，以免覆盖原有资料。</p><form class="planning-form" @submit.prevent="saveProfile">
-              <div class="field-grid">
-                <label class="date-field--clickable" @click="openDatePicker"><span>出生日期</span><input v-model="profileForm.birthDate" type="date" /></label>
+              <div class="field-grid profile-fields">
+                <label class="date-field--clickable profile-fields-wide" @click="openDatePicker"><span>出生日期</span><input v-model="profileForm.birthDate" type="date" /></label>
                 <label><span>性别</span><select v-model="profileForm.sexCategory"><option :value="null">请选择</option><option value="male">男</option><option value="female">女</option></select></label>
                 <label><span>身高（cm）</span><input v-model.number="profileForm.heightCm" type="number" min="80" max="250" step="0.1" placeholder="例如 175" /></label>
-                <label><span>日常活动水平</span><select v-model="profileForm.palCategory"><option :value="null">还不确定</option><option value="inactive">久坐为主</option><option value="low_active">有少量日常活动</option><option value="active">经常活动或训练</option><option value="very_active">活动量很大</option></select></label>
+                <label class="profile-fields-wide"><span>平时活动量</span><select v-model="profileForm.palCategory"><option :value="null">还不确定</option><option value="inactive">久坐为主</option><option value="low_active">有少量日常活动</option><option value="active">经常活动或训练</option><option value="very_active">活动量很大</option></select></label>
               </div>
               <small class="field-help">当前计算方法适用于 19–64 岁成人。</small>
-              <details :open="setupActive || profileForm.pregnantOrBreastfeeding || profileForm.medicalNutritionCondition || profileForm.specialBodyComposition"><summary>特殊情况与适用边界</summary><fieldset class="safety-fieldset"><legend>适用边界</legend>
-                <label class="switch-row"><input v-model="profileForm.pregnantOrBreastfeeding" type="checkbox" /><span>当前处于孕期或哺乳期</span></label>
-                <label class="switch-row"><input v-model="profileForm.medicalNutritionCondition" type="checkbox" /><span>有需要专业营养处理的疾病或健康状态</span></label>
-                <label class="switch-row"><input v-model="profileForm.specialBodyComposition" type="checkbox" /><span>体成分明显特殊，不适合直接按体重计算运动蛋白质</span></label>
+              <details :open="setupActive || profileForm.pregnantOrBreastfeeding || profileForm.medicalNutritionCondition || profileForm.specialBodyComposition"><summary>健康情况</summary><fieldset class="safety-fieldset"><legend class="sr-only">影响营养参考的健康情况</legend>
+                <label class="switch-row"><input v-model="profileForm.pregnantOrBreastfeeding" type="checkbox" /><span>孕期或哺乳期</span></label>
+                <label class="switch-row"><input v-model="profileForm.medicalNutritionCondition" type="checkbox" /><span>因健康原因需要专业饮食指导</span></label>
+                <label class="switch-row"><input v-model="profileForm.specialBodyComposition" type="checkbox" /><span>体脂或肌肉量明显特殊</span></label>
+                <p class="field-help">有以上情况时，部分个性化营养参考将不适用；仍可正常记录。</p>
               </fieldset></details>
               <button v-if="!setupActive" class="action-button action-button--primary" type="submit" :disabled="profileSaving || !profileAvailable">{{ profileSaving ? '保存中…' : '保存基础资料' }}</button>
             </form>
@@ -549,7 +562,7 @@ onDeactivated(() => { if (portabilityTimer !== undefined) window.clearInterval(p
             <dl v-if="latestMeasurement || latestWaist" class="body-summary"><div v-if="latestMeasurement"><dt>当前体重</dt><dd>{{ latestMeasurement.weightKg }} <small>kg</small></dd><small>{{ latestMeasurement.localDate }}</small></div><div v-if="latestWaist"><dt>当前腰围</dt><dd>{{ latestWaist.waistCm }} <small>cm</small></dd><small>{{ latestWaist.localDate }}</small></div></dl>
             <div v-if="!setupActive" class="form-actions"><button class="text-action" @click="startNewMeasurement">记录新测量</button><button class="text-action" @click="router.push({ name: 'history', query: { tab: 'trends', metric: 'body' } })">查看身体趋势</button></div>
             <label v-if="setupActive" class="checkbox-row"><input v-model="measurementUnknown" type="checkbox" />暂时没有测量值，之后再记录</label>
-            <p v-if="!measurementsAvailable" class="field-help">身体测量记录尚未载入，当前不能新增或修正。</p><form class="planning-form" @submit.prevent="saveMeasurement">
+            <p v-if="!measurementsAvailable" class="field-help">身体测量记录尚未载入，当前不能新增或修正。</p><form v-show="!setupActive || !measurementUnknown" class="planning-form" @submit.prevent="saveMeasurement">
               <div class="field-grid">
                 <label><span>测量日期</span><input v-model="measurementForm.localDate" type="date" required /></label>
                 <label><span>体重（kg）</span><input v-model.number="measurementForm.weightKg" type="number" min="20" max="400" step="0.1" required placeholder="例如 70.5" /></label>

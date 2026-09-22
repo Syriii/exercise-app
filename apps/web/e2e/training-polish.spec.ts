@@ -115,7 +115,7 @@ test('populated records and plans have short previews but expose every full name
   await reveal(card.getByRole('button', { includeHidden: true, name: '存为我的计划' }));
   page.once('dialog', dialog => dialog.accept('多动作计划'));
   await card.getByRole('button', { name: '存为我的计划' }).click();
-  await expect(page.getByRole('status')).toContainText('已存入我的计划');
+  await expect(page.getByRole('status').filter({ hasText: '已存入我的计划' })).toBeVisible();
   await page.goto('/training/plans');
   const plan = page.locator('.template-card');
   await expect(plan.locator('.record-summary')).toContainText('5 个动作');
