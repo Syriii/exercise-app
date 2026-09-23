@@ -2,7 +2,7 @@ import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerResult, ImageAnalyz
 import { estimateDeepSeekCost } from "./deepseek-pricing.js";
 import type { ImageFoodCandidate, ImageNutritionCandidate } from "./types.js";
 
-export const imageAnalysisPromptVersion = "meal-image-foods-2026-09-06.1";
+export const imageAnalysisPromptVersion = "meal-image-foods-2026-09-23.1";
 
 const defaultRetryLimit = 2;
 const defaultRetryDelayMs = 500;
@@ -204,7 +204,10 @@ JSON 示例：
 - 每项 energyKcal、proteinGrams、carbohydrateGrams、fatGrams 表示该项所列份量的营养，不是每100克，也不是整餐。无法可靠判断的营养用 null，不能填0；能量不超过100000，其他营养不超过10000；
 - 每项 note 可为 null，或简述份量基准和不确定因素；碗、杯等须说明估算容量或大小，不能将估计当精确测量；
 - confidence：low、medium、high；assumptions：假设数组；uncertaintyNote：照片无法确认的因素。
-能辨认的鸡蛋、豆浆分别记录；混合菜可整道记录，不臆造原料克数、品牌、精确配方或未拍到的内容。完全无法识别时保留一项“未识别食物”，份量与营养均为 null。整餐合计由应用计算，不要输出重复的整餐条目。`;
+先检查整张照片，包括边缘、独立小碗和饮品。可辨认的独立食物分别记录；部分可见但内容不清的独立容器可记为“未识别食物”，相关份量与营养用 null，并在 note 中说明，不能无声漏掉。
+对外观不能可靠区分的牛羊肉、具体菌菇或调味料，只写能从照片支持的食物类别，把可能品种放在不确定说明中，不能把猜测当作已识别。辨别白米饭、炒饭、杂粮饭时留意米粒状态、配菜混合和可见油光；不因无法识别特殊调味料就把炒饭改称杂粮拌饭。
+估算炒饭、炒面、炒米粉等熟制主食时，把照片可见的油光、酱汁和常见烹调油计入该道菜的脂肪与能量；具体用油量不可见时写明估算依据和可能偏差，不填写虚假的精确克数，也不能把未知油脂填成 0。
+混合菜可整道记录，不臆造原料克数、品牌、精确配方或未拍到的内容。完全无法识别时保留一项“未识别食物”，份量与营养均为 null。整餐合计由应用计算，不要输出重复的整餐条目。`;
 
 function classifyHttpError(status: number): DeepSeekImageAnalyzerError {
   if (status === 400) return new DeepSeekImageAnalyzerError("deepseek_invalid_request", false);
