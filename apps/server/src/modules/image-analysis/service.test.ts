@@ -8,6 +8,7 @@ import { MemoryNutritionRepository } from "../nutrition/memory-repository.js";
 import { NutritionService } from "../nutrition/service.js";
 import { MemoryTaskQueue } from "../tasks/memory-task-queue.js";
 import type { ImageAnalyzer } from "./analyzer.js";
+import { DeepSeekImageAnalyzerError } from "./deepseek-analyzer.js";
 import { MemoryImageAnalysisRepository } from "./memory-repository.js";
 import { FixedImageAnalyzer, ImageAnalysisService } from "./service.js";
 
@@ -68,6 +69,17 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it("retains a charged provider call when the model response cannot be used", async () => {
+    const call = { startedAt: "2026-09-23T02:00:00.000Z", configuredModel: "deepseek-flash",
+      providerModel: "deepseek-flash", providerRequestId: "provider-1", status: "deepseek_invalid_candidate",
+      usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120, promptCacheHitTokens: 0, promptCacheMissTokens: 100 },
+      cost: null, durationMs: 40 };
+    const values = await fixture({ model: "deepseek-flash", analyze: async () => { throw new DeepSeekImageAnalyzerError("deepseek_invalid_candidate", true, [call]); } });
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    await expect(values.service.process(uploaded.id)).rejects.toThrow("deepseek_invalid_candidate");
+    expect((await values.repository.get("user-1", uploaded.id))?.attempts[0]?.evidence).toMatchObject({ calls: [call] });
+  });
+
   it("keeps photos and per-attempt evidence across time, rejects other accounts and fences results after deletion", async () => {
     vi.useFakeTimers();
     try {

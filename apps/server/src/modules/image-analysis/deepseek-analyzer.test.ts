@@ -73,7 +73,7 @@ describe("DeepSeekImageAnalyzer", () => {
               },
             },
           ],
-          usage: { prompt_tokens: 400, completion_tokens: 120, total_tokens: 520 },
+          usage: { prompt_tokens: 400, completion_tokens: 120, total_tokens: 520, prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 300 },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
@@ -96,7 +96,8 @@ describe("DeepSeekImageAnalyzer", () => {
       providerRequestId: "provider-request",
       providerModel: "deepseek-v4-flash-vision-exp",
       finishReason: "stop",
-      usage: { promptTokens: 400, completionTokens: 120, totalTokens: 520 },
+      usage: { promptTokens: 400, completionTokens: 120, totalTokens: 520, promptCacheHitTokens: 100, promptCacheMissTokens: 300 },
+      calls: [expect.objectContaining({ status: "succeeded", providerRequestId: "provider-request", cost: expect.objectContaining({ basis: "provider_cache_split" }) })],
       candidate: { energyKcal: 300, proteinGrams: null, confidence: "low" },
     });
   });
@@ -176,6 +177,7 @@ describe("DeepSeekImageAnalyzer", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.providerRequestId).toBe("request-after-retry");
+    expect(result.calls?.map(call => call.status)).toEqual(["deepseek_overloaded", "succeeded"]);
   });
 
   it("does not retry configuration or account errors", async () => {
@@ -234,6 +236,7 @@ describe("DeepSeekImageAnalyzer", () => {
     await expect(analyzer.analyze("image/png", Buffer.from("image"))).rejects.toMatchObject({
       code: "deepseek_output_truncated",
       retryable: false,
+      calls: [expect.objectContaining({ status: "deepseek_output_truncated" })],
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

@@ -95,16 +95,16 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
         })));
         await tx.update(meals).set({ revision: sql`${meals.revision} + 1`, updatedAt: new Date() }).where(eq(meals.id, meal.id));
       }
-      await tx.update(mealImageAnalysisAttempts).set({ status: "succeeded", providerRequestId, finishedAt: new Date(), evidence: { model: analysis.model, promptVersion: analysis.promptVersion, candidate, providerModel: result?.providerModel ?? null, usage: result?.usage ?? null, finishReason: result?.finishReason ?? null, ...(result?.durationMs === undefined ? {} : { durationMs: result.durationMs }) } }).where(eq(mealImageAnalysisAttempts.id, attemptId));
+      await tx.update(mealImageAnalysisAttempts).set({ status: "succeeded", providerRequestId, finishedAt: new Date(), evidence: { model: analysis.model, promptVersion: analysis.promptVersion, candidate, providerModel: result?.providerModel ?? null, usage: result?.usage ?? null, calls: result?.calls ?? [], finishReason: result?.finishReason ?? null, ...(result?.durationMs === undefined ? {} : { durationMs: result.durationMs }) } }).where(eq(mealImageAnalysisAttempts.id, attemptId));
       await tx.update(mealImageAnalyses).set({ status: "succeeded", rawCandidate: candidate as unknown as Record<string, unknown>, uncertaintyNote: candidate.uncertaintyNote, lastErrorCode: null, revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id));
       return { status: "succeeded" as const, tentativeHandled: true };
     });
   }
-  public async fail(id: string, attemptId: string, errorCode: string) {
+  public async fail(id: string, attemptId: string, errorCode: string, calls?: readonly import("./analyzer.js").ImageAnalyzerCall[]) {
     await this.database.transaction(async tx => {
-      const [analysis] = await tx.select({ status: mealImageAnalyses.status }).from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update");
+      const [analysis] = await tx.select({ status: mealImageAnalyses.status, model: mealImageAnalyses.model, promptVersion: mealImageAnalyses.promptVersion }).from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update");
       if (analysis?.status !== "running") return;
-      const changed = await tx.update(mealImageAnalysisAttempts).set({ status: "failed", errorCode, finishedAt: new Date() })
+      const changed = await tx.update(mealImageAnalysisAttempts).set({ status: "failed", errorCode, finishedAt: new Date(), ...(calls ? { evidence: { model: analysis.model, promptVersion: analysis.promptVersion, calls } } : {}) })
         .where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.analysisId, id), eq(mealImageAnalysisAttempts.status, "running"))).returning({ id: mealImageAnalysisAttempts.id });
       // An old attempt failing after recovery must not fail the new attempt.
       if (changed.length === 0) return;

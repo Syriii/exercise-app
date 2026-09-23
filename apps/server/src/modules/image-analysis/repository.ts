@@ -15,7 +15,7 @@ export interface ImageAnalysisRepository {
   getWorkItem(analysisId: string): Promise<AnalysisWorkItem | null>;
   beginAttempt(analysisId: string): Promise<{ work: AnalysisWorkItem; attemptId: string } | "not_found" | "not_ready">;
   succeed(analysisId: string, attemptId: string, candidate: ImageNutritionCandidate, providerRequestId: string | null, result?: import("./analyzer.js").ImageAnalyzerResult): Promise<{ readonly status: "succeeded"; readonly tentativeHandled: boolean } | "not_running">;
-  fail(analysisId: string, attemptId: string, errorCode: string): Promise<void>;
+  fail(analysisId: string, attemptId: string, errorCode: string, calls?: readonly import("./analyzer.js").ImageAnalyzerCall[]): Promise<void>;
   retry(userId: string, analysisId: string, expectedRevision: number, provider?: { model: string; promptVersion: string }): Promise<MealImageAnalysis | "not_found" | "not_failed" | "revision_conflict">;
   markAdopted(userId: string, analysisId: string, expectedRevision: number): Promise<MealImageAnalysis | "not_found" | "not_ready" | "revision_conflict">;
   markMediaStatus(mediaId: string, status: "available" | "deletion_pending" | "deleted" | "missing"): Promise<void>;

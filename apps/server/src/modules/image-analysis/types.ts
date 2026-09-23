@@ -36,6 +36,7 @@ export interface AnalysisAttemptEvidence {
   readonly usage?: import("./analyzer.js").ImageAnalyzerUsage | null;
   readonly finishReason?: string | null;
   readonly candidate?: ImageNutritionCandidate;
+  readonly calls?: readonly import("./analyzer.js").ImageAnalyzerCall[];
 }
 
 export interface ImageAnalysisAttempt {

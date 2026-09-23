@@ -1,4 +1,5 @@
-import type { ImageAnalyzer, ImageAnalyzerResult, ImageAnalyzerUsage } from "./analyzer.js";
+import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerResult, ImageAnalyzerUsage } from "./analyzer.js";
+import { estimateDeepSeekCost } from "./deepseek-pricing.js";
 import type { ImageFoodCandidate, ImageNutritionCandidate } from "./types.js";
 
 export const imageAnalysisPromptVersion = "meal-image-foods-2026-09-06.1";
@@ -11,6 +12,7 @@ export class DeepSeekImageAnalyzerError extends Error {
   public constructor(
     public readonly code: string,
     public readonly retryable: boolean,
+    public calls: readonly ImageAnalyzerCall[] = [],
   ) {
     super(code);
     this.name = "DeepSeekImageAnalyzerError";
@@ -46,11 +48,13 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
     const deadline = this.#now() + this.options.timeoutMs;
     const retryLimit = this.options.retryLimit ?? defaultRetryLimit;
     const retryDelayMs = this.options.retryDelayMs ?? defaultRetryDelayMs;
+    const calls: ImageAnalyzerCall[] = [];
 
     for (let retry = 0; ; retry += 1) {
       try {
-        return await this.request(contentType, image, deadline);
+        return { ...await this.request(contentType, image, deadline, calls), calls };
       } catch (error) {
+        if (error instanceof DeepSeekImageAnalyzerError) error.calls = [...calls];
         if (!(error instanceof DeepSeekImageAnalyzerError) || !error.retryable || retry >= retryLimit) {
           throw error;
         }
@@ -61,16 +65,22 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
     }
   }
 
-  private async request(contentType: string, image: Buffer, deadline: number): Promise<ImageAnalyzerResult> {
+  private async request(contentType: string, image: Buffer, deadline: number, calls: ImageAnalyzerCall[]): Promise<ImageAnalyzerResult> {
     const remainingMs = deadline - this.#now();
     if (remainingMs <= 0) throw new DeepSeekImageAnalyzerError("deepseek_timeout", true);
 
     const startedAt = this.#now();
+    let sent = false;
+    let providerRequestId: string | null = null;
+    let providerModel: string | null = null;
+    let usage: ImageAnalyzerUsage | null = null;
+    let status = "unknown_error";
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), remainingMs);
     try {
       let response: Response;
       try {
+        sent = true;
         response = await fetch(`${this.options.baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
           signal: controller.signal,
@@ -116,6 +126,11 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
       } catch {
         throw new DeepSeekImageAnalyzerError("deepseek_invalid_response", true);
       }
+      if (typeof body !== "object" || body === null) throw new DeepSeekImageAnalyzerError("deepseek_invalid_response", true);
+
+      providerRequestId = typeof body.id === "string" ? body.id : null;
+      providerModel = typeof body.model === "string" ? body.model : null;
+      usage = validateUsage(body.usage);
 
       const choice = body.choices?.[0];
       if (choice?.finish_reason === "length") {
@@ -133,16 +148,25 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
         throw new DeepSeekImageAnalyzerError("deepseek_invalid_json", true);
       }
 
+      const candidate = validateCandidate(parsed);
+      status = "succeeded";
       return {
-        candidate: validateCandidate(parsed),
-        providerRequestId: typeof body.id === "string" ? body.id : null,
-        providerModel: typeof body.model === "string" ? body.model : null,
+        candidate,
+        providerRequestId,
+        providerModel,
         finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
-        usage: validateUsage(body.usage),
+        usage,
         durationMs: Math.max(0, this.#now() - startedAt),
       };
+    } catch (error) {
+      status = error instanceof DeepSeekImageAnalyzerError ? error.code : "deepseek_unknown_error";
+      throw error;
     } finally {
       clearTimeout(timeout);
+      if (sent) calls.push({ startedAt: new Date(startedAt).toISOString(), configuredModel: this.options.model,
+        providerModel, providerRequestId, status, usage,
+        cost: estimateDeepSeekCost(providerModel ?? this.options.model, new Date(startedAt), usage),
+        durationMs: Math.max(0, this.#now() - startedAt) });
     }
   }
 }
@@ -188,8 +212,10 @@ function validateUsage(value: unknown): ImageAnalyzerUsage | null {
   const promptTokens = nonnegativeInteger(usage.prompt_tokens);
   const completionTokens = nonnegativeInteger(usage.completion_tokens);
   const totalTokens = nonnegativeInteger(usage.total_tokens);
-  if (promptTokens === null || completionTokens === null || totalTokens === null) return null;
-  return { promptTokens, completionTokens, totalTokens };
+  const promptCacheHitTokens = nonnegativeInteger(usage.prompt_cache_hit_tokens);
+  const promptCacheMissTokens = nonnegativeInteger(usage.prompt_cache_miss_tokens);
+  if ([promptTokens, completionTokens, totalTokens, promptCacheHitTokens, promptCacheMissTokens].every(value => value === null)) return null;
+  return { promptTokens, completionTokens, totalTokens, promptCacheHitTokens, promptCacheMissTokens };
 }
 
 function nonnegativeInteger(value: unknown): number | null {

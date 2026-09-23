@@ -6,9 +6,13 @@
 
 首批参考 [Google Research Nutrition5k](https://github.com/google-research-datasets/Nutrition5k)：公开实拍餐盘、称量食材及按营养数据库计算的标注，许可 CC-BY-4.0（Google Research / Thames 等，CVPR 2021）。不是实验室测得的整餐营养，也不代表所有中式餐食。
 
+中餐试点可使用 [Meituan DiningBench](https://huggingface.co/datasets/meituan/DiningBench)（CC-BY-NC-ND-4.0）原始图片和标注，仅在非商业内部评测中使用。选取用户实拍图，不用商家展示图。它主要是餐馆菜品，不能当作中式食堂的代表性样本；部分营养真值来自商户标签，其他部分由模型结合菜谱与份量估算后人工核对，[论文方法](https://arxiv.org/html/2604.10425v1)未逐样本标记来源，因此仅作有噪声的对照，不充当称重真值。图片包约 8GB，准备脚本流式提取固定的 20 张中式主食图片，跳过扩展名与实际编码不一致的文件，清单记录官方修订号、来源路径与 SHA256。若要判断食堂份量与营养是否可用，仍需另有获授权且称重的实际食堂样本。
+
 `apps/server/scripts/prepare-photo-evaluation.mjs` 从官方 depth test split 中筛选 100–1000g、能量大于 0 的餐盘，按固定种子 `exercise-photo-eval-v1` 排序取 20 张。先固定样本再预测，不按识别结果剔除失败样本。清单保留来源、图片/元数据 SHA256 和真实标注；照片、清单和逐项结果只存私有临时目录，不提交 Git。
 
 准备下载不调用模型。发送照片前必须获得所用样本、服务与调用数量的明确授权；程序要求 `PHOTO_EVALUATION_APPROVED=true` 及精确清单摘要。一次清单最多 30 张，每张仅一次调用，关闭自动重试。生产媒体与账号数据不用于此工具。
+
+每次提供方请求（包括内部重试和失败）随分析尝试证据保存配置模型、返回模型、请求 ID、状态、请求时间、耗时、输入/输出/总 token 与缓存命中/未命中 token。DeepSeek 返回用量时依 [官方价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) 的北京时间峰谷价估算人民币费用，连同费率快照版本、价格来源及命中/未命中价保存；缺少缓存拆分时给上下界，缺少输入/输出 token 或未知模型时费用为未知，不填 0 或声称与账单一致。评测 JSONL 逐图保存调用证据，并在汇总中单列已估价、未知次数和费用区间。进程在响应后而持久写入前异常退出时可能只有已开始记录，必须人工核对提供方账单，不能自动重发。
 
 ## 执行
 

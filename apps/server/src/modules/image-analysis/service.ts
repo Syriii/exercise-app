@@ -116,7 +116,8 @@ export class ImageAnalysisService {
         : error instanceof Error && error.message.startsWith("deepseek_")
           ? error.message.slice(0, 100)
           : "analysis_failed";
-      await this.options.repository.fail(analysisId, started.attemptId, code);
+      await this.options.repository.fail(analysisId, started.attemptId, code,
+        error instanceof DeepSeekImageAnalyzerError ? error.calls : undefined);
       throw error;
     }
   }

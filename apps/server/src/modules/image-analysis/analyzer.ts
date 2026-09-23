@@ -1,9 +1,22 @@
 import type { ImageNutritionCandidate } from "./types.js";
 
 export interface ImageAnalyzerUsage {
-  readonly promptTokens: number;
-  readonly completionTokens: number;
-  readonly totalTokens: number;
+  readonly promptTokens: number | null;
+  readonly completionTokens: number | null;
+  readonly totalTokens: number | null;
+  readonly promptCacheHitTokens?: number | null;
+  readonly promptCacheMissTokens?: number | null;
+}
+
+export interface ImageAnalyzerCall {
+  readonly startedAt: string;
+  readonly configuredModel: string;
+  readonly providerModel: string | null;
+  readonly providerRequestId: string | null;
+  readonly status: string;
+  readonly usage: ImageAnalyzerUsage | null;
+  readonly cost: import("./deepseek-pricing.js").DeepSeekCostEstimate | null;
+  readonly durationMs: number;
 }
 
 export interface ImageAnalyzerResult {
@@ -13,6 +26,7 @@ export interface ImageAnalyzerResult {
   readonly finishReason?: string | null;
   readonly usage?: ImageAnalyzerUsage | null;
   readonly durationMs?: number;
+  readonly calls?: readonly ImageAnalyzerCall[];
 }
 
 export interface ImageAnalyzer {
