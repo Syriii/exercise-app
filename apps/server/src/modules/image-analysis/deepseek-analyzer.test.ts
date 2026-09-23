@@ -197,6 +197,19 @@ describe("DeepSeekImageAnalyzer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("retains provider usage from a failed HTTP response without its error body", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ id: "failed-request", model: "deepseek-flash",
+      usage: { prompt_tokens: 300, completion_tokens: 0, total_tokens: 300, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 300 },
+      error: { message: "sensitive-provider-message" } }), { status: 429 })));
+    const analyzer = new DeepSeekImageAnalyzer({ apiKey: "test-only", baseUrl: "https://api.deepseek.com", model: "deepseek-flash", timeoutMs: 1000, retryLimit: 0 });
+    const error = await analyzer.analyze("image/png", Buffer.from("test")).catch(value => value as DeepSeekImageAnalyzerError);
+    expect(error).toMatchObject({ code: "deepseek_rate_limited", calls: [expect.objectContaining({
+      providerRequestId: "failed-request", usage: expect.objectContaining({ promptTokens: 300 }),
+      cost: expect.objectContaining({ basis: "provider_cache_split" }),
+    })] });
+    expect(JSON.stringify(error.calls)).not.toContain("sensitive-provider-message");
+  });
+
   it("honors a single-call evaluation budget even for transient errors", async () => {
     const fetchMock = vi.fn(async () => new Response("overloaded", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);

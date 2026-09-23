@@ -118,7 +118,19 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
         throw new DeepSeekImageAnalyzerError("deepseek_network_error", true);
       }
 
-      if (!response.ok) throw classifyHttpError(response.status);
+      if (!response.ok) {
+        // Some gateways return usage even for a non-2xx request. Inspect only safe
+        // billing fields; never retain the provider's error body.
+        try {
+          const errorBody = await response.json() as DeepSeekResponse;
+          if (typeof errorBody === "object" && errorBody !== null) {
+            providerRequestId = typeof errorBody.id === "string" ? errorBody.id : null;
+            providerModel = typeof errorBody.model === "string" ? errorBody.model : null;
+            usage = validateUsage(errorBody.usage);
+          }
+        } catch { /* HTTP status remains the authoritative error. */ }
+        throw classifyHttpError(response.status);
+      }
 
       let body: DeepSeekResponse;
       try {
