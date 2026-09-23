@@ -15,6 +15,7 @@ import { ensureApiDatabaseRole, grantApiDatabaseRole } from "./runtime-role.js";
 import { PostgresIdentityRepository } from "../modules/identity/postgres-repository.js";
 import { IdentityService } from "../modules/identity/service.js";
 import { PostgresImageAnalysisRepository } from "../modules/image-analysis/postgres-repository.js";
+import { estimateDeepSeekCost } from "../modules/image-analysis/deepseek-pricing.js";
 import { PostgresOperationsService } from "../modules/operations/service.js";
 import { PostgresNutritionRepository } from "../modules/nutrition/postgres-repository.js";
 import { PostgresUserDataExporter } from "../modules/portability/postgres-exporter.js";
@@ -1194,7 +1195,11 @@ describe("PostgreSQL integration", () => {
       const attempt = await images.beginAttempt(uploaded.id);
       if (typeof attempt === "string") throw Error(attempt);
       const candidate = { title: "番茄", observedFoods: [], foods: [{ label: "小番茄", portionAmount: 200, portionUnit: "g", note: null, energyKcal: 60, proteinGrams: 2, carbohydrateGrams: 12, fatGrams: 0 }], energyKcal: 60, proteinGrams: 2, carbohydrateGrams: 12, fatGrams: 0, confidence: "low" as const, assumptions: [], uncertaintyNote: "估算" };
-      const result = { candidate, providerRequestId: "test-id", providerModel: "returned-test", durationMs: 88, usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 } };
+      const startedAt = "2026-09-17T02:00:00.000Z";
+      const usage = { promptTokens: 120, completionTokens: 30, totalTokens: 150, promptCacheHitTokens: 20, promptCacheMissTokens: 100 };
+      const call = { startedAt, configuredModel: "deepseek-v4-flash-vision-exp", providerModel: "deepseek-flash", providerRequestId: "test-id", status: "succeeded",
+        usage, cost: estimateDeepSeekCost("deepseek-flash", new Date(startedAt), usage), durationMs: 88 };
+      const result = { candidate, providerRequestId: "test-id", providerModel: "returned-test", durationMs: 88, usage, calls: [call] };
       await images.succeed(uploaded.id, attempt.attemptId, candidate, "test-id", result);
       let saved = await context.run(owner, () => nutrition.getMeal(owner, meal.id));
       const item = saved.contributions[0]!;
@@ -1205,7 +1210,7 @@ describe("PostgreSQL integration", () => {
       expect(JSON.stringify(events)).not.toContain("object_key");
       expect(events.find(row => row.entity_type === "meal_image_analyses" && row.before === null)?.after.media).toMatchObject({ sha256: "a".repeat(64) });
       const attemptEvidence = (await images.get(owner, uploaded.id))!.attempts[0]!.evidence;
-      expect(attemptEvidence).toMatchObject({ model: "requested-test", promptVersion: "prompt-test", providerModel: "returned-test", candidate, durationMs: 88, usage: result.usage });
+      expect(attemptEvidence).toMatchObject({ model: "requested-test", promptVersion: "prompt-test", providerModel: "returned-test", candidate, durationMs: 88, usage, calls: [call] });
       // Duplicate/late worker delivery is not a second result or history mutation.
       expect(await images.succeed(uploaded.id, attempt.attemptId, candidate, "duplicate", result)).toBe("not_running");
       await expect(context.run(owner, () => nutrition.updateContribution(owner, meal.id, item.id, 1, 1, input, false))).rejects.toMatchObject({ statusCode: 409 });
@@ -1224,6 +1229,17 @@ describe("PostgreSQL integration", () => {
       const exported = await context.run(owner, () => new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date()));
       expect(exported.data.meal_record_events).toHaveLength(events.length);
       expect(exported.data.meal_image_analysis_attempts).toEqual(expect.arrayContaining([expect.objectContaining({ evidence: attemptEvidence })]));
+      const failed = await context.run(owner, () => scoped.create(owner, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "c".repeat(64) }, null, "requested-test", "prompt-test"));
+      const failedAttempt = await images.beginAttempt(failed.id);
+      if (typeof failedAttempt === "string") throw Error(failedAttempt);
+      await images.fail(failed.id, failedAttempt.attemptId, "provider_error", [call]);
+      expect((await images.get(owner, failed.id))?.attempts[0]?.evidence).toMatchObject({ model: "requested-test", promptVersion: "prompt-test", calls: [call] });
+      await context.run(other, async () => {
+        expect(await scoped.get(other, failed.id)).toBeNull();
+        expect((await new PostgresUserDataExporter(restricted.database).exportUserData(other, new Date())).data.meal_image_analysis_attempts).toEqual([]);
+      });
+      expect((await context.run(owner, () => new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date()))).data.meal_image_analysis_attempts)
+        .toEqual(expect.arrayContaining([expect.objectContaining({ analysis_id: failed.id, evidence: expect.objectContaining({ calls: [call] }) })]));
       const completed = (await images.get(owner, uploaded.id))!;
       const again = await context.run(owner, () => scoped.reanalyze(owner, completed.id, completed.revision, { model: "new-test", promptVersion: "new-prompt" }));
       if (typeof again === "string") throw Error(again);
