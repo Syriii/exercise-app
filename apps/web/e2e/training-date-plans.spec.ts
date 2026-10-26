@@ -106,7 +106,7 @@ test("rescheduling leaves facts in place and copying last actual content drops t
   await expect(page.getByRole("article", { name: "当天计划" })).toContainText("已记录 0／3 组");
   await expect(page.getByRole("article", { name: "已存训练记录" })).toHaveCount(0);
   await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
-  await page.getByText("参考计划或上次内容", { exact: true }).click();
+  await page.getByRole("button", { name: "上次实际内容", exact: true }).click();
   await page.getByRole("button", { name: "使用上次实际内容" }).click();
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByRole("article", { name: "当天计划" })).toContainText("已记录 0／3 组");

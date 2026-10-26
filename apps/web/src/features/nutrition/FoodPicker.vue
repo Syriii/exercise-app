@@ -147,6 +147,15 @@ onBeforeUnmount(() => { generation++; });
       <p v-if="page?.warning" class="field-help" role="status">{{ page.warning }}</p>
       <p v-if="loading" role="status">正在读取食物…</p>
       <p v-else-if="page && !page.items.length" class="empty-copy">没有匹配的食物。已选内容仍在，也可以补充个人食物。</p>
+      <form v-if="draft.selected.length" :id="selectionId" class="catalog-selection" aria-label="已选食物" @submit.prevent="save">
+        <strong>本次吃了多少 · 已选 {{ draft.selected.length }} 项</strong>
+        <div v-for="(item, index) in draft.selected" :key="item.food.id" class="catalog-selection-row">
+          <div class="selection-food-name"><strong>{{ item.food.label }}</strong><small>{{ scaledEnergy(item.food, item.amount) }}</small></div>
+          <label class="portion-inline"><span class="sr-only">{{ item.food.label }}份量（{{ item.food.basisUnit ?? '单位未知' }}）</span><input v-model="item.amount" type="number" min="0.001" max="100000" step="0.001" required :disabled="saving" /><span aria-hidden="true">{{ item.food.basisUnit ?? '单位未知' }}</span></label>
+          <button class="text-action" type="button" :disabled="saving" :aria-label="`取消选择：${item.food.label}`" @click="draft.selected.splice(index, 1)"><AppIcon name="trash" /></button>
+        </div>
+        <p v-if="!replacement && meal && draft.mealRevision !== null && draft.mealRevision !== meal.revision" class="field-help">这顿饭有其他更新，所选食物仍保留。<button class="text-action" type="button" @click="draft.mealRevision = meal!.revision">按当前餐食重试</button></p>
+      </form>
       <ul v-if="page?.items.length" class="catalog-results" aria-label="食物列表">
         <li v-for="food in page.items" :key="food.id">
           <FoodArt :kind="categoryArt[food.category]" />
@@ -161,15 +170,6 @@ onBeforeUnmount(() => { generation++; });
         </li>
       </ul>
       <button v-if="page?.nextCursor" class="text-action" type="button" :disabled="loading || saving" @click="load(true)">加载更多食物</button>
-      <form v-if="draft.selected.length" :id="selectionId" class="catalog-selection" aria-label="已选食物" @submit.prevent="save">
-        <strong>已选 {{ draft.selected.length }} 项</strong>
-        <div v-for="(item, index) in draft.selected" :key="item.food.id" class="catalog-selection-row">
-          <div class="selection-food-name"><strong>{{ item.food.label }}</strong><small>{{ scaledEnergy(item.food, item.amount) }}</small></div>
-          <label class="portion-inline"><span class="sr-only">{{ item.food.label }}份量（{{ item.food.basisUnit ?? '单位未知' }}）</span><input v-model="item.amount" type="number" min="0.001" max="100000" step="0.001" required :disabled="saving" /><span aria-hidden="true">{{ item.food.basisUnit ?? '单位未知' }}</span></label>
-          <button class="text-action" type="button" :disabled="saving" :aria-label="`取消选择：${item.food.label}`" @click="draft.selected.splice(index, 1)"><AppIcon name="trash" /></button>
-        </div>
-        <p v-if="!replacement && meal && draft.mealRevision !== null && draft.mealRevision !== meal.revision" class="field-help">这顿饭有其他更新，所选食物仍保留。<button class="text-action" type="button" @click="draft.mealRevision = meal!.revision">按当前餐食重试</button></p>
-      </form>
       <details class="catalog-personal"><summary>找不到？补充个人食物</summary>
         <form @submit.prevent="createPersonal">
           <fieldset :disabled="saving || disabled || draft.personalPending !== null">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from "vue";
 import { returnToHistory } from "../support/history-return";
 import { useRoute, useRouter } from "vue-router";
 
@@ -18,6 +18,8 @@ import RetainedMealPhoto from "../features/nutrition/RetainedMealPhoto.vue";
 import { foodCatalogApi } from "../api/food-catalog";
 import { newFoodPickerDraft, type FoodPickerDraft, type FoodReplacementTarget } from "../features/nutrition/food-picker-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
+import { usePhotoIntakeStore } from "../stores/photo-intake";
+import MealReviewPhoto from "../features/nutrition/MealReviewPhoto.vue";
 
 interface ContributionForm { mode: MealContributionMode; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; saveAsTemplate: boolean; }
 interface ImageAdoptionForm { mode: "whole_meal" | "supplement"; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; deleteOriginal: boolean; }
@@ -25,6 +27,10 @@ const emptyContribution = (): ContributionForm => ({ mode: "item", label: "", po
 
 const route = useRoute();
 const router = useRouter();
+const photoIntake = usePhotoIntakeStore();
+const quickPhotoPicker = ref<InstanceType<typeof MealPhotoPicker> | null>(null);
+const focusedMealId = ref<string | null>(null);
+const incomingPhotoDate = ref<string | null>(null);
 const selectedDate = ref(typeof route.query.date === "string" ? route.query.date : localDate(new Date()));
 const loading = ref(true);
 const saving = ref(false);
@@ -100,6 +106,7 @@ async function createManualMeal(): Promise<Meal> {
 async function manualFoodsSaved(meal: Meal) {
   await selectionsSaved(meal);
   openMeals[meal.id] = true;
+  focusedMealId.value = meal.id;
   creatingMeal.value = false;
   pendingManualMeal.value = undefined;
   newMealFoods.value = { ...newFoodPickerDraft(), open: true };
@@ -131,6 +138,15 @@ const actingAnalysisId = ref<string | null>(null);
 
 const composerIntent = ref<"photo" | "food">("photo");
 const openMeals = reactive<Record<string, boolean>>({});
+const visibleCorrection = computed(() => !creatingMeal.value && meals.value.some(meal => openMeals[meal.id]
+  && (!focusedMealId.value || focusedMealId.value === meal.id) && meal.contributions.some(item => item.id === editingContributionId.value)));
+async function resumeCorrection() {
+  const owner = meals.value.find(meal => meal.contributions.some(item => item.id === editingContributionId.value));
+  if (!owner) return;
+  creatingMeal.value = false; openMeals[owner.id] = true; focusedMealId.value = owner.id;
+  await nextTick();
+  document.querySelector<HTMLElement>('.contribution-form')?.scrollIntoView({block:'nearest'});
+}
 const photoPanels = reactive<Record<string, boolean>>({});
 const correctionBases = reactive<Record<string, { meal: Meal; item: MealContribution }>>({});
 const metadataDrafts = reactive<Record<string, { base: Meal; date: string; time: string; name: string; note: string }>>({});
@@ -187,8 +203,21 @@ function nullableNumber(value: string | number): number | null { if (typeof valu
 function formFor(mealId: string): ContributionForm { contributionForms[mealId] ??= emptyContribution(); return contributionForms[mealId]!; }
 function rawContributionInput(form: ContributionForm): ContributionInput { return { mode: form.mode, label: form.label, portionAmount: nullableNumber(form.portionAmount), portionUnit: nullableText(form.portionUnit), basisDescription: nullableText(form.basisDescription), energyKcal: nullableNumber(form.energyKcal), proteinGrams: nullableNumber(form.proteinGrams), carbohydrateGrams: nullableNumber(form.carbohydrateGrams), fatGrams: nullableNumber(form.fatGrams) }; }
 function displayTime(value: string): string { return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
-function nutrientText(value: number | null, unit: string): string { return value === null ? "未知" : `${value} ${unit}`; }
+function nutrientText(value: number | null, unit: string): string { const factor = unit === 'kcal' ? 1 : 10; return value === null ? "未知" : `${Math.round(value * factor) / factor} ${unit}`; }
 function contributionForAnalysis(meal: Meal, analysisId: string): MealContribution | undefined { return meal.contributions.find((value) => value.sourceAnalysisId === analysisId); }
+function reviewAnalysis(meal: Meal): MealImageAnalysis | undefined {
+  const values = analysesByMeal[meal.id] ?? [];
+  return values.find(value => value.imageAvailable && contributionForAnalysis(meal, value.id))
+    ?? values.find(value => value.imageAvailable) ?? values[0];
+}
+function toggleMeal(meal: Meal) {
+  const opening = !openMeals[meal.id];
+  for (const key of Object.keys(openMeals)) openMeals[key] = false;
+  openMeals[meal.id] = opening;
+  focusedMealId.value = opening ? meal.id : null;
+}
+function showMealList() { for (const key of Object.keys(openMeals)) openMeals[key] = false; focusedMealId.value = null; }
+function cancelCorrection(meal: Meal) { editingContributionId.value = null; delete correctionBases[meal.id]; contributionForms[meal.id] = emptyContribution(); errorMessage.value = ''; }
 function analysisStatus(value: MealImageAnalysis, meal: Meal): string {
   if (value.status === "waiting") return "照片已保存，尚未识别";
   const contribution = contributionForAnalysis(meal, value.id);
@@ -223,6 +252,7 @@ function clearRecord<T>(record: Record<string, T>) {
 }
 
 function resetDateScopedState() {
+  focusedMealId.value = null;
   reference.value = null;
   summary.value = null;
   meals.value = [];
@@ -308,9 +338,11 @@ async function load(preserveDraft = false) {
 }
 
 async function changeDate() { await router.replace({ name: "nutrition", query: selectedDate.value === localDate(new Date()) ? {} : { date: selectedDate.value } }); await load(); }
-async function openMealComposer(intent: "photo" | "food" = "photo") {
+async function openMealComposer(intent: "photo" | "food" = "photo", source?: "camera" | "gallery") {
   composerIntent.value = quickMealImage.value ? "photo" : intent;
   creatingMeal.value = true;
+  // Keep the picker mounted so the native selector opens within the original user gesture.
+  if (source && !quickMealImage.value) quickPhotoPicker.value?.pick(source);
   await nextTick();
   document.querySelector<HTMLElement>(".quick-meal-panel")?.focus({ preventScroll: true });
   scrollToMealContent(document.querySelector(".quick-meal-panel"));
@@ -342,6 +374,7 @@ async function createMeal() {
 
   meals.value = [saved, ...meals.value];
   openMeals[saved.id] = true;
+  focusedMealId.value = saved.id;
   photoPanels[saved.id] = selectedImage !== undefined || composerIntent.value === "photo";
   formFor(saved.id);
   creatingMeal.value = false;
@@ -371,37 +404,33 @@ async function createMeal() {
 }
 
 async function selectQuickMealImage(event: Event) {
-  if (preparingImage.value) return;
   const file = (event.target as HTMLInputElement).files?.[0];
   if (file === undefined) return;
+  await prepareQuickMealImage(file);
+}
+let imagePreparation: Promise<void> | undefined;
+async function prepareQuickMealImage(file: File) {
+  await prepareSelectedImage(file, prepared => { quickMealImage.value = prepared; });
+}
+async function prepareSelectedImage(file: File, apply: (prepared: PreparedMealImage | undefined) => void) {
   const date = selectedDate.value;
   preparingImage.value = true;
   errorMessage.value = "";
-  try {
-    const prepared = await prepareMealImage(file);
-    if (date === selectedDate.value) quickMealImage.value = prepared;
-  } catch (error) {
-    console.error("Quick meal image preparation failed", error);
-    quickMealImage.value = undefined;
-    errorMessage.value = "这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。";
-  } finally { preparingImage.value = false; }
+  const work = (imagePreparation ?? Promise.resolve()).then(async () => {
+    try { const prepared = await prepareMealImage(file); if (date === selectedDate.value) apply(prepared); }
+    catch (error) {
+      console.error('Meal image preparation failed', error);
+      if (date === selectedDate.value) { apply(undefined); errorMessage.value = '这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。'; }
+    }
+  });
+  imagePreparation = work;
+  try { await work; } finally { if (imagePreparation === work) { imagePreparation = undefined; preparingImage.value = false; } }
 }
 
 async function selectMealImage(mealId: string, event: Event) {
-  if (preparingImage.value) return;
   const file = (event.target as HTMLInputElement).files?.[0];
   if (file === undefined) return;
-  const date = selectedDate.value;
-  preparingImage.value = true;
-  errorMessage.value = "";
-  try {
-    const prepared = await prepareMealImage(file);
-    if (date === selectedDate.value) imageSelections.value = { ...imageSelections.value, [mealId]: prepared };
-  } catch (error) {
-    console.error("Meal image preparation failed", error);
-    imageSelections.value = { ...imageSelections.value, [mealId]: undefined };
-    errorMessage.value = "这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。";
-  } finally { preparingImage.value = false; }
+  await prepareSelectedImage(file, prepared => { imageSelections.value = { ...imageSelections.value, [mealId]: prepared }; });
 }
 
 async function uploadMealImage(meal: Meal) {
@@ -479,6 +508,7 @@ function editContribution(meal: Meal, value: MealContribution) {
   if (editingContributionId.value === value.id) return;
   if (editingContributionId.value !== null) {
     errorMessage.value = "请先保存或取消正在修正的食物，再修改其他食物。";
+    void nextTick(() => document.querySelector<HTMLElement>('.form-error')?.scrollIntoView({block:'nearest'}));
     return;
   }
   correctionBases[meal.id] = { meal, item: value };
@@ -491,17 +521,73 @@ async function refreshSummary(expectedDate = selectedDate.value) {
   const refreshed = await nutritionApi.getDaySummary(expectedDate, browserTimeZone());
   if (selectedDate.value === expectedDate) summary.value = refreshed;
 }
+let requestedActionRun: symbol | null = null;
+const acceptingIncomingPhoto = ref(false);
+function activeAction(path: string, activation: number) { return pageActive && route.name === 'nutrition' && route.fullPath === path && activationVersion === activation; }
+async function acceptIncomingPhoto() {
+  const date = incomingPhotoDate.value;
+  if (!date || acceptingIncomingPhoto.value || !window.confirm('放弃当前未保存的记餐输入，改记新照片？已经保存的餐食不受影响。')) return;
+  acceptingIncomingPhoto.value = true;
+  const path = route.fullPath, activation = activationVersion;
+  try {
+  if (imagePreparation) await imagePreparation;
+  if (!activeAction(path, activation)) return;
+  const file = photoIntake.peek(date);
+  if (!file) { incomingPhotoDate.value = null; return; }
+  selectedDate.value = date;
+  await load();
+  if (!activeAction(path, activation)) return;
+  incomingPhotoDate.value = null;
+  await openMealComposer('photo');
+  if (!activeAction(path, activation)) return;
+  photoIntake.take(date);
+  await prepareQuickMealImage(file);
+  if (!activeAction(path, activation)) return;
+  await router.replace({ name:'nutrition', query:{date} });
+  } finally { acceptingIncomingPhoto.value = false; }
+}
+function cancelIncomingPhoto() {
+  if (acceptingIncomingPhoto.value) return;
+  if (incomingPhotoDate.value) photoIntake.take(incomingPhotoDate.value);
+  incomingPhotoDate.value = null;
+}
 async function handleRequestedAction() {
-  if (route.name !== "nutrition") return;
+  if (!pageActive || route.name !== "nutrition" || requestedActionRun) return;
+  const run = Symbol('photo-entry'), path = route.fullPath, activation = activationVersion;
+  requestedActionRun = run;
+  const current = () => requestedActionRun === run && activeAction(path, activation);
+  try {
   if (typeof route.query.mealId === "string") {
-    openMeals[route.query.mealId] = true;
+    if (meals.value.some(meal => meal.id === route.query.mealId)) {
+      openMeals[route.query.mealId] = true;
+      focusedMealId.value = route.query.mealId;
+    } else { focusedMealId.value = null; notice.value = '这顿饭已改期或删除，当前显示这一天的餐食。'; }
     await nextTick();
+    if (!current()) return;
     scrollToMealContent(document.getElementById(`meal-${route.query.mealId}`));
   }
-  if (route.query.action !== "new-meal" && route.query.action !== "photo") return;
-  await openMealComposer(route.query.action === "photo" ? "photo" : "food");
+  const requested = route.query.action === 'new-meal' || route.query.action === 'photo';
+  if (!requested && (route.query.mealId || !photoIntake.pendingDate())) return;
+  if (imagePreparation) await imagePreparation;
+  if (!current()) return;
+  const requestedDate = requested ? (typeof route.query.date === 'string' ? route.query.date : localDate(new Date())) : photoIntake.pendingDate() ?? selectedDate.value;
+  const incomingPhoto = photoIntake.peek(requestedDate);
+  const hasDraft = quickMealImage.value || newMealFoods.value.selected.length || mealForm.name.trim() || mealForm.note.trim() || pendingManualMeal.value || manualCreationUnknown.value;
+  if (incomingPhoto && hasDraft) {
+    incomingPhotoDate.value = requestedDate;
+    creatingMeal.value = true;
+    const { action: _action, ...query } = route.query;
+    await router.replace({ name:'nutrition', query:{...query, date:selectedDate.value} });
+    return;
+  }
+  if (incomingPhoto && requestedDate !== selectedDate.value) { selectedDate.value = requestedDate; await load(); if (!current()) return; }
+  await openMealComposer(incomingPhoto || route.query.action === "photo" ? "photo" : "food");
+  if (!current()) return;
+  if (incomingPhoto) { photoIntake.take(selectedDate.value); await prepareQuickMealImage(incomingPhoto); }
+  if (!current()) return;
   const { action: _action, ...query } = route.query;
   await router.replace({ name: "nutrition", query: { ...query, date: selectedDate.value } });
+  } finally { if (requestedActionRun === run) requestedActionRun = null; }
 }
 
 watch(() => route.query.date, (value) => {
@@ -510,14 +596,19 @@ watch(() => route.query.date, (value) => {
   if (next !== selectedDate.value) { selectedDate.value = next; void load(); }
 });
 watch(() => route.query.action, () => { void handleRequestedAction(); });
+watch(meals, values => { if (focusedMealId.value && !values.some(meal => meal.id === focusedMealId.value)) focusedMealId.value = null; });
 let pageActive = false;
-function stopPolling() { pageActive = false; if (pollTimer !== undefined) window.clearInterval(pollTimer); pollTimer = undefined; }
+let activationVersion = 0;
+function stopPolling() { pageActive = false; activationVersion++; requestedActionRun = null; if (pollTimer !== undefined) window.clearInterval(pollTimer); pollTimer = undefined; }
 onActivated(async () => {
+  const activation = ++activationVersion;
   pageActive = true;
   await load(true);
+  if (!pageActive || activation !== activationVersion) return;
   await loadPhotoSettings();
-  if (!pageActive) return;
+  if (!pageActive || activation !== activationVersion) return;
   await handleRequestedAction();
+  if (!pageActive || activation !== activationVersion) return;
   if (pollTimer === undefined) pollTimer = window.setInterval(() => void pollImageAnalyses(), 2_000);
 });
 onDeactivated(stopPolling);
@@ -533,12 +624,13 @@ onBeforeUnmount(stopPolling);
         <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
       </nav>
     </header>
-    <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }} <button v-if="automaticPhotos === null" class="text-action" type="button" @click="loadPhotoSettings">重新读取设置</button></p>
+    <p v-if="errorMessage && !visibleCorrection" class="form-error" role="alert">{{ errorMessage }} <button v-if="automaticPhotos === null" class="text-action" type="button" @click="loadPhotoSettings">重新读取设置</button><button v-if="editingContributionId" class="text-action" type="button" @click="resumeCorrection">继续未保存的修改</button></p>
+    <section v-if="incomingPhotoDate" class="work-panel" aria-label="处理新选照片"><p>新照片用于 {{ incomingPhotoDate }}。当前未保存的记餐仍保留，请先选择要继续哪一餐。</p><div class="row-actions"><button class="action-button" type="button" :disabled="preparingImage || saving || acceptingIncomingPhoto" @click="acceptIncomingPhoto">放弃当前草稿，使用新照片</button><button class="text-action" type="button" :disabled="acceptingIncomingPhoto" @click="cancelIncomingPhoto">取消新照片，保留当前草稿</button></div></section>
     <p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
     <p v-if="preparingImage" class="field-help" role="status">正在准备照片，请稍候…</p>
     <section v-if="loading" class="work-panel training-empty"><strong>正在读取这一天…</strong></section>
     <div v-else class="view-stack">
-      <section v-show="!creatingMeal" class="recommendation-panel nutrition-overview" aria-labelledby="nutrition-overview-title">
+      <section v-show="!creatingMeal" class="recommendation-panel nutrition-overview" :class="{ 'nutrition-overview--compact': focusedMealId }" aria-labelledby="nutrition-overview-title">
         <div class="panel-heading"><h2 id="nutrition-overview-title"><AppIcon name="food" />当天营养</h2><span class="field-help">已记录</span></div>
         <div class="hero-energy"><dl><dt>能量</dt><dd>{{ nutrientText(recordedValue('energyKcal'), 'kcal') }}</dd><span class="field-help">每日参考 {{ targetValue('energyKcal') === null ? '暂不可用' : nutrientText(targetValue('energyKcal'), 'kcal') }}</span></dl><FoodArt kind="rice" /></div>
         <dl class="macro-grid">
@@ -555,11 +647,11 @@ onBeforeUnmount(stopPolling);
         </details>
       </section>
       <div v-show="!creatingMeal" class="form-actions nutrition-record-actions" role="group" aria-label="记录餐食">
-        <button class="primary-button" type="button" :disabled="saving" @click="openMealComposer('photo')"><AppIcon name="camera" />拍照记一餐</button>
-        <button class="action-button" type="button" :disabled="saving" @click="openMealComposer('photo')"><AppIcon name="image" />相册记一餐</button>
+        <button class="primary-button" type="button" aria-label="拍照记一餐" :disabled="saving" @click="openMealComposer('photo', 'camera')"><AppIcon name="camera" />拍照</button>
+        <button class="action-button" type="button" aria-label="相册记一餐" :disabled="saving" @click="openMealComposer('photo', 'gallery')"><AppIcon name="image" />相册</button>
         <button class="text-action" type="button" :disabled="saving" @click="openMealComposer('food')"><AppIcon name="plus" />手动添加食物</button>
       </div>
-      <section v-if="creatingMeal" tabindex="-1" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
+      <section v-show="creatingMeal" tabindex="-1" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
         <div class="panel-heading"><h2 id="quick-meal-title">快速记餐</h2><button class="text-action" type="button" :disabled="saving" @click="closeMealComposer">收起</button></div>
         <form class="inline-form meal-create-form" @submit.prevent="createMeal">
           <fieldset :disabled="saving || preparingImage || uploadingMealId !== null || (composerIntent === 'food' && !!pendingManualMeal)">
@@ -571,10 +663,10 @@ onBeforeUnmount(stopPolling);
                 <label>备注（可选）<input v-model="mealForm.note" maxlength="1000" placeholder="例如：公司食堂" /></label>
               </div>
             </details>
-            <MealPhotoPicker v-if="composerIntent === 'photo'" :file="quickMealImage?.file" :disabled="saving" @change="selectQuickMealImage" />
+            <MealPhotoPicker v-show="composerIntent === 'photo'" ref="quickPhotoPicker" :file="quickMealImage?.file" :disabled="saving || preparingImage" @change="selectQuickMealImage" />
             <small v-if="quickMealImage"><template v-if="quickMealImage.compressed">已压缩 {{ formatFileSize(quickMealImage.originalBytes) }} → {{ formatFileSize(quickMealImage.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(quickMealImage.uploadBytes) }}</template></small>
             <button v-if="quickMealImage" class="text-action" type="button" @click="quickMealImage = undefined">移除待上传照片</button>
-            <button v-if="composerIntent === 'photo'" class="primary-button" type="submit">{{ quickMealImage ? '建立餐次并上传' : '建立餐次' }}</button>
+            <button v-if="composerIntent === 'photo'" class="primary-button" type="submit">{{ quickMealImage ? '保存这餐并上传' : '保存这餐' }}</button>
           </fieldset>
         </form>
         <template v-if="composerIntent === 'food'">
@@ -588,13 +680,20 @@ onBeforeUnmount(stopPolling);
         </template>
       </section>
       <section v-show="!creatingMeal" class="work-panel meal-log" aria-labelledby="meal-log-title">
-        <div class="panel-heading"><h2 id="meal-log-title">这一天吃了什么</h2><span class="status-chip">{{ meals.length }} 餐</span></div><p v-if="!meals.length" class="field-help">还没有餐食记录。</p>
-        <article v-for="meal in meals" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card">
-          <header><div><MealThumbnail :analysis-id="(analysesByMeal[meal.id] ?? []).find(item => item.imageAvailable)?.id" /><div><strong>{{ meal.name ?? '餐食' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div></div><button class="text-action" type="button" :aria-expanded="!!openMeals[meal.id]" @click="openMeals[meal.id] = !openMeals[meal.id]">{{ openMeals[meal.id] ? '收起餐食' : '打开餐食' }}</button><button class="text-action danger-text" type="button" :disabled="saving" @click="deleteMeal(meal)"><AppIcon name="trash" />删除整顿</button></header>
+        <div class="panel-heading"><h2 id="meal-log-title">{{ focusedMealId ? '核对这顿饭' : '这一天吃了什么' }}</h2><span class="status-chip">{{ meals.length }} 餐</span></div>
+        <button v-if="focusedMealId" type="button" class="text-action meal-list-return" @click="showMealList"><AppIcon name="back" />返回当天餐食</button>
+        <p v-if="!meals.length" class="field-help">还没有餐食记录。</p>
+        <article v-for="meal in meals" v-show="!focusedMealId || focusedMealId === meal.id" :id="`meal-${meal.id}`" :key="meal.id" class="meal-card" :class="{ 'meal-card--open': openMeals[meal.id] }">
+          <header><div><MealThumbnail :analysis-id="(analysesByMeal[meal.id] ?? []).find(item => item.imageAvailable)?.id" /><div class="meal-card-title"><strong>{{ meal.name ?? '餐食' }}</strong><span>{{ displayTime(meal.occurredAt) }}</span></div></div><button class="text-action" type="button" :aria-expanded="!!openMeals[meal.id]" @click="toggleMeal(meal)">{{ openMeals[meal.id] ? '收起餐食' : '打开餐食' }}</button><details class="meal-card-menu"><summary aria-label="餐食操作"><AppIcon name="more" /></summary><button class="text-action danger-text" type="button" :disabled="saving" @click="deleteMeal(meal)"><AppIcon name="trash" />删除整顿</button></details></header>
           <p class="meal-summary">{{ meal.contributions.map(item => item.label).join('、') || '还未添加食物' }}</p>
           <p class="meal-summary">{{ nutrients.map(metric => `${metric.label} ${mealNutrient(meal, metric.key)} ${metric.unit}`).join(' · ') }}</p>
           <p v-if="(analysesByMeal[meal.id] ?? []).some(analysis => analysis.status === 'pending' || analysis.status === 'running')" class="field-help" role="status">照片识别中，可以稍后回来查看。</p>
           <div v-show="openMeals[meal.id]" class="meal-content">
+            <section v-if="reviewAnalysis(meal)" class="meal-review" aria-label="照片与当前食物核对">
+              <MealReviewPhoto :analysis="reviewAnalysis(meal)!" />
+              <p v-if="meal.contributions.length" class="meal-save-state"><AppIcon name="check" />已保存<template v-if="meal.contributions.some(item => item.source === 'model_adopted')"> · 照片估算</template></p>
+              <p v-if="reviewAnalysis(meal)?.candidate?.uncertaintyNote" class="field-help">{{ reviewAnalysis(meal)?.candidate?.uncertaintyNote }}</p>
+            </section>
             <div class="row-actions"><button class="text-action" type="button" :disabled="saving" @click="startMetadata(meal)">修改餐食信息</button><button class="text-action" type="button" @click="photoPanels[meal.id] = !photoPanels[meal.id]">{{ photoPanels[meal.id] ? '收起照片' : '照片与识别' }}</button></div>
             <p v-if="meal.note">{{ meal.note }}</p>
             <form v-if="metadataDrafts[meal.id]" class="meal-metadata-form" aria-label="修改餐食信息" @submit.prevent="saveMetadata(meal)">
@@ -605,18 +704,20 @@ onBeforeUnmount(stopPolling);
               </fieldset>
             </form>
             <ul v-if="meal.contributions.length" class="meal-items">
-              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)" />
+              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)">
+                <form v-if="item.id === editingContributionId" class="contribution-form" aria-label="修正食物" @submit.prevent="saveContribution(meal, item)">
+                  <fieldset :disabled="saving">
+                    <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
+                    <label>食物名称<input v-model="formFor(meal.id).label" required /></label>
+                    <p class="field-help">改成另一种食物请使用“换食物”，营养会按新基准换算。</p>
+                    <details><summary>修正已知营养</summary><p class="field-help">未知营养留空，调整食用量请使用“改份量”。</p><div class="form-row nutrient-inputs"><label>能量 kcal<input v-model="formFor(meal.id).energyKcal" type="number" min="0" step="any" /></label><label>蛋白质 g<input v-model="formFor(meal.id).proteinGrams" type="number" min="0" step="any" /></label><label>碳水 g<input v-model="formFor(meal.id).carbohydrateGrams" type="number" min="0" step="any" /></label><label>脂肪 g<input v-model="formFor(meal.id).fatGrams" type="number" min="0" step="any" /></label></div></details>
+                    <div class="row-actions"><button class="primary-button" type="submit">保存修正</button><button class="text-action" type="button" @click="cancelCorrection(meal)">取消修改</button></div>
+                  </fieldset>
+                </form>
+              </MealFoodItem>
             </ul>
             <FoodPicker v-if="foodReplacementDrafts[meal.id]" :id="`food-replacement-${meal.id}`" :key="foodReplacementDrafts[meal.id]!.target.id" :meal="meal" :draft="foodReplacementDrafts[meal.id]!.picker" :replacement="foodReplacementDrafts[meal.id]!.target" :disabled="saving" @busy="saving = $event" @saved="foodReplacementSaved" @refreshed="foodReplacementRefreshed" @cancel="delete foodReplacementDrafts[meal.id]" />
             <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
-            <form v-if="meal.contributions.some(item => item.id === editingContributionId)" class="contribution-form" aria-label="修正食物" @submit.prevent="saveContribution(meal, meal.contributions.find(item => item.id === editingContributionId))">
-              <fieldset :disabled="saving">
-                <label>食物名称<input v-model="formFor(meal.id).label" required /></label>
-                <p class="field-help">这里只修正名称或已知营养。调整食用量请使用该食物的“改份量”；未知营养留空。</p>
-                <div class="form-row nutrient-inputs"><label>能量 kcal<input v-model="formFor(meal.id).energyKcal" type="number" min="0" step="any" /></label><label>蛋白质 g<input v-model="formFor(meal.id).proteinGrams" type="number" min="0" step="any" /></label><label>碳水 g<input v-model="formFor(meal.id).carbohydrateGrams" type="number" min="0" step="any" /></label><label>脂肪 g<input v-model="formFor(meal.id).fatGrams" type="number" min="0" step="any" /></label></div>
-                <div class="row-actions"><button class="primary-button" type="submit">保存修正</button><button class="text-action" type="button" @click="editingContributionId = null">取消修改</button></div>
-              </fieldset>
-            </form>
               <section v-show="photoPanels[meal.id]" class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
                 <div class="meal-image-panel__heading">
                   <div>
@@ -624,11 +725,11 @@ onBeforeUnmount(stopPolling);
                     <span>{{ automaticPhotos === null ? '正在读取识别设置；读取完成后可以上传照片。' : automaticPhotos ? '照片上传后自动识别，已有记录不会被覆盖。' : '照片先保存到这餐，需要时再手动发起识别。' }}</span>
                   </div>
                 </div>
-                <div class="image-upload-row">
+                <details class="meal-upload-disclosure" :open="!(analysesByMeal[meal.id]?.length) || !!imageSelections[meal.id]"><summary>添加餐食照片</summary><div class="image-upload-row">
                   <MealPhotoPicker :file="imageSelections[meal.id]?.file" :disabled="preparingImage || uploadingMealId !== null" @change="selectMealImage(meal.id, $event)" />
                   <span class="selected-file"><template v-if="imageSelections[meal.id]">{{ imageSelections[meal.id]!.file.name }} · <template v-if="imageSelections[meal.id]!.compressed">已压缩 {{ formatFileSize(imageSelections[meal.id]!.originalBytes) }} → {{ formatFileSize(imageSelections[meal.id]!.uploadBytes) }}</template><template v-else>保持原图 {{ formatFileSize(imageSelections[meal.id]!.uploadBytes) }}</template></template><template v-else>还没有选择照片</template></span>
                   <button class="action-button" type="button" :disabled="preparingImage || uploadingMealId !== null || automaticPhotos === null" @click="uploadMealImage(meal)">{{ uploadingMealId === meal.id ? '正在上传…' : automaticPhotos ? '上传并识别' : '上传照片' }}</button>
-                </div>
+                </div></details>
                 <div v-if="uploadingMealId === meal.id" class="upload-progress" role="status"><progress max="100" :value="uploadProgress[meal.id] ?? 0"></progress><span>已上传 {{ uploadProgress[meal.id] ?? 0 }}%</span></div>
                 <div v-if="(analysesByMeal[meal.id] ?? []).length" class="image-analysis-list">
                   <article v-for="analysis in analysesByMeal[meal.id] ?? []" :key="analysis.id" class="image-analysis-card">

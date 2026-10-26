@@ -11,6 +11,43 @@ const egg = builtinFoods.find((food) => food.id === "usda:173424")!;
 const selection = { foodId: egg.id, version: egg.version, amount: 100 };
 
 describe("unified food catalog", () => {
+  it("starts new accounts with familiar foods while keeping personal favorites first and isolated", async () => {
+    const service = new NutritionService(new MemoryNutritionRepository());
+    const page = await service.getFoodCatalog("owner");
+    expect(page.items.slice(0, 3).map(food => food.id)).toEqual(["tfda:A0550601", egg.id, "tfda:H1150201"]);
+    expect(page.items[1]).toMatchObject({ label: "鸡蛋（水煮全蛋）", basisAmount: 100, basisUnit: "g", energyKcal: 155, isFavorite: false });
+    expect((await service.getFoodCatalog("owner", "", "meat_eggs")).items[0]!.id).toBe(egg.id);
+    const favorite = builtinFoods.find(food => food.label.startsWith("阿部牙鲷"))!;
+    await service.setFoodFavorite("owner", favorite.id, true);
+    expect((await service.getFoodCatalog("owner")).items[0]).toMatchObject({ id: favorite.id, isFavorite: true });
+    expect((await service.getFoodCatalog("other")).items[0]).toMatchObject({ id: "tfda:A0550601", isFavorite: false });
+  });
+
+  it("ranks exact names and familiar matches ahead of incidental text without combining source or preparation identities", async () => {
+    const service = new NutritionService(new MemoryNutritionRepository());
+    const exact = await service.createPersonalFood("owner", { ...unknownInput, label: "牛奶", category: "dairy" });
+    await service.setFoodFavorite("owner", exact.id, false);
+    const milk = await service.getFoodCatalog("owner", "牛奶");
+    expect(milk.items.slice(0, 2).map(food => food.id)).toEqual([exact.id, "usda:172217"]);
+    expect((await service.getFoodCatalog("owner", "牛奶凤梨")).items[0]!.label).toBe("牛奶凤梨");
+    const rice = await service.getFoodCatalog("owner", "米饭");
+    expect(rice.items.slice(0, 2).map(food => food.id)).toEqual(["tfda:A0550601", "usda:168878"]);
+    expect(rice.items[0]).toMatchObject({ provider: "tfda", energyKcal: 183, basisAmount: 100 });
+    expect(rice.items[1]).toMatchObject({ provider: "usda_sr_legacy", label: "白米饭（长粒、强化米、熟）", energyKcal: 130, basisAmount: 100 });
+    const eggs = await service.getFoodCatalog("owner", "鸡蛋", "meat_eggs", null, 50);
+    expect(eggs.items[0]!.id).toBe(egg.id);
+    expect(eggs.items.some(food => food.id === "tfda:K0100101" && food.label.includes("生"))).toBe(true);
+    const pagedIds: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await service.getFoodCatalog("owner", "鸡蛋", "meat_eggs", cursor, 3);
+      pagedIds.push(...page.items.map(food => food.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(new Set(pagedIds).size).toBe(eggs.total);
+    expect(pagedIds).toEqual(eggs.items.map(food => food.id));
+  });
+
   it("exposes the versioned TFDA catalog with Chinese search, sample provenance, unknown values and immutable portions", async () => {
     const tfda = builtinFoods.filter(food => food.provider === "tfda");
     expect(tfda).toHaveLength(2180);

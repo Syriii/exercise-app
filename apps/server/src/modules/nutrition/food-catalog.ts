@@ -52,6 +52,34 @@ export function foodMatchesSearch(food: FoodDefinition, normalizedQuery: string)
   return (publicSearchText.get(food.id) ?? normalizeFoodSearch(`${food.label} ${food.originalName ?? ""}`)).includes(normalizedQuery);
 }
 
+// A browsing order for familiar foods, not a nutritional recommendation or a new
+// food definition. Every source, preparation state and portion basis stays intact.
+const everydayFoodIds = [
+  "tfda:A0550601", "usda:173424", "tfda:H1150201", "usda:172217", "tfda:R2400201",
+  "usda:171477", "tfda:R4701201", "usda:171688", "usda:173944", "usda:169967",
+  "usda:168463", "usda:170394", "usda:170440", "usda:171284", "tfda:A0810201",
+  "usda:172688", "tfda:R4700901", "usda:173806", "usda:171413",
+] as const;
+const everydayFoodOrder = new Map<string, number>(everydayFoodIds.map((id, index) => [id, index]));
+const publicSearchNames = new Map(builtinFoods.map(food => [food.id, searchableNames(food)]));
+
+function searchableNames(food: FoodDefinition) {
+  const label = normalizeFoodSearch(food.label);
+  return { label, base: label.split(/[（(]/, 1)[0]!.trim(),
+    aliases: normalizeFoodSearch(food.searchAliases ?? "").split(/[\s,，;；、]+/).filter(Boolean) };
+}
+
+function foodSearchRank(food: FoodDefinition, normalizedQuery: string): number {
+  if (!normalizedQuery) return 0;
+  const names = publicSearchNames.get(food.id) ?? searchableNames(food);
+  if (names.label === normalizedQuery) return 0;
+  if (names.base === normalizedQuery) return 1;
+  if (everydayFoodOrder.has(food.id)) return 2;
+  if (names.aliases.includes(normalizedQuery)) return 3;
+  if (names.label.startsWith(normalizedQuery)) return 4;
+  return names.label.includes(normalizedQuery) ? 5 : 6;
+}
+
 export function personalFood(food: PersonalFoodTemplate): CatalogFood {
   const result: CatalogFood = {
     id: food.catalogKey ?? `personal:${food.id}`, version: `personal-${food.revision}`,
@@ -70,7 +98,7 @@ export function externalFoodVersion(food: FoodDefinition): string {
     food.energyKcal, food.proteinGrams, food.carbohydrateGrams, food.fatGrams])).digest("hex").slice(0, 20);
 }
 
-export function catalogFoods(templates: readonly PersonalFoodTemplate[], external: readonly FoodDefinition[] = []): CatalogFood[] {
+export function catalogFoods(templates: readonly PersonalFoodTemplate[], external: readonly FoodDefinition[] = [], normalizedQuery = ""): CatalogFood[] {
   const foods = new Map<string, CatalogFood>([...builtinFoods, ...external].map((food) => [food.id, { ...food, isFavorite: false }]));
   for (const template of templates) {
     const food = personalFood(template);
@@ -78,6 +106,8 @@ export function catalogFoods(templates: readonly PersonalFoodTemplate[], externa
     foods.set(food.id, { ...(foods.get(food.id) ?? food), isFavorite: food.isFavorite });
   }
   return [...foods.values()].sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite)
+    || foodSearchRank(a, normalizedQuery) - foodSearchRank(b, normalizedQuery)
+    || (everydayFoodOrder.get(a.id) ?? everydayFoodIds.length) - (everydayFoodOrder.get(b.id) ?? everydayFoodIds.length)
     || a.label.localeCompare(b.label, "zh-CN") || a.id.localeCompare(b.id));
 }
 

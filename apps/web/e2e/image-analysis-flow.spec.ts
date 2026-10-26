@@ -49,7 +49,7 @@ test("photo foods count automatically and can be scaled and reused independently
   });
   await expect(page.getByText("canteen.png")).toBeVisible();
   await expect(page.getByText(/保持原图/)).toBeVisible();
-  await page.getByRole("button", { name: "建立餐次并上传" }).click();
+  await page.getByRole("button", { name: "保存这餐并上传" }).click();
   const meal = page.locator("article.meal-card").filter({ hasText: "食堂午饭" });
   await expect(page.getByText("照片已上传；识别完成后会按食物计入，你可以直接修改份量。已有记录不会被覆盖")).toBeVisible();
 
@@ -83,7 +83,7 @@ test("photo foods count automatically and can be scaled and reused independently
   await page.getByRole("button", { name: "拍照记一餐" }).click();
   await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill("复用晚饭");
-  await page.getByRole("button", { name: "建立餐次", exact: true }).click();
+  await page.getByRole("button", { name: "保存这餐", exact: true }).click();
   const dinner = page.locator("article.meal-card").filter({ hasText: "复用晚饭" });
   const picker = dinner.getByRole("region", { name: "添加食物", exact: true });
   await picker.getByRole("button", { name: "添加食物", exact: true }).click();
@@ -92,6 +92,8 @@ test("photo foods count automatically and can be scaled and reused independently
   await picker.getByRole("button", { name: "加入这顿饭（1项）", exact: true }).click();
   await expect(dinner.locator(".meal-items > li")).toHaveCount(1);
   await expect(dinner.locator(".meal-items").getByText(/60 kcal/)).toBeVisible();
+  await page.getByRole('button', {name:'返回当天餐食', exact:true}).click();
+  await meal.getByRole('button', {name:'打开餐食',exact:true}).click();
   await expect(rice.getByText(/120 kcal/)).toBeVisible();
   await expect(page.getByRole("region", { name: "当天营养" }).getByText("560 kcal")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
@@ -155,7 +157,7 @@ test("a failed quick photo upload keeps one meal and can retry without duplicati
     mimeType: "image/png",
     buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   });
-  await page.getByRole("button", { name: "建立餐次并上传" }).click();
+  await page.getByRole("button", { name: "保存这餐并上传" }).click();
 
   const meal = page.locator("article.meal-card").filter({ hasText: "上传重试餐" });
   await expect(page.getByText("服务器暂时无法处理请求，请稍后重试")).toBeVisible();

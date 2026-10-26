@@ -83,7 +83,9 @@ test("today shows four recorded nutrients and opens the shared photo composer", 
   await expect(page.getByText("今天还可以吃", { exact: true })).toHaveCount(0);
   await expect(page.locator(".view-stack > section")).toHaveCount(2);
   await page.screenshot({ path: info.outputPath("today-empty.png"), fullPage: true });
+  const photo = page.waitForEvent('filechooser');
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
+  await (await photo).setFiles({ name: 'today.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
   await expect(page.getByRole('region', { name: '快速记餐' }).locator('.compact-metadata summary')).toContainText('修改信息');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

@@ -6,6 +6,7 @@ import { router } from "./router";
 import { initializeDiagnostics } from "./support/diagnostics";
 import "./styles/app.css";
 import "./styles/mobile-redesign.css";
+import "./styles/recording-experience.css";
 
 const root = document.querySelector("#root");
 

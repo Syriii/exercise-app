@@ -1,5 +1,5 @@
 import type { Readable } from "node:stream";
-import type { ImageAnalyzer } from "./analyzer.js";
+import type { ImageAnalyzer, ImageAnalyzerCall } from "./analyzer.js";
 import { DeepSeekImageAnalyzerError, imageAnalysisPromptVersion } from "./deepseek-analyzer.js";
 import { ImageAnalysisError } from "./errors.js";
 import type { ImageAnalysisRepository } from "./repository.js";
@@ -95,9 +95,12 @@ export class ImageAnalysisService {
       throw error;
     }
     if (!started.work.imageAvailable) { await this.options.repository.fail(analysisId, started.attemptId, "image_unavailable"); return; }
+    let completedCalls: readonly ImageAnalyzerCall[] | undefined;
     try {
       const image = await readAll(await this.options.mediaStore.open(started.work.objectKey), this.options.maxUploadBytes);
       const result = await this.options.analyzer.analyze(started.work.contentType, image);
+      // A charged provider result must survive a later business-write failure.
+      completedCalls = result.calls;
       const completed = await this.options.repository.succeed(analysisId, started.attemptId, result.candidate, result.providerRequestId, result);
       const newer = completed !== "not_running" && !completed.tentativeHandled
         ? (await this.options.repository.list(started.work.userId, started.work.mealId)).some(other => other.id !== analysisId && other.createdAt >= started.work.createdAt)
@@ -117,7 +120,7 @@ export class ImageAnalysisService {
           ? error.message.slice(0, 100)
           : "analysis_failed";
       await this.options.repository.fail(analysisId, started.attemptId, code,
-        error instanceof DeepSeekImageAnalyzerError ? error.calls : undefined);
+        completedCalls ?? (error instanceof DeepSeekImageAnalyzerError ? error.calls : undefined));
       throw error;
     }
   }

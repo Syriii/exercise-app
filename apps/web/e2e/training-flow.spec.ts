@@ -39,8 +39,8 @@ test("a person records multiple actual actions without creating a live workout",
   await actions.nth(0).getByLabel("次数", { exact: true }).nth(2).fill("8");
   await reveal(actions.nth(1).getByLabel("记录方式"));
   await actions.nth(1).getByLabel("记录方式").selectOption("activity");
-  await actions.nth(1).getByLabel("时长（秒）").fill("1800");
-  await actions.nth(1).getByLabel("距离（米）").fill("3000");
+  await actions.nth(1).getByLabel("时长（分钟）").fill("30");
+  await actions.nth(1).getByLabel("距离（公里）").fill("3");
   await reveal(actions.nth(2).getByLabel("记录方式"));
   await actions.nth(2).getByLabel("记录方式").selectOption("unknown");
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toEqual([]);
@@ -82,13 +82,13 @@ test("a reusable plan is copied into a draft and can be changed without modifyin
   await extra.getByLabel("动作名称", { exact: true }).fill("平板支撑");
   await reveal(extra.getByLabel("记录方式"));
   await extra.getByLabel("记录方式").selectOption("activity");
-  await extra.getByLabel("时长（秒）").fill("60");
+  await extra.getByLabel("时长（分钟）").fill("1");
   await page.getByRole("button", { name: "保存训练记录", exact: true }).click();
   await expect(page.getByText("这次训练已保存。", { exact: true })).toBeVisible();
   const plans = await (await page.request.get("/api/v1/training/templates")).json();
   expect(plans[0].items[0].targetRepsMin).toBe(10);
   await page.getByRole("button", { name: "记录训练内容", exact: true }).click();
-  await page.getByText("参考计划或上次内容", { exact: true }).click();
+  await page.getByRole("button", { name: "上次实际内容", exact: true }).click();
   await page.getByRole("button", { name: "使用上次实际内容" }).click();
   await expect(page.getByLabel("每组次数")).toHaveValue("8");
   expect(await (await page.request.get("/api/v1/training/sessions")).json()).toHaveLength(1);

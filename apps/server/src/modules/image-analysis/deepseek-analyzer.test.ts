@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DeepSeekImageAnalyzer, DeepSeekImageAnalyzerError } from "./deepseek-analyzer.js";
+import { DeepSeekImageAnalyzer, DeepSeekImageAnalyzerError, imageAnalysisPromptVersion } from "./deepseek-analyzer.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -40,6 +42,9 @@ describe("DeepSeekImageAnalyzer", () => {
       });
       const messages = body.messages as Array<{ content: Array<Record<string, unknown>> }>;
       expect(String(messages[0]?.content)).toContain("JSON 示例");
+      // Bind the production version to the reviewed e1833d5 prompt bytes.
+      expect({ version: imageAnalysisPromptVersion, promptSha256: createHash("sha256").update(String(messages[0]?.content)).digest("hex") })
+        .toEqual({ version: "meal-image-foods-2026-09-06.1", promptSha256: "b7c9aed3132312367fa85709d206464fbcf5f4938e4cf09a2d6000b33116d3d5" });
       expect(messages[1]?.content[1]).toEqual({
         type: "image_url",
         image_url: {

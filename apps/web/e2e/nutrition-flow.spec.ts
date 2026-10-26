@@ -60,7 +60,9 @@ test("today opens nutrition with the quick meal form ready", async ({ page }, te
   await completeSetup(page);
   await expect(page).toHaveURL(/\/today$/);
 
+  const selection=page.waitForEvent('filechooser');
   await page.getByRole("button", { name: "拍照记一餐", exact: true }).click();
+  await (await selection).setFiles({name:'today.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});
   await expect(page).toHaveURL(/\/nutrition/);
   await expect(page.getByRole("region", { name: "快速记餐" })).toBeVisible();
   await expect(page.getByRole("region", { name: "快速记餐", exact: true })).toBeFocused();
@@ -193,6 +195,7 @@ test("a person can record, correct, and review a meal without treating unknown n
 
   await reveal(meal.getByRole("button", { includeHidden: true, name: "修正" }));
   await meal.getByRole("button", { name: "修正" }).click();
+  await reveal(meal.getByLabel("能量 kcal"));
   await meal.getByLabel("能量 kcal").fill("250");
   await meal.getByRole("button", { name: "保存修正" }).click();
   await expect(page.getByRole("region", { name: "当天营养" }).getByText("250 kcal")).toBeVisible();

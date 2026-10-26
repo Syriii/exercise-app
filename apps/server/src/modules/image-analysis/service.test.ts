@@ -7,8 +7,9 @@ import { MemoryTemporaryMediaStore } from "../media/memory-temporary-media-store
 import { MemoryNutritionRepository } from "../nutrition/memory-repository.js";
 import { NutritionService } from "../nutrition/service.js";
 import { MemoryTaskQueue } from "../tasks/memory-task-queue.js";
-import type { ImageAnalyzer } from "./analyzer.js";
+import type { ImageAnalyzer, ImageAnalyzerCall } from "./analyzer.js";
 import { DeepSeekImageAnalyzerError } from "./deepseek-analyzer.js";
+import { estimateDeepSeekCost } from "./deepseek-pricing.js";
 import { MemoryImageAnalysisRepository } from "./memory-repository.js";
 import { FixedImageAnalyzer, ImageAnalysisService } from "./service.js";
 
@@ -78,6 +79,39 @@ describe("ImageAnalysisService", () => {
     const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
     await expect(values.service.process(uploaded.id)).rejects.toThrow("deepseek_invalid_candidate");
     expect((await values.repository.get("user-1", uploaded.id))?.attempts[0]?.evidence).toMatchObject({ calls: [call] });
+  });
+
+  it("retains charged calls when result persistence fails and only analyzes again after manual retry", async () => {
+    const startedAt = "2026-09-23T02:00:00.000Z";
+    const usage = { promptTokens: 100, completionTokens: 20, totalTokens: 120, promptCacheHitTokens: 0, promptCacheMissTokens: 100 };
+    const call: ImageAnalyzerCall = { startedAt, configuredModel: "deepseek-flash", providerModel: "deepseek-flash",
+      providerRequestId: "charged-before-write-failed", status: "succeeded", usage,
+      cost: estimateDeepSeekCost("deepseek-flash", new Date(startedAt), usage), durationMs: 40 };
+    const analyze = vi.fn(async () => ({ candidate, providerRequestId: call.providerRequestId,
+      providerModel: call.providerModel, usage, calls: [call] }));
+    const values = await fixture({ model: "deepseek-flash", analyze });
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    const writeError = new Error("database_write_failed");
+    vi.spyOn(values.repository, "succeed").mockRejectedValueOnce(writeError);
+
+    await expect(values.service.process(uploaded.id)).rejects.toBe(writeError);
+
+    const failed = (await values.repository.get("user-1", uploaded.id))!;
+    expect(failed).toMatchObject({ status: "failed", candidate: null, lastErrorCode: "analysis_failed",
+      attempts: [{ status: "failed", evidence: { calls: [call] } }] });
+    expect(failed.attempts[0]?.evidence?.calls?.[0]?.cost).not.toBeNull();
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(0);
+    await values.service.process(uploaded.id);
+    expect(analyze).toHaveBeenCalledTimes(1);
+
+    await values.service.retry("user-1", uploaded.id, failed.revision);
+    await values.service.process(uploaded.id);
+    const completed = (await values.repository.get("user-1", uploaded.id))!;
+    expect(completed.status).toBe("succeeded");
+    expect(completed.attempts.map(attempt => attempt.status)).toEqual(["failed", "succeeded"]);
+    expect(completed.attempts[0]?.evidence?.calls).toEqual([call]);
+    expect(analyze).toHaveBeenCalledTimes(2);
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(1);
   });
 
   it("keeps photos and per-attempt evidence across time, rejects other accounts and fences results after deletion", async () => {

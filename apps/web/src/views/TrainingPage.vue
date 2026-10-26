@@ -29,17 +29,26 @@ const previousRecord = computed(() => sessions.value.find(s => s.status !== "in_
 const todayPlans = computed(() => schedules.value.filter(s => s.status !== "cancelled"));
 const recentActions = computed(() => [...new Set(sessions.value.flatMap(s => s.items.filter(i => i.status === 'completed').map(i => i.performedExerciseName ?? i.exerciseName)))]);
 const pickerOpen = ref(false);
+const pickingFrom = ref(0);
+const sourceMode = ref<"self" | "today" | "template" | "previous">("self");
 const recordFields = ref<HTMLFieldSetElement | null>(null);
 function pickAction(name: string, measurement: import('../features/training/record-draft').Measurement) {
   if (!draft.value || draft.value.items.length >= 50) return;
   draft.value.items.push({ ...blankAction(name), measurement });
+  pickerOpen.value = true;
+}
+function finishPicking() {
   pickerOpen.value = false;
-  void nextTick(() => recordFields.value?.querySelector<HTMLElement>('.record-action:last-of-type .action-title')?.focus());
+  void nextTick(() => recordFields.value?.querySelectorAll<HTMLElement>('.record-action')[pickingFrom.value]?.querySelector<HTMLElement>('.action-title, .action-included input')?.focus());
+}
+function chooseSource(source: typeof sourceMode.value) {
+  if (source === "self") { if (sourceMode.value !== "self" || !pickerOpen.value) pickingFrom.value = draft.value?.items.length ?? 0; pickerOpen.value = true; }
+  sourceMode.value = source;
 }
 function report(e: unknown) { error.value = e instanceof Error ? e.message : "暂时保存不了，输入已保留。"; }
-function mayReplace() { return draft.value === null || window.confirm("当前还有未保存的训练内容。放弃这些输入并打开另一条记录吗？"); }
+function mayReplace() { return draft.value === null || (!draft.value.items.length && !draft.value.note && !draft.value.time && !names.value.trim() && draft.value.localDate === date.value) || window.confirm("当前还有未保存的训练内容。放弃这些输入并打开另一条记录吗？"); }
 function clearConflict() { conflicting.value = false; latest.value = null; deletedConflict.value = false; planConflict.value = false; }
-function begin() { if (!mayReplace()) return; draft.value = emptyRecord(date.value); pickerOpen.value = true; names.value = ""; error.value = ""; notice.value = ""; clearConflict(); }
+function begin() { if (!mayReplace()) return; draft.value = emptyRecord(date.value); sourceMode.value = "self"; pickerOpen.value = true; pickingFrom.value = 0; names.value = ""; error.value = ""; notice.value = ""; clearConflict(); }
 function addNames() {
   if (!draft.value) return;
   const incoming = names.value.split(/[\n、,，]/).map(v => v.trim()).filter(Boolean);
@@ -52,6 +61,7 @@ function importTemplate() {
   if (!source || !draft.value) return;
   if (draft.value.items.length + source.items.length > 50) { error.value = "合并后超过 50 个动作，请先移除不需要的内容。"; return; }
   draft.value.items.push(...source.items.map(actionFromPlan));
+  sourceMode.value = "template"; pickerOpen.value = false;
   notice.value = "已带出计划参考，勾选做过的动作并核对实际量；尚未保存。";
   selectedTemplate.value = "";
 }
@@ -60,11 +70,12 @@ function copyPrevious() {
   const items = recordFromActual(previousRecord.value).items.map(item => ({ ...item, id: submissionId(), planLink: null }));
   if (draft.value.items.length + items.length > 50) { error.value = "合并后超过 50 个动作。"; return; }
     draft.value.items.push(...items);
+  sourceMode.value = "previous"; pickerOpen.value = false;
   notice.value = "已复制上次实际内容。请删改为本次确实做过的动作和数量。";
 }
 async function edit(record: TrainingSession) {
   if (!mayReplace()) return;
-  try { draft.value = recordFromActual(await trainingApi.getSession(record.id)); names.value = ""; clearConflict(); error.value = "";
+  try { draft.value = recordFromActual(await trainingApi.getSession(record.id)); sourceMode.value = "self"; pickerOpen.value = false; names.value = ""; clearConflict(); error.value = "";
     notice.value = record.status === "in_progress" ? "旧记录中已确认完成的动作已带入；待完成的计划没有当作实际记录。" : ""; }
   catch (e) { report(e); }
 }
@@ -149,6 +160,7 @@ async function handleQuery() {
         draft.value = emptyRecord(date.value); names.value = ""; clearConflict();
         const items = query.templateId ? templates.value.find(t => t.id === query.templateId)?.items
           : programs.value.find(p => p.id === query.programId)?.units.find(u => u.id === query.unitId)?.items;
+        sourceMode.value = items ? "template" : "self"; pickerOpen.value = !items;
         if (items) { draft.value.items = items.map(actionFromPlan); notice.value = "计划只作为参考；勾选做过的动作，核对实际量后保存。"; }
         else if (!query.new) error.value = "来源计划已不存在，可以直接填写本次实际内容。";
       }
@@ -161,6 +173,7 @@ function referenceSchedule(schedule: TrainingSchedule) {
   if (!mayReplace()) return;
   if (!schedule.items) { editingPlan.value = schedule; return; }
   draft.value = emptyRecord(schedule.localDate); names.value = ""; clearConflict(); error.value = "";
+  sourceMode.value = "today"; pickerOpen.value = false;
   draft.value.items = schedule.items.map(item => ({ ...actionFromPlan(item), planLink: {
     scheduleId: schedule.id, revision: schedule.revision, itemId: item.id, localDate: schedule.localDate, title: schedule.title, item,
   } }));
@@ -219,11 +232,34 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
           </div></details>
           <details v-if="draft.items.some(item => item.planLink)"><summary><AppIcon name="calendar" />关联计划 · {{ [...new Set(draft.items.flatMap(item => item.planLink ? [item.planLink.title] : []))].join('、') }}</summary><p>改动作名称会取消该动作关联。</p><button type="button" class="text-action" @click="detachPlan">取消计划关联，独立记录</button></details>
           <p v-if="planConflict" role="alert">日期计划已变化，输入仍保留。<button type="button" class="text-action" @click="detachPlan">保留实际内容，取消关联后保存</button></p>
-          <details><summary>参考计划或上次内容</summary><div class="record-source"><label><span>选择计划</span><select v-model="selectedTemplate"><option value="">请选择</option><option v-for="plan in templates" :key="plan.id" :value="plan.id">{{ plan.name }}</option></select></label><button type="button" class="action-button" :disabled="!selectedTemplate" @click="importTemplate">加入参考内容</button><button type="button" class="action-button" :disabled="!previousRecord" @click="copyPrevious">使用上次实际内容</button></div><p>参考内容不是本次完成量。请移除未做的动作并核对数量。</p></details>
-          <ExercisePicker v-if="pickerOpen || !draft.items.length" :recent="recentActions" :disabled="saving || draft.items.length >= 50" @select="pickAction" />
+          <section class="record-start" aria-label="选择记录起点">
+            <h3>从哪里开始？</h3>
+            <div class="record-start-options" role="group" aria-label="训练记录来源">
+              <button type="button" class="action-button" :aria-pressed="sourceMode === 'self'" @click="chooseSource('self')">自选动作</button>
+              <button type="button" class="action-button" :aria-pressed="sourceMode === 'today'" @click="chooseSource('today')">当天计划</button>
+              <button type="button" class="action-button" :aria-pressed="sourceMode === 'template'" @click="chooseSource('template')">已有计划</button>
+              <button type="button" class="action-button" :aria-pressed="sourceMode === 'previous'" @click="chooseSource('previous')">上次实际内容</button>
+            </div>
+            <div v-if="sourceMode === 'today'" class="record-source-content">
+              <p v-if="!todayPlans.length" class="field-help">{{ date }} 没有训练安排，可以自选动作或参考已有计划。</p>
+              <template v-else><p class="field-help">带入参考后，勾选本次做过的动作并核对实际量。</p><button v-for="plan in todayPlans" :key="plan.id" type="button" class="action-button" @click="referenceSchedule(plan)">{{ plan.title }}</button></template>
+            </div>
+            <div v-else-if="sourceMode === 'template'" class="record-source">
+              <p v-if="!templates.length" class="field-help">还没有可复用的计划，可以先自选动作。</p>
+              <template v-else><label><span>选择计划</span><select v-model="selectedTemplate"><option value="">请选择</option><option v-for="plan in templates" :key="plan.id" :value="plan.id">{{ plan.name }}</option></select></label><button type="button" class="action-button" :disabled="!selectedTemplate" @click="importTemplate">加入参考内容</button></template>
+            </div>
+            <div v-else-if="sourceMode === 'previous'" class="record-source-content">
+              <p v-if="!previousRecord" class="field-help">还没有可以参考的实际训练记录。</p>
+              <template v-else><p class="field-help">{{ previousRecord.localDate }} · {{ previousRecord.items.filter(item => item.status === 'completed').map(item => item.performedExerciseName ?? item.exerciseName).join('、') }}</p><button type="button" class="action-button" @click="copyPrevious">使用上次实际内容</button><p class="field-help">复制后请改为本次做过的内容与数量，保存前不会计入记录。</p></template>
+            </div>
+          </section>
+          <template v-if="sourceMode === 'self' && pickerOpen">
+            <ExercisePicker :recent="recentActions" :selected="draft.items.map(item => item.name)" :disabled="saving || draft.items.length >= 50" @select="pickAction" />
+            <button v-if="draft.items.length" type="button" class="action-button" @click="finishPicking">完成选择，核对数量（{{ draft.items.length }}）</button>
+          </template>
           <p v-if="draft.items.some(item => item.included === false)" class="field-help">勾选已做的动作，核对实际量。</p>
           <RecordActionFields v-for="(item, index) in draft.items" :key="item.id" v-model="draft.items[index]!" @remove="draft.items.splice(index, 1)" />
-          <button v-if="draft.items.length" type="button" class="text-action" @click="pickerOpen = !pickerOpen">{{ pickerOpen ? '收起动作列表' : '继续选择动作' }}</button>
+          <button v-if="draft.items.length && (sourceMode !== 'self' || !pickerOpen)" type="button" class="text-action" @click="chooseSource('self')">继续选择动作</button>
           <details><summary><AppIcon name="more" />更多记录方式</summary><details><summary>一次添加多个动作</summary><label><span>动作名称，每行一个</span><textarea v-model="names" rows="3" placeholder="深蹲&#10;俯卧撑&#10;跑步" /></label><button type="button" class="action-button" @click="addNames">加入这些动作</button><button type="button" class="text-action" :disabled="draft.items.length >= 50" @click="addAction">添加动作</button></details><p class="data-note">数量不清楚可以留空。切换页面会保留输入；刷新或关闭应用不会保存草稿。</p></details>
           <div class="selection-save-bar"><span>已选 {{ draft.items.filter(item => item.included !== false).length }} 个动作</span><button class="action-button action-button--primary" type="submit" :disabled="conflicting">{{ saving ? "保存中…" : "保存训练记录" }}</button></div>
           <button class="text-action" type="button" @click="discard">放弃未保存内容</button>
@@ -266,6 +302,12 @@ watch(() => [draft.value?.id, draft.value?.localDate] as const, ([id, value], [o
 label { display: grid; gap: var(--space-xs); min-width: 0; } input, textarea, select { max-width: 100%; min-width: 0; } textarea { width: 100%; }
 input, textarea, select { min-height: 2.75rem; padding: var(--space-xs) var(--space-sm); border: 1px solid var(--color-rule-strong); border-radius: var(--radius-sm); background: var(--color-paper); }
 .record-source { margin-block: var(--space-md); } .record-source label { flex: 1; min-width: min(100%, 10rem); }
+.record-start { display: grid; gap: var(--space-xs); min-width: 0; }
+.record-start h3 { font-size: var(--text-base); }
+.record-start-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); }
+.record-start-options .action-button { min-width: 0; font-size: var(--text-sm); }
+.record-start-options .action-button[aria-pressed=true] { background: var(--color-accent-soft); border-color: var(--color-accent); color: var(--color-accent); }
+.record-source-content { display: grid; gap: var(--space-xs); min-width: 0; }
 .saved-training { margin-top: var(--space-md); } .saved-training li { margin-block: var(--space-sm); overflow-wrap: anywhere; } .saved-training li span { display: block; }
 .record-plans article { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-sm); margin-block: var(--space-md); }
 .record-plans .date-plan { display: block; } .date-plan li { margin-block:.75rem; } .date-plan li span { display:block; }

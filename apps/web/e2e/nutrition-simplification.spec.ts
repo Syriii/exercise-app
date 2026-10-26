@@ -85,7 +85,7 @@ test("reopening a photo draft keeps the attachment visible and removable", async
   await expect(composer.getByText(/draft.png/)).toBeVisible();
   await expect(composer.getByLabel("餐次名称（可选）")).toHaveValue("保留的草稿");
   await composer.getByRole("button", { name: "移除待上传照片" }).click();
-  await expect(composer.getByRole("button", { name: "建立餐次", exact: true })).toBeVisible();
+  await expect(composer.getByRole("button", { name: "保存这餐", exact: true })).toBeVisible();
   await expect(composer.getByText(/draft.png/)).toHaveCount(0);
 });
 
@@ -98,6 +98,7 @@ test("opening another correction never replaces unsaved nutrition values", async
   await reveal(egg.getByRole("button", { includeHidden: true, name: "修正", exact: true }));
   await egg.getByRole("button", { name: "修正", exact: true }).click();
   const correction = meal.getByRole("form", { name: "修正食物", exact: true });
+  await reveal(correction.getByLabel("能量 kcal"));
   await correction.getByLabel("能量 kcal").fill("130");
   await reveal(soy.getByRole("button", { includeHidden: true, name: "修正", exact: true }));
   await soy.getByRole("button", { name: "修正", exact: true }).click();

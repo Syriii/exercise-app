@@ -34,7 +34,10 @@ test('food selection comes before optional metadata and compact portions save un
   }
   await composer.getByRole('button', { name: '加入这顿饭（1项）', exact: true }).click();
   await expect(page.locator('.meal-items')).toContainText('150 g');
-  await expect(page.locator('.meal-items')).toContainText('232.5 kcal');
+  await expect(page.locator('.meal-items')).toContainText('233 kcal');
+  const date=await page.getByLabel('查看日期').inputValue();
+  const meals=await (await page.request.get(`/api/v1/nutrition/meals?from=${date}&to=${date}`)).json();
+  expect(meals[0].contributions[0].energyKcal).toBe(232.5);
   const item = page.locator('.food-item');
   await expect(item.getByRole('button', { name: '修正', exact: true })).toBeHidden();
   await item.locator('summary').click();
@@ -47,6 +50,7 @@ test('training picks actions, uses compact amounts and preserves hidden notes an
   await expect(page.getByLabel('训练日期', { exact: true })).toBeHidden();
   await expect(page.getByLabel('本次备注（可选）')).toBeHidden();
   await page.getByRole('button', { name: '添加动作：深蹲', exact: true }).click();
+  await page.getByRole('button', { name: '完成选择，核对数量（1）', exact: true }).click();
   const squat = page.getByRole('region', { name: '动作填写' }).first();
   await expect(squat.getByLabel('动作备注（可选）')).toBeHidden();
   await squat.getByLabel('组数', { exact: true }).fill('3');
@@ -71,11 +75,12 @@ test('training picks actions, uses compact amounts and preserves hidden notes an
   await squat.getByLabel('次数', { exact: true }).nth(2).fill('8');
   await page.getByRole('button', { name: '继续选择动作', exact: true }).click();
   await page.getByRole('button', { name: '添加动作：跑步', exact: true }).click();
+  await page.getByRole('button', { name: '完成选择，核对数量（2）', exact: true }).click();
   const run = page.getByRole('region', { name: '动作填写' }).last();
   await expect(run.locator('.action-title')).toBeFocused();
   await expect(run.getByLabel('组数', { exact: true })).toHaveCount(0);
-  await run.getByLabel('时长（秒）').fill('1200');
-  await run.getByLabel('距离（米）').fill('2000');
+  await run.getByLabel('时长（分钟）').fill('20');
+  await run.getByLabel('距离（公里）').fill('2');
   await page.getByRole('button', { name: '保存训练记录', exact: true }).click();
   await expect(page.getByText('这次训练已保存。', { exact: true })).toBeVisible();
   const records = await (await page.request.get('/api/v1/training/sessions')).json();

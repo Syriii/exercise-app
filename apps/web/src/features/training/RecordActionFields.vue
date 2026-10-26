@@ -4,12 +4,29 @@ import AppIcon from '../../components/AppIcon.vue';
 import ExerciseNameField from "../../components/ExerciseNameField.vue";
 import ExerciseGuidanceCard from "../../components/ExerciseGuidanceCard.vue";
 import { trainingApi, type ExerciseGuidance } from "../../api/training";
-import { blankSet, expandSets, type ActionDraft } from "./record-draft";
+import { blankSet, expandSets, type ActionDraft, type SetDraft } from "./record-draft";
+import { minutesToSeconds, shiftActivityDecimal } from "./activity-units";
 const item = defineModel<ActionDraft>({ required: true });
 defineEmits<{ remove: [] }>();
 const error = ref("");
 const guidanceOpen = ref(false), guidance = ref<ExerciseGuidance | null>(null);
 const editingName = ref(!item.value.name);
+const durationUnit = ref<"minutes" | "seconds">(item.value.sets.some(set => set.durationSeconds && Number(set.durationSeconds) % 60 !== 0) ? "seconds" : "minutes");
+const distanceUnit = ref<"kilometers" | "meters">("kilometers");
+function durationValue(value: string) { return durationUnit.value === "seconds" || !value.trim() ? value : String(Number(value) / 60); }
+function distanceValue(value: string) { return distanceUnit.value === "meters" ? value : shiftActivityDecimal(value, -3) ?? value; }
+function updateDuration(event: Event, set: SetDraft) {
+  const input = event.target as HTMLInputElement;
+  const value = durationUnit.value === "minutes" ? minutesToSeconds(input.value) : input.value;
+  set.durationSeconds = value ?? input.value;
+  input.setCustomValidity(value !== null && (!value || (Number.isInteger(Number(value)) && Number(value) >= 0)) ? "" : "请填写可换算为整秒的时长，也可以切换为秒输入。");
+}
+function updateDistance(event: Event, set: SetDraft) {
+  const input = event.target as HTMLInputElement;
+  const value = distanceUnit.value === "kilometers" ? shiftActivityDecimal(input.value, 3) : input.value;
+  set.distanceMeters = value ?? input.value;
+  input.setCustomValidity(value !== null ? "" : "请填写有效的距离。");
+}
 let guidanceRequest = 0;
 watch(() => item.value.name, () => { guidanceRequest++; guidanceOpen.value = false; guidance.value = null; });
 async function preview() {
@@ -47,8 +64,14 @@ function expand() { try { expandSets(item.value); error.value = ""; } catch (e) 
         <strong v-if="item.measurement === 'sets'">第 {{ index + 1 }} 组</strong>
         <label v-if="item.measurement !== 'activity'"><span>次数</span><input v-model="set.reps" type="text" inputmode="numeric" min="0" placeholder="未记录" /></label>
         <label v-if="item.measurement !== 'activity'"><span>重量 kg<span class="sr-only">（可选）</span></span><input v-model="set.weightKg" inputmode="decimal" placeholder="未记录" /></label>
-        <label v-if="['activity', 'mixed'].includes(item.measurement)"><span>时长（秒）</span><input v-model="set.durationSeconds" type="text" inputmode="numeric" min="0" placeholder="未记录" /></label>
-        <label v-if="['activity', 'mixed'].includes(item.measurement)"><span>距离（米）</span><input v-model="set.distanceMeters" inputmode="decimal" placeholder="未记录" /></label>
+        <div v-if="['activity', 'mixed'].includes(item.measurement)" class="activity-quantity">
+          <label><span>时长单位</span><select v-model="durationUnit" aria-label="时长单位"><option value="minutes">分钟</option><option value="seconds">秒</option></select></label>
+          <label><span class="sr-only">{{ durationUnit === 'minutes' ? '时长（分钟）' : '时长（秒）' }}</span><input :value="durationValue(set.durationSeconds)" type="number" inputmode="decimal" min="0" :step="durationUnit === 'seconds' ? '1' : 'any'" placeholder="未记录" @input="updateDuration($event, set)" /></label>
+        </div>
+        <div v-if="['activity', 'mixed'].includes(item.measurement)" class="activity-quantity">
+          <label><span>距离单位</span><select v-model="distanceUnit" aria-label="距离单位"><option value="kilometers">公里</option><option value="meters">米</option></select></label>
+          <label><span class="sr-only">{{ distanceUnit === 'kilometers' ? '距离（公里）' : '距离（米）' }}</span><input :value="distanceValue(set.distanceMeters)" type="number" inputmode="decimal" min="0" step="any" placeholder="未记录" @input="updateDistance($event, set)" /></label>
+        </div>
         <details v-if="item.expanded || set.note" class="set-note"><summary>备注{{ set.note ? ' · 已填' : '' }}</summary><label><span>本项备注</span><input v-model="set.note" maxlength="500" /></label></details>
         <button v-if="item.sets.length > 1" class="text-action" type="button" @click="item.sets.splice(index, 1)">移除此项</button>
       </div>
@@ -62,6 +85,10 @@ function expand() { try { expandSets(item.value); error.value = ""; } catch (e) 
 .record-action { display: grid; gap: var(--space-xs); padding-block: var(--space-sm); border-bottom: 1px solid var(--color-rule); min-width: 0; }
 .record-quantities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-xs); margin-block: var(--space-xs); }
 .record-quantities--activity { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.activity-quantity { display: grid; gap: var(--space-2xs); min-width: 0; align-content: start; }
+.activity-quantity > label:first-child { display: flex; flex-wrap: wrap; gap: var(--space-2xs); align-items: center; }
+.activity-quantity > label:first-child > span { font-size: var(--text-sm); }
+.activity-quantity select { flex: 1; width: auto; min-width: 0; padding-inline: var(--space-xs); }
 .record-quantities > strong, .set-note { grid-column: 1 / -1; }
 .record-quantities label span { font-size: var(--text-sm); }
 .record-quantities input { padding-inline: var(--space-xs); }

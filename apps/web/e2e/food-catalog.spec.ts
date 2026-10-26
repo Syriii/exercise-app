@@ -24,10 +24,13 @@ test("Chinese catalog finds regional staples in both scripts and saves a sourced
   await picker.getByLabel("豆浆(无糖)份量（g）").fill("250");
   await picker.getByRole("button", { name: "加入这顿饭（1项）", exact: true }).click();
   await expect(meal.locator(".meal-items > li")).toHaveCount(1);
-  await expect(meal.locator(".meal-items")).toContainText("87.5 kcal");
+  await expect(meal.locator(".meal-items")).toContainText("88 kcal");
+  const selectedDate=await page.getByLabel('查看日期').inputValue();
+  const savedMeals=await (await page.request.get(`/api/v1/nutrition/meals?from=${selectedDate}&to=${selectedDate}`)).json();
+  expect(savedMeals[0].contributions[0].energyKcal).toBe(87.5);
   await page.reload();
   await expect(meal.locator(".meal-items")).toContainText("豆浆(无糖)");
-  await expect(meal.locator(".meal-items")).toContainText("87.5 kcal");
+  await expect(meal.locator(".meal-items")).toContainText("88 kcal");
 });
 
 test("catalog browsing, favorites, multi-selection and lost-response retry preserve one meal", async ({ page }, testInfo) => {
@@ -93,7 +96,10 @@ test("catalog browsing, favorites, multi-selection and lost-response retry prese
   await picker.getByRole("button", { name: "加入这顿饭（2项）", exact: true }).click();
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
   await expect(meal.locator(".meal-items")).toContainText("310 kcal");
-  await expect(meal.locator(".meal-items")).toContainText("17.5 kcal");
+  await expect(meal.locator(".meal-items")).toContainText("18 kcal");
+  const date=await page.getByLabel('查看日期').inputValue();
+  const stored=await (await page.request.get(`/api/v1/nutrition/meals?from=${date}&to=${date}`)).json();
+  expect(stored[0].contributions.find((value:{label:string})=>value.label==='西兰花（水煮、沥干、无盐）').energyKcal).toBe(17.5);
 
   await picker.getByRole("button", { name: "添加食物", exact: true }).click();
   await picker.getByLabel("搜索食物", { exact: true }).fill("");

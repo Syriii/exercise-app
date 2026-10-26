@@ -80,7 +80,7 @@ export class NutritionService {
     if (query.length > 100 || !Number.isInteger(limit) || limit < 1 || limit > 50 || (category !== "all" && !Object.hasOwn(foodCategories, category)))
       throw new NutritionError("invalid_nutrition_input", "食物查询条件无效", 400);
     const text = normalizeFoodSearch(query);
-    const foods = catalogFoods(await this.repository.listFoodTemplates(userId), external).filter((food) =>
+    const foods = catalogFoods(await this.repository.listFoodTemplates(userId), external, text).filter((food) =>
       (category === "all" || category === food.category) && foodMatchesSearch(food, text));
     const start = cursor === null ? 0 : foods.findIndex((food) => food.id === cursor) + 1;
     if (cursor !== null && start === 0) throw new NutritionError("food_catalog_changed", "列表已变化，请重新搜索；已选食物会保留", 409);

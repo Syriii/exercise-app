@@ -7,6 +7,10 @@ import AppIcon from "../../components/AppIcon.vue";
 const props = defineProps<{ file?: File; disabled?: boolean }>();
 const emit = defineEmits<{ change: [event: Event] }>();
 const camera = ref<HTMLInputElement | null>(null), gallery = ref<HTMLInputElement | null>(null);
+function pick(source: "camera" | "gallery") {
+  if (!props.disabled) (source === "camera" ? camera.value : gallery.value)?.click();
+}
+defineExpose({ pick });
 const preview = ref("");
 watch(() => props.file, file => {
   if (preview.value) URL.revokeObjectURL(preview.value);
@@ -25,8 +29,8 @@ function selected(event: Event) {
     <img v-if="preview" :src="preview" alt="待上传的餐食照片" class="photo-selection-preview" />
     <p v-if="file" class="field-help">{{ file.name }}</p>
     <div class="photo-source-actions">
-      <button type="button" class="action-button" :disabled="disabled" @click="camera?.click()"><AppIcon name="camera" />拍摄照片</button>
-      <button type="button" class="action-button" :disabled="disabled" @click="gallery?.click()"><AppIcon name="image" />从相册选择</button>
+      <button type="button" class="action-button" :disabled="disabled" @click="pick('camera')"><AppIcon name="camera" />拍摄照片</button>
+      <button type="button" class="action-button" :disabled="disabled" @click="pick('gallery')"><AppIcon name="image" />从相册选择</button>
     </div>
     <input ref="camera" class="photo-source-input" type="file" aria-label="拍摄餐食照片" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" :disabled="disabled" @change="selected" />
     <input ref="gallery" class="photo-source-input" type="file" aria-label="从相册选择餐食照片" accept="image/jpeg,image/png,image/gif,image/webp" :disabled="disabled" @change="selected" />

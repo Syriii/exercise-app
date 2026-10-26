@@ -1,0 +1,38 @@
+/* Hallmark · genre: modern-minimal · macrostructure: task workspace
+ * design-system: apps/web/design.md · designed-as-app */
+.status-chip[data-tone="accent"] { color: var(--color-accent); background: var(--color-accent-soft); }
+.nutrition-record-actions > button { white-space: nowrap; }
+.meal-card > header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; }
+.meal-card > header > div:first-child { min-width: 0; }
+.meal-card > header .meal-thumbnail, .meal-card > header .food-art { width: 48px; height: 48px; flex-basis: 48px; border-radius: var(--radius-sm); }
+.meal-card-title { min-width: 0; flex: 1; }
+.meal-card-title strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.meal-card > header > .text-action { font-size: var(--text-sm); white-space: nowrap; }
+.meal-card-menu { position: relative; }
+.meal-card-menu > summary { display: flex; align-items: center; justify-content: center; list-style: none; width: 44px; min-height: 48px; padding: 0; }
+.meal-card-menu > summary::-webkit-details-marker { display: none; }
+.meal-card-menu > button { position: absolute; right: 0; top: 100%; z-index: var(--z-notice); min-width: 10rem; border: var(--rule-thin) solid var(--color-rule); background: var(--color-surface); }
+.meal-card--open { border-color: var(--color-rule-strong); }
+.meal-list-return { justify-self: start; }
+.meal-review { display: grid; gap: var(--space-xs); }
+.meal-save-state { display: flex; align-items: center; gap: var(--space-xs); color: var(--color-accent); font-weight: 600; margin: 0; }
+.meal-review .field-help { margin: 0; }
+.meal-items { padding: 0; }
+.meal-image-panel { border: 0; border-top: var(--rule-thin) solid var(--color-rule); border-radius: 0; background: transparent; }
+.image-analysis-card { border: 0; border-radius: 0; background: transparent; padding: var(--space-xs) 0; }
+.image-analysis-card > header { flex-wrap: wrap; }
+.meal-upload-disclosure { min-width: 0; }
+.nutrition-overview--compact { gap: var(--space-xs); }
+.nutrition-overview--compact .hero-energy .food-art { display: none; }
+.nutrition-overview--compact .hero-energy dt { display: none; }
+.nutrition-overview--compact .macro-grid { padding-block: 0; }
+.nutrition-overview--compact .panel-heading { display: none; }
+.nutrition-page .contribution-form { padding: var(--space-sm); border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-paper-2); }
+.nutrition-page .contribution-form .nutrient-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nutrition-page .contribution-form .nutrient-inputs label { min-width: 0; }
+@media (max-width: 359px) {
+  .meal-card > header { grid-template-columns: minmax(0, 1fr) auto; }
+  .meal-card > header > div:first-child { grid-column: 1 / -1; }
+  .meal-card-title { flex: 1; }
+  .meal-card > header > .text-action { justify-self: start; }
+}

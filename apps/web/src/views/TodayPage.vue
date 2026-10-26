@@ -4,12 +4,22 @@ import { useRouter } from "vue-router";
 import AppShell from "../app/AppShell.vue";
 import AppIcon from "../components/AppIcon.vue";
 import FoodArt from "../components/FoodArt.vue";
+import MealPhotoPicker from "../features/nutrition/MealPhotoPicker.vue";
+import { usePhotoIntakeStore } from "../stores/photo-intake";
 import { nutritionApi, type Meal, type NutritionDaySummary, type NutritionValueSummary } from "../api/nutrition";
 import { reminderApi, type MeasurementReminderStatus, type NutritionReminderStatus, type TrainingReminderStatus } from "../api/reminders";
 import { trainingApi, type TrainingSchedule, type TrainingSession } from "../api/training";
 import { progressSummary } from "../features/training/plan-progress";
 
 const router = useRouter();
+const photoIntake = usePhotoIntakeStore();
+const photoEntry = ref<InstanceType<typeof MealPhotoPicker> | null>(null);
+function startPhoto(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  photoIntake.select(file, today.value);
+  void router.push({ name: "nutrition", query: { date: today.value, action: "photo" } });
+}
 function localDate() { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); }
 const today = ref(localDate()), schedules = ref<TrainingSchedule[] | null>(null), sessions = ref<TrainingSession[] | null>(null);
 const summary = ref<NutritionDaySummary | null>(null), meals = ref<Meal[] | null>(null), measurement = ref<MeasurementReminderStatus | null>(null);
@@ -82,7 +92,8 @@ onBeforeUnmount(() => { ++sequence; window.clearInterval(timer); window.removeEv
         <div class="hero-energy"><dl><dt>已记录能量</dt><dd>{{ valueText(summary?.energyKcal, 'kcal') }}</dd></dl><FoodArt kind="rice" /></div>
         <dl class="macro-grid"><div v-for="nutrient in nutrients.slice(1)" :key="nutrient.key"><dt>{{ nutrient.label }}</dt><dd>{{ valueText(summary?.[nutrient.key], nutrient.unit) }}</dd></div></dl>
         <p class="data-note">{{ summary && summary.mealCount > 0 && nutrients.some(n => !summary![n.key].complete) ? '部分营养未知，合计仅含已知值。' : '仅统计已记录餐食，不代表全天摄入。' }}</p>
-        <button class="action-button action-button--primary" @click="openNutrition(true)"><AppIcon name="camera" />拍照记一餐</button>
+        <button class="action-button action-button--primary" @click="photoEntry?.pick('camera')"><AppIcon name="camera" />拍照记一餐</button>
+        <MealPhotoPicker ref="photoEntry" class="photo-entry-inputs" @change="startPhoto" />
         <button class="today-last-meal text-action" @click="openNutrition()">
           <AppIcon name="clock" /><span v-if="lastMeal">上一餐 {{ new Date(lastMeal.occurredAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }} · {{ lastMeal.name ?? '餐食' }}</span>
           <span v-else>{{ meals === null ? '餐食暂时无法读取' : '查看今天餐食' }}</span><AppIcon name="arrow" />
@@ -103,6 +114,7 @@ onBeforeUnmount(() => { ++sequence; window.clearInterval(timer); window.removeEv
 </template>
 
 <style scoped>
+.photo-entry-inputs { display: none; }
 .today-last-meal { display: flex; text-align: left; width: 100%; } .today-last-meal span { flex:1; overflow-wrap:anywhere; }
 .metric-list dd { font-size: clamp(1rem, 2vw, 1.6rem); }
 .balance-panel, .today-training-panel { gap: .75rem; padding: 1rem; }

@@ -76,6 +76,7 @@ test("manual selection creates no empty meal on dismiss, preserves portions, and
   expect((await meals()).length).toBe(1);
   await card.getByRole("button", { name: "收起餐食", exact: true }).click();
   await page.screenshot({ animations: "disabled", path: info.outputPath("meal-card.png") });
+  await card.getByLabel('餐食操作', {exact:true}).click();
   await expect(card.getByRole("button", { name: "删除整顿", exact: true })).toBeVisible();
   page.once("dialog", dialog => dialog.accept());
   await card.getByRole("button", { name: "删除整顿", exact: true }).click();
@@ -140,7 +141,7 @@ test("camera and gallery are separate, selecting then cancelling preserves the a
   await expect(composer.getByLabel("拍摄餐食照片", { exact: true })).toHaveAttribute("capture", "environment");
   await gallery.setInputFiles({ name: "gallery.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") });
   await expect(page.getByText("正在准备照片，请稍候…")).toBeVisible();
-  await expect(composer.getByRole("button", { name: "建立餐次", exact: true })).toBeDisabled();
+  await expect(composer.getByRole("button", { name: "保存这餐", exact: true })).toBeDisabled();
   await page.evaluate(() => (window as Window & { releasePreparedPhoto?: () => void }).releasePreparedPhoto?.());
   await expect(composer.getByRole("img", { name: "待上传的餐食照片" })).toBeVisible();
   await gallery.setInputFiles([]);

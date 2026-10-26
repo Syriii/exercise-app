@@ -21,7 +21,7 @@ async function photoMeal(page: Page, suffix: string) {
   await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill("替换早餐");
   await page.getByLabel("从相册选择餐食照片").setInputFiles({ name: "fixed.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]) });
-  await page.getByRole("button", { name: "建立餐次并上传" }).click();
+  await page.getByRole("button", { name: "保存这餐并上传" }).click();
   const meal = page.locator("article.meal-card").filter({ has: page.locator("header strong", { hasText: "替换早餐" }) });
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
   const date = await page.getByLabel("查看日期").inputValue();
@@ -64,7 +64,9 @@ test("single photo food replacement reuses catalog, keeps drafts and reconciles 
   await picker.getByRole("button", { name: "取消替换", exact: true }).click();
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);
   const egg = meal.locator(".meal-items > li").filter({ hasText: "鸡蛋（水煮全蛋）" });
-  await expect(egg).toContainText("77.5 kcal");
+  await expect(egg).toContainText("78 kcal");
+  const storedMeals = await (await page.request.get(`/api/v1/nutrition/meals?from=${data.localDate}&to=${data.localDate}`)).json();
+  expect(storedMeals.find((value: {id:string}) => value.id === data.id).contributions.find((value: {label:string}) => value.label === '鸡蛋（水煮全蛋）').energyKcal).toBe(77.5);
   await expect(egg).not.toContainText("照片估算");
   await expect(meal.locator(".meal-items > li").filter({ hasText: "米饭" })).toContainText("240 kcal");
   await egg.getByRole("button", { name: "改份量" }).click();

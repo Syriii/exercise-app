@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { ApiError } from "../../api/client";
 import { nutritionApi, type ImageReplacementInput, type Meal, type MealImageAnalysis } from "../../api/nutrition";
 const props = defineProps<{ meal: Meal; analysis: MealImageAnalysis; disabled?: boolean }>();
@@ -7,6 +7,7 @@ const emit = defineEmits<{ saved: [meal: Meal, analysis: MealImageAnalysis]; ref
 const draft = ref<{ meal: Meal; analysis: MealImageAnalysis; input: ImageReplacementInput } | null>(null);
 const saving = ref(false);
 const error = ref("");
+const alreadyIncluded = computed(() => props.meal.contributions.some(item => item.sourceAnalysisId === props.analysis.id));
 async function preview(refresh = false) {
   if (saving.value || props.disabled) return;
   error.value = "";
@@ -38,7 +39,7 @@ async function save(undo = false) {
 </script>
 
 <template>
-  <section class="image-replacement" aria-label="使用照片结果">
+  <section v-if="!alreadyIncluded || analysis.replacement || draft" class="image-replacement" aria-label="使用照片结果">
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
     <template v-if="analysis.replacement">
       <p v-if="analysis.replacement.undone" class="field-help">已撤销这次替换，原有食物已恢复。</p>

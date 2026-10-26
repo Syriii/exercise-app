@@ -6,7 +6,7 @@ export async function createMeal(page: Page, name: string) {
   await page.getByRole("group", { name: "记录餐食" }).getByRole("button", { name: "拍照记一餐", exact: true }).click();
   await reveal(page.getByLabel("餐次名称（可选）"));
   await page.getByLabel("餐次名称（可选）").fill(name);
-  await page.getByRole("button", { name: "建立餐次", exact: true }).click();
+  await page.getByRole("button", { name: "保存这餐", exact: true }).click();
   const meal = page.locator("article.meal-card").filter({ has: page.locator("header strong", { hasText: name }) });
   await expect(meal.getByRole("button", { name: "收起餐食", exact: true })).toBeVisible();
   await meal.getByRole("button", { name: "收起照片", exact: true }).click();
