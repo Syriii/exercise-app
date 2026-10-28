@@ -4,7 +4,7 @@ import type { Meal } from "../src/api/nutrition";
 import { completeSetup } from "./helpers/setup";
 
 const fakePhoto = { name: "local-meal.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") };
-const retainedValues = { name: "米饭的未保存修正", energy: "275", protein: "7.5", carbohydrate: "58", fat: "1.2" };
+const retainedValues = { name: "米饭的未保存修正", energy: "275", protein: "7.5", carbohydrate: "58", fat: "0" };
 
 async function photoMeal(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });

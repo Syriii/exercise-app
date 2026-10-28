@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../../app.js";
@@ -9,11 +10,92 @@ import { PlanningService } from "../planning/service.js";
 import { MemoryNutritionRepository } from "./memory-repository.js";
 import { FixedPublicFoodProvider } from "./public-food-provider.js";
 import { NutritionService } from "./service.js";
+import type { NutrientValues } from "./types.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 afterEach(async () => Promise.all(apps.splice(0).map(async (app) => app.close())));
 
+const nutrientKeys = ["energyKcal", "proteinGrams", "carbohydrateGrams", "fatGrams"] as const;
+const nutrients = (value: number | null): NutrientValues => ({ energyKcal: value, proteinGrams: value, carbohydrateGrams: value, fatGrams: value });
+type SavedMeal = { id: string; revision: number; contributions: Array<NutrientValues & { id: string; revision: number }> };
+
+async function authenticatedNutritionApp() {
+  const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
+  const identityService = new IdentityService({ repository: new MemoryIdentityRepository(), sessionSecret: config.sessionSecret, sessionTtlHours: config.sessionTtlHours });
+  const app = await buildApp({ config, checkDatabase: async () => undefined, identityService, planningService: new PlanningService(new MemoryPlanningRepository()), nutritionService: new NutritionService(new MemoryNutritionRepository()) });
+  apps.push(app);
+  const registration = await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { username: "nullable-nutrition", password: "only local nullable nutrition password" } });
+  expect(registration.statusCode, registration.body).toBe(201);
+  return { app, headers: { cookie: String(registration.headers["set-cookie"]).split(";", 1)[0] } };
+}
+
+const mealPayload = { occurredAt: "2026-10-28T04:00:00.000Z", localDate: "2026-10-28", timeZone: "Asia/Shanghai", name: "核对午饭", note: null };
+const foodPayload = { mode: "item", label: "核对食物", portionAmount: 100, portionUnit: "g", basisDescription: "本地测试明确输入" } as const;
+
 describe("nutrition routes", () => {
+  it.each([0, null])("preserves all four nutrients when adding %s and correcting to the other nullable value", async initial => {
+    const { app, headers } = await authenticatedNutritionApp();
+    const created = await app.inject({ method: "POST", url: "/api/v1/nutrition/meals", headers, payload: mealPayload });
+    expect(created.statusCode, created.body).toBe(201);
+    const meal = created.json<SavedMeal>();
+    const added = await app.inject({ method: "POST", url: `/api/v1/nutrition/meals/${meal.id}/contributions`, headers,
+      payload: { ...foodPayload, ...nutrients(initial), mealRevision: meal.revision, replaceExisting: false } });
+    expect(added.statusCode, added.body).toBe(201);
+    const saved = added.json<SavedMeal>();
+    expect(saved.contributions).toEqual([expect.objectContaining(nutrients(initial))]);
+    const initialRead = await app.inject({ method: "GET", url: "/api/v1/nutrition/meals?from=2026-10-28&to=2026-10-28", headers });
+    expect(initialRead.statusCode, initialRead.body).toBe(200);
+    expect(initialRead.json()).toMatchObject([{ contributions: [nutrients(initial)] }]);
+    const initialSummary = await app.inject({ method: "GET", url: "/api/v1/nutrition/day-summary?localDate=2026-10-28&timeZone=Asia%2FShanghai", headers });
+    expect(initialSummary.statusCode, initialSummary.body).toBe(200);
+    for (const key of nutrientKeys) expect(initialSummary.json()[key]).toMatchObject({ recorded: initial, complete: initial !== null });
+
+    const correctedValue = initial === null ? 0 : null;
+    const item = saved.contributions[0]!;
+    const corrected = await app.inject({ method: "PUT", url: `/api/v1/nutrition/meals/${meal.id}/contributions/${item.id}`, headers,
+      payload: { ...foodPayload, ...nutrients(correctedValue), mealRevision: saved.revision, contributionRevision: item.revision, replaceExisting: false } });
+    expect(corrected.statusCode, corrected.body).toBe(200);
+    expect(corrected.json()).toMatchObject({ contributions: [nutrients(correctedValue)] });
+    const finalRead = await app.inject({ method: "GET", url: "/api/v1/nutrition/meals?from=2026-10-28&to=2026-10-28", headers });
+    expect(finalRead.statusCode, finalRead.body).toBe(200);
+    expect(finalRead.json()).toMatchObject([{ contributions: [nutrients(correctedValue)] }]);
+    const finalSummary = await app.inject({ method: "GET", url: "/api/v1/nutrition/day-summary?localDate=2026-10-28&timeZone=Asia%2FShanghai", headers });
+    expect(finalSummary.statusCode, finalSummary.body).toBe(200);
+    for (const key of nutrientKeys) expect(finalSummary.json()[key]).toMatchObject({ recorded: correctedValue, complete: correctedValue !== null });
+  });
+
+  it.each([0, null])("preserves %s in personal templates, corrections and reuse from the catalog", async initial => {
+    const { app, headers } = await authenticatedNutritionApp();
+    const created = await app.inject({ method: "POST", url: "/api/v1/nutrition/food-templates", headers,
+      payload: { ...foodPayload, ...nutrients(initial) } });
+    expect(created.statusCode, created.body).toBe(201);
+    const template = created.json<{ id: string; revision: number } & NutrientValues>();
+    expect(template).toMatchObject(nutrients(initial));
+    const initialRead = await app.inject({ method: "GET", url: "/api/v1/nutrition/food-templates", headers });
+    expect(initialRead.statusCode, initialRead.body).toBe(200);
+    expect(initialRead.json()).toMatchObject([nutrients(initial)]);
+
+    const correctedValue = initial === null ? 0 : null;
+    const changed = await app.inject({ method: "PUT", url: `/api/v1/nutrition/food-templates/${template.id}`, headers,
+      payload: { ...foodPayload, label: "已修正模板", ...nutrients(correctedValue), revision: template.revision } });
+    expect(changed.statusCode, changed.body).toBe(200);
+    expect(changed.json()).toMatchObject(nutrients(correctedValue));
+    const finalRead = await app.inject({ method: "GET", url: "/api/v1/nutrition/food-templates", headers });
+    expect(finalRead.statusCode, finalRead.body).toBe(200);
+    expect(finalRead.json()).toMatchObject([nutrients(correctedValue)]);
+    const catalog = await app.inject({ method: "GET", url: "/api/v1/nutrition/food-catalog?query=%E5%B7%B2%E4%BF%AE%E6%AD%A3%E6%A8%A1%E6%9D%BF&limit=1", headers });
+    expect(catalog.statusCode, catalog.body).toBe(200);
+    const food = catalog.json<{ items: Array<{ id: string; version: string } & NutrientValues> }>().items[0]!;
+    expect(food).toMatchObject(nutrients(correctedValue));
+    const newMeal = await app.inject({ method: "POST", url: "/api/v1/nutrition/meals", headers, payload: mealPayload });
+    expect(newMeal.statusCode, newMeal.body).toBe(201);
+    const meal = newMeal.json<SavedMeal>();
+    const reused = await app.inject({ method: "POST", url: `/api/v1/nutrition/meals/${meal.id}/food-selections`, headers,
+      payload: { mealRevision: meal.revision, submissionId: randomUUID(), selections: [{ foodId: food.id, version: food.version, amount: 200 }] } });
+    expect(reused.statusCode, reused.body).toBe(201);
+    expect(reused.json()).toMatchObject({ contributions: [{ ...nutrients(correctedValue), foodSnapshot: nutrients(correctedValue) }] });
+  });
+
   it("serializes an authenticated meal contribution and day summary", async () => {
     const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
     const identityService = new IdentityService({ repository: new MemoryIdentityRepository(), sessionSecret: config.sessionSecret, sessionTtlHours: config.sessionTtlHours });

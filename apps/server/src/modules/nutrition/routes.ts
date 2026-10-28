@@ -9,7 +9,8 @@ import type { DietPlan, DietPlanInput, FoodSearchResult, Meal, PersonalFoodTempl
 import { foodCategories, type FoodCategory } from "./food-catalog.js";
 import type { FoodSelection } from "./service.js";
 
-const nullableNumber = { anyOf: [{ type: "null" }, { type: "number" }] } as const;
+// One nullable type preserves both 0 and null under AJV's default coercion.
+const nullableNumber = { type: "number", nullable: true } as const;
 const nullableString = { anyOf: [{ type: "null" }, { type: "string" }] } as const;
 const nutrientProperties = { energyKcal: nullableNumber, proteinGrams: nullableNumber, carbohydrateGrams: nullableNumber, fatGrams: nullableNumber } as const;
 const catalogProperties = { id: { type: "string" }, version: { type: "string" }, label: { type: "string" },

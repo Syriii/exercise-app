@@ -163,6 +163,17 @@ const orphanedCorrection = computed(() => {
   const form = base && contributionForms[base.meal.id];
   return base && form ? { meal: base.meal, item: base.item, form } : null;
 });
+async function returnToCorrectionDate() {
+  const correction = orphanedCorrection.value;
+  if (!correction || loading.value || saving.value || uploadingMealId.value !== null || actingAnalysisId.value !== null) return;
+  const date = correction.meal.localDate, contributionId = correction.item.id;
+  creatingMeal.value = false;
+  selectedDate.value = date;
+  await changeDate();
+  if (!pageActive || route.name !== "nutrition" || selectedDate.value !== date || editingContributionId.value !== contributionId) return;
+  await resumeCorrection();
+  document.querySelector<HTMLInputElement>('.contribution-form input')?.focus({ preventScroll: true });
+}
 const metadataDrafts = reactive<Record<string, { base: Meal; date: string; time: string; name: string; note: string }>>({});
 const nutrients = [
   { key: "energyKcal", label: "能量", unit: "kcal" },
@@ -281,11 +292,9 @@ function resetDateScopedState() {
   manualCreationUnknown.value = false;
   newMealFoods.value = { ...newFoodPickerDraft(), open: true };
   quickMealImage.value = undefined;
-  editingContributionId.value = null;
   mealForm.name = "";
   mealForm.time = currentTime();
   mealForm.note = "";
-  clearRecord(contributionForms);
   clearRecord(analysesByMeal);
   clearRecord(uploadProgress);
   clearRecord(imageForms);
@@ -652,15 +661,19 @@ onBeforeUnmount(stopPolling);
     <p v-if="errorMessage && !visibleCorrection" class="form-error" role="alert">{{ errorMessage }} <button v-if="automaticPhotos === null" class="text-action" type="button" @click="loadPhotoSettings">重新读取设置</button><button v-if="editingContributionId" class="text-action" type="button" @click="resumeCorrection">继续未保存的修改</button></p>
     <section v-if="orphanedCorrection" ref="orphanedCorrectionPanel" class="work-panel" tabindex="-1" aria-labelledby="orphaned-correction-title">
       <h2 id="orphaned-correction-title">未保存的食物修正</h2>
-      <p>原食物已不在当前记录中，无法保存到原食物。放弃这份修改后可继续修正其他食物。</p>
+      <p v-if="orphanedCorrection.meal.localDate !== selectedDate">这份修改属于 {{ orphanedCorrection.meal.localDate }}，输入已保留。</p>
+      <p v-else>原食物已不在当前记录中，无法保存到原食物。放弃这份修改后可继续修正其他食物。</p>
       <p class="field-help">原记录：{{ orphanedCorrection.meal.localDate }} · {{ orphanedCorrection.meal.name ?? '餐食' }} · {{ orphanedCorrection.item.label }}</p>
       <dl class="retained-correction-values" aria-label="保留的修正输入">
         <div><dt>食物名称</dt><dd>{{ orphanedCorrection.form.label || '未填写' }}</dd></div>
         <div v-for="metric in nutrients" :key="metric.key">
-          <dt>{{ metric.label }} {{ metric.unit }}</dt><dd>{{ orphanedCorrection.form[metric.key] || '未填写' }}</dd>
+          <dt>{{ metric.label }} {{ metric.unit }}</dt><dd>{{ orphanedCorrection.form[metric.key] === '' ? '未填写' : orphanedCorrection.form[metric.key] }}</dd>
         </div>
       </dl>
-      <div class="row-actions"><button class="text-action" type="button" :disabled="saving" @click="cancelCorrection(orphanedCorrection.meal)">放弃未保存的修改</button></div>
+      <div class="row-actions retained-correction-actions">
+        <button v-if="orphanedCorrection.meal.localDate !== selectedDate" class="action-button" type="button" :aria-label="`返回 ${orphanedCorrection.meal.localDate} 继续修改`" :disabled="loading || saving || uploadingMealId !== null || actingAnalysisId !== null" @click="returnToCorrectionDate">返回原日期</button>
+        <button class="text-action" type="button" :disabled="saving" @click="cancelCorrection(orphanedCorrection.meal)">放弃未保存的修改</button>
+      </div>
     </section>
     <section v-if="incomingPhotoDate" class="work-panel" aria-label="处理新选照片"><p>新照片用于 {{ incomingPhotoDate }}。当前未保存的记餐仍保留，请先选择要继续哪一餐。</p><div class="row-actions"><button class="action-button" type="button" :disabled="preparingImage || saving || acceptingIncomingPhoto" @click="acceptIncomingPhoto">放弃当前草稿，使用新照片</button><button class="text-action" type="button" :disabled="acceptingIncomingPhoto" @click="cancelIncomingPhoto">取消新照片，保留当前草稿</button></div></section>
     <p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
@@ -851,4 +864,6 @@ fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: .75rem; min-wid
 .retained-correction-values > div:first-child { grid-column: 1 / -1; }
 .retained-correction-values dt { font-size: .85rem; color: var(--color-muted); }
 .retained-correction-values dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.retained-correction-actions { flex-wrap: wrap; justify-content: flex-start; gap: .5rem; }
+.retained-correction-actions > button { flex-shrink: 0; max-width: 100%; }
 </style>
