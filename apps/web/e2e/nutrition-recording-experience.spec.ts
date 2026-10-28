@@ -74,6 +74,15 @@ test('saved photo foods expose the original and local correction without another
     await meal.scrollIntoViewIfNeeded();
     await page.screenshot({path:info.outputPath(`meal-review-${width}.png`),animations:'disabled'});
   }
+  const detailsButton=meal.getByRole('button',{name:'收起识别详情',exact:true});
+  await expect(detailsButton).toHaveAttribute('aria-expanded','true');
+  const detailsId=await detailsButton.getAttribute('aria-controls');
+  expect(detailsId).toBeTruthy();
+  await expect(page.locator(`[id="${detailsId}"]`)).toBeVisible();
+  await detailsButton.click();
+  await expect(meal.getByRole('button',{name:'识别详情',exact:true})).toHaveAttribute('aria-expanded','false');
+  await expect(page.locator(`[id="${detailsId}"]`)).toBeHidden();
+  await expect(meal.getByRole('img',{name:'当前餐食的已保存照片'})).toBeVisible();
 });
 
 test('a photo from Today explicitly resolves an older meal draft instead of losing either selection', async ({page}) => {
@@ -147,6 +156,40 @@ test('an unavailable meal link returns the actual day list instead of hiding its
   await expect(page.locator('.meal-card').getByText('仍然存在的餐食',{exact:true})).toBeVisible();
 });
 
+test('returning to a date cannot restore a photo from an abandoned preparation', async ({page})=>{
+  await page.addInitScript(()=>{
+    const original=window.createImageBitmap.bind(window);
+    window.createImageBitmap=async(input:ImageBitmapSource)=>{
+      await new Promise<void>(resolve=>{(window as Window & {releaseAbandonedPhoto?:()=>void}).releaseAbandonedPhoto=resolve;});
+      return original(input);
+    };
+  });
+  await register(page);
+  const firstDate='2026-10-01', secondDate='2026-10-02';
+  await page.goto(`/nutrition?date=${firstDate}`);
+  const chooser=page.waitForEvent('filechooser');
+  await page.getByRole('button',{name:'相册记一餐',exact:true}).click();
+  await (await chooser).setFiles({...photo,name:'abandoned.png'});
+  await expect(page.getByText('正在准备照片，请稍候…')).toBeVisible();
+  await page.getByRole('region',{name:'快速记餐'}).getByRole('button',{name:'收起',exact:true}).click();
+  for(const date of [secondDate,firstDate]) {
+    const mealsLoaded=page.waitForResponse(response=>{
+      const url=new URL(response.url());
+      return url.pathname==='/api/v1/nutrition/meals' && url.searchParams.get('from')===date && url.searchParams.get('to')===date;
+    });
+    await page.getByLabel('查看日期',{exact:true}).fill(date);
+    await mealsLoaded;
+    await expect(page).toHaveURL(new RegExp(`/nutrition\\?date=${date}$`));
+  }
+  await page.evaluate(()=>(window as Window & {releaseAbandonedPhoto?:()=>void}).releaseAbandonedPhoto?.());
+  await expect(page.getByText('正在准备照片，请稍候…')).toBeHidden();
+  await page.getByRole('button',{name:'手动添加食物',exact:true}).click();
+  const composer=page.getByRole('region',{name:'快速记餐'});
+  await expect(composer.getByRole('list',{name:'食物列表'})).toBeVisible();
+  await expect(composer.getByRole('img',{name:'待上传的餐食照片'})).toBeHidden();
+  await expect(composer.getByRole('button',{name:'移除待上传照片',exact:true})).toHaveCount(0);
+});
+
 test('preparing an existing meal photo cannot enable an unfinished new photo submission', async ({page})=>{
   await page.addInitScript(()=>{
     const original=window.createImageBitmap.bind(window);let count=0;
@@ -160,7 +203,7 @@ test('preparing an existing meal photo cannot enable an unfinished new photo sub
   const date=await page.evaluate(()=>new Date().toLocaleDateString('en-CA'));
   const meal=await (await page.request.post('/api/v1/nutrition/meals',{data:{localDate:date,occurredAt:new Date().toISOString(),timeZone:'Asia/Shanghai',name:'已有餐食',note:null}})).json();
   await page.goto(`/nutrition?date=${date}&mealId=${meal.id}`);
-  await page.getByRole('button',{name:'照片与识别',exact:true}).click();
+  await page.getByRole('button',{name:'识别详情',exact:true}).click();
   await page.locator('.meal-card').getByLabel('从相册选择餐食照片',{exact:true}).setInputFiles({...photo,name:'existing.png'});
   await expect(page.getByText('正在准备照片，请稍候…')).toBeVisible();
   await page.locator('.mobile-dock, .rail-nav').getByRole('button',{name:/^今天/}).filter({visible:true}).click();

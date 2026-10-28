@@ -1,8 +1,30 @@
 import type { ImageNutritionCandidate } from "../modules/image-analysis/types.js";
+import type { ImageAnalyzerCall } from "../modules/image-analysis/analyzer.js";
 
 export const evaluationKeys = ["energyKcal", "massGrams", "proteinGrams", "carbohydrateGrams", "fatGrams"] as const;
 export type EvaluationValues = Record<(typeof evaluationKeys)[number], number | null>;
 export interface EvaluationRecord { id: string; truth: EvaluationValues; prediction: EvaluationValues | null; error: string | null; }
+
+/** Unknown request prices leave the batch upper bound unknown, not zero. */
+export function summarizeEvaluationCalls(calls: readonly ImageAnalyzerCall[]) {
+  let knownMinimum = 0, knownMaximum = 0, pricedRequests = 0;
+  for (const call of calls) {
+    if (call.cost === null) continue;
+    pricedRequests += 1;
+    knownMinimum += call.cost.minimumCny;
+    knownMaximum += call.cost.maximumCny;
+  }
+  const unknownRequests = calls.length - pricedRequests;
+  return { modelRequests: calls.length, pricedRequests,
+    estimatedCostCny: {
+      // With unknown calls, this is only a lower bound from the priced subtotal.
+      minimum: knownMinimum,
+      maximum: unknownRequests > 0 ? null : knownMaximum,
+      knownSubtotal: { minimum: knownMinimum, maximum: knownMaximum },
+      unknownRequests,
+    },
+  };
+}
 
 /** Compare the same frozen samples, never make lower coverage look like lower error. */
 export function compareEvaluations(baseline: readonly EvaluationRecord[], candidate: readonly EvaluationRecord[]) {

@@ -251,7 +251,9 @@ function clearRecord<T>(record: Record<string, T>) {
   for (const key of Object.keys(record)) delete record[key];
 }
 
+let photoDraftGeneration = 0;
 function resetDateScopedState() {
+  photoDraftGeneration++;
   focusedMealId.value = null;
   reference.value = null;
   summary.value = null;
@@ -413,14 +415,15 @@ async function prepareQuickMealImage(file: File) {
   await prepareSelectedImage(file, prepared => { quickMealImage.value = prepared; });
 }
 async function prepareSelectedImage(file: File, apply: (prepared: PreparedMealImage | undefined) => void) {
-  const date = selectedDate.value;
+  const date = selectedDate.value, generation = photoDraftGeneration;
+  const currentDraft = () => date === selectedDate.value && generation === photoDraftGeneration;
   preparingImage.value = true;
   errorMessage.value = "";
   const work = (imagePreparation ?? Promise.resolve()).then(async () => {
-    try { const prepared = await prepareMealImage(file); if (date === selectedDate.value) apply(prepared); }
+    try { const prepared = await prepareMealImage(file); if (currentDraft()) apply(prepared); }
     catch (error) {
       console.error('Meal image preparation failed', error);
-      if (date === selectedDate.value) { apply(undefined); errorMessage.value = '这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。'; }
+      if (currentDraft()) { apply(undefined); errorMessage.value = '这张照片暂时无法处理，请换一张 JPEG、PNG 或 WebP 图片。'; }
     }
   });
   imagePreparation = work;
@@ -694,7 +697,7 @@ onBeforeUnmount(stopPolling);
               <p v-if="meal.contributions.length" class="meal-save-state"><AppIcon name="check" />已保存<template v-if="meal.contributions.some(item => item.source === 'model_adopted')"> · 照片估算</template></p>
               <p v-if="reviewAnalysis(meal)?.candidate?.uncertaintyNote" class="field-help">{{ reviewAnalysis(meal)?.candidate?.uncertaintyNote }}</p>
             </section>
-            <div class="row-actions"><button class="text-action" type="button" :disabled="saving" @click="startMetadata(meal)">修改餐食信息</button><button class="text-action" type="button" @click="photoPanels[meal.id] = !photoPanels[meal.id]">{{ photoPanels[meal.id] ? '收起照片' : '照片与识别' }}</button></div>
+            <div class="row-actions"><button class="text-action" type="button" :disabled="saving" @click="startMetadata(meal)">修改餐食信息</button><button class="text-action" type="button" :aria-expanded="!!photoPanels[meal.id]" :aria-controls="`meal-recognition-details-${meal.id}`" @click="photoPanels[meal.id] = !photoPanels[meal.id]">{{ photoPanels[meal.id] ? '收起识别详情' : '识别详情' }}</button></div>
             <p v-if="meal.note">{{ meal.note }}</p>
             <form v-if="metadataDrafts[meal.id]" class="meal-metadata-form" aria-label="修改餐食信息" @submit.prevent="saveMetadata(meal)">
               <fieldset :disabled="saving">
@@ -718,7 +721,7 @@ onBeforeUnmount(stopPolling);
             </ul>
             <FoodPicker v-if="foodReplacementDrafts[meal.id]" :id="`food-replacement-${meal.id}`" :key="foodReplacementDrafts[meal.id]!.target.id" :meal="meal" :draft="foodReplacementDrafts[meal.id]!.picker" :replacement="foodReplacementDrafts[meal.id]!.target" :disabled="saving" @busy="saving = $event" @saved="foodReplacementSaved" @refreshed="foodReplacementRefreshed" @cancel="delete foodReplacementDrafts[meal.id]" />
             <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
-              <section v-show="photoPanels[meal.id]" class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
+              <section v-show="photoPanels[meal.id]" :id="`meal-recognition-details-${meal.id}`" class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
                 <div class="meal-image-panel__heading">
                   <div>
                     <strong :id="`meal-image-${meal.id}`">拍照估算</strong>

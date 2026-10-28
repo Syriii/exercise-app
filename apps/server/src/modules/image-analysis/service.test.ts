@@ -7,7 +7,7 @@ import { MemoryTemporaryMediaStore } from "../media/memory-temporary-media-store
 import { MemoryNutritionRepository } from "../nutrition/memory-repository.js";
 import { NutritionService } from "../nutrition/service.js";
 import { MemoryTaskQueue } from "../tasks/memory-task-queue.js";
-import type { ImageAnalyzer, ImageAnalyzerCall } from "./analyzer.js";
+import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerResult } from "./analyzer.js";
 import { DeepSeekImageAnalyzerError } from "./deepseek-analyzer.js";
 import { estimateDeepSeekCost } from "./deepseek-pricing.js";
 import { MemoryImageAnalysisRepository } from "./memory-repository.js";
@@ -70,6 +70,66 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it.each(["succeeded", "failed"] as const)("retains a late %s call after photo cancellation without restoring business data", async outcome => {
+    let resolveResponse!: (result: ImageAnalyzerResult) => void, rejectResponse!: (error: unknown) => void, modelStarted!: () => void;
+    const response = new Promise<ImageAnalyzerResult>((resolve, reject) => { resolveResponse = resolve; rejectResponse = reject; });
+    const started = new Promise<void>(resolve => { modelStarted = resolve; });
+    const analyze = vi.fn(() => { modelStarted(); return response; });
+    const values = await fixture({ model: "original-model", analyze });
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    const processing = values.service.process(uploaded.id).then(() => null, error => error);
+    await started;
+    await values.service.removeOriginal("user-1", uploaded.id);
+    const cancelled = (await values.repository.get("user-1", uploaded.id))!;
+    const call: ImageAnalyzerCall = { startedAt: "2026-10-28T04:00:00.000Z", configuredModel: "original-model", providerModel: "deepseek-flash",
+      providerRequestId: "late-request", status: outcome === "succeeded" ? "succeeded" : "deepseek_timeout",
+      usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, cost: null, durationMs: 40 };
+    const providerError = new DeepSeekImageAnalyzerError("deepseek_timeout", true, [call]);
+    const result = { candidate, providerRequestId: call.providerRequestId, calls: [call] };
+    if (outcome === "succeeded") resolveResponse(result); else rejectResponse(providerError);
+    expect(await processing).toBe(outcome === "succeeded" ? null : providerError);
+    const saved = (await values.repository.get("user-1", uploaded.id))!;
+    expect(saved).toEqual({ ...cancelled, attempts: [{ ...cancelled.attempts[0]!, evidence: { ...cancelled.attempts[0]!.evidence!, calls: [call] } }] });
+    expect(saved.candidate).toBeNull();
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(0);
+    expect(await values.repository.get("user-2", uploaded.id)).toBeNull();
+    expect(await values.repository.succeed(uploaded.id, saved.attempts[0]!.id, candidate, call.providerRequestId, result)).toBe("not_running");
+    await values.repository.fail(uploaded.id, saved.attempts[0]!.id, "later-error", [call]);
+    expect(await values.repository.get("user-1", uploaded.id)).toEqual(saved);
+    await values.service.process(uploaded.id);
+    expect(analyze).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds late billing only to the expired attempt while a newer version runs and completes", async () => {
+    const values = await fixture({ model: "original-model", analyze: async () => ({ candidate, providerRequestId: null }) });
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    const first = await values.repository.beginAttempt(uploaded.id);
+    if (typeof first === "string") throw Error(first);
+    await values.repository.expireInterrupted(new Date(Date.now() + 1000), new Date());
+    const expired = (await values.repository.get("user-1", uploaded.id))!;
+    await values.repository.retry("user-1", uploaded.id, expired.revision, { model: "new-model", promptVersion: "new-prompt" });
+    const second = await values.repository.beginAttempt(uploaded.id);
+    if (typeof second === "string") throw Error(second);
+    const running = (await values.repository.get("user-1", uploaded.id))!;
+    const call: ImageAnalyzerCall = { startedAt: "2026-10-28T04:00:00.000Z", configuredModel: "original-model", providerModel: "returned-model",
+      providerRequestId: "late-original-request", status: "succeeded", usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, cost: null, durationMs: 40 };
+    const result = { candidate, providerRequestId: call.providerRequestId, calls: [call] };
+    expect(await values.repository.succeed(uploaded.id, first.attemptId, candidate, call.providerRequestId, result)).toBe("not_running");
+    await values.repository.fail(uploaded.id, first.attemptId, "late-error", [call]);
+    const withOldBilling = (await values.repository.get("user-1", uploaded.id))!;
+    expect(withOldBilling).toEqual({ ...running, attempts: [{ ...expired.attempts[0]!, evidence: { ...expired.attempts[0]!.evidence!, calls: [call] } }, running.attempts[1]!] });
+    expect(await values.repository.succeed(randomUUID(), first.attemptId, candidate, call.providerRequestId, result)).toBe("not_running");
+    await values.repository.fail(uploaded.id, randomUUID(), "wrong-attempt", [call]);
+    expect(await values.repository.get("user-1", uploaded.id)).toEqual(withOldBilling);
+    expect(await values.repository.succeed(uploaded.id, second.attemptId, candidate, "new-request")).toMatchObject({ status: "succeeded" });
+    const completed = (await values.repository.get("user-1", uploaded.id))!;
+    await values.repository.fail(uploaded.id, first.attemptId, "another-late-error", [call]);
+    expect(await values.repository.succeed(uploaded.id, first.attemptId, candidate, call.providerRequestId, result)).toBe("not_running");
+    expect(await values.repository.get("user-1", uploaded.id)).toEqual(completed);
+    expect(completed.attempts[0]!.evidence).toMatchObject({ model: "original-model", promptVersion: uploaded.promptVersion, calls: [call] });
+    expect(completed.attempts[1]!.evidence).toMatchObject({ model: "new-model", promptVersion: "new-prompt" });
+  });
+
   it("retains a charged provider call when the model response cannot be used", async () => {
     const call = { startedAt: "2026-09-23T02:00:00.000Z", configuredModel: "deepseek-flash",
       providerModel: "deepseek-flash", providerRequestId: "provider-1", status: "deepseek_invalid_candidate",

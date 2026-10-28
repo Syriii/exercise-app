@@ -180,7 +180,7 @@ test("manual photo recognition previews a partial replacement, retries safely an
   const meal = await createMeal(page, "替换早餐");
   await addPersonalFood(meal, "原有主食", "100", "g", { energy: "200" });
   await addPersonalFood(meal, "保留豆浆", "200", "ml", { energy: "80" });
-  await meal.getByRole("button", { name: "照片与识别" }).click();
+  await meal.getByRole("button", { name: "识别详情" }).click();
   await meal.getByLabel("从相册选择餐食照片", { exact: true }).setInputFiles({ name: "breakfast.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
   await meal.getByRole("button", { name: "上传照片", exact: true }).click();
   const analysis = meal.locator("article.image-analysis-card").first();
@@ -212,7 +212,7 @@ test("manual photo recognition previews a partial replacement, retries safely an
   await expect(meal.locator(".meal-items").getByText("原有主食", { exact: true })).toHaveCount(0);
   await page.reload();
   await meal.getByRole("button", { name: "打开餐食", exact: true }).click();
-  await meal.getByRole("button", { name: "照片与识别" }).click();
+  await meal.getByRole("button", { name: "识别详情" }).click();
   page.once("dialog", dialog => dialog.accept());
   await analysis.getByRole("button", { name: "撤销这次结果替换" }).click();
   await expect(meal.locator(".meal-items > li")).toHaveCount(2);

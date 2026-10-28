@@ -65,7 +65,7 @@ test("expired original images never promise retry and food details still work", 
   });
   await page.reload();
   await meal.getByRole("button", { name: "打开餐食", exact: true }).click();
-  await meal.getByRole("button", { name: "照片与识别", exact: true }).click();
+  await meal.getByRole("button", { name: "识别详情", exact: true }).click();
   await expect(meal.getByText("原图已不可用，请重新选择照片；已有食物记录不受影响。")).toBeVisible();
   await expect(meal.getByRole("button", { name: "重新分析", exact: true })).toHaveCount(0);
   await expect(meal.getByText(/原图仍在/)).toHaveCount(0);

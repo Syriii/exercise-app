@@ -1,5 +1,51 @@
 import { expect, it } from "vitest";
-import { compareEvaluations, predictionValues, summarizeEvaluation } from "./photo-evaluation.js";
+import type { ImageAnalyzerCall } from "../modules/image-analysis/analyzer.js";
+import { compareEvaluations, predictionValues, summarizeEvaluation, summarizeEvaluationCalls } from "./photo-evaluation.js";
+
+function evaluationCall(cost: { minimumCny: number; maximumCny: number } | null, status = "succeeded"): ImageAnalyzerCall {
+  return { startedAt: "2026-09-23T02:00:00Z", configuredModel: "deepseek-flash", providerModel: "deepseek-flash",
+    providerRequestId: null, status, usage: null, durationMs: 1,
+    cost: cost === null ? null : { ...cost, currency: "CNY", priceVersion: "test-price", priceSource: "https://example.invalid/pricing",
+      ratePeriod: "peak", billedModel: "deepseek-flash", cacheHitInputPerMillion: 0.04, cacheMissInputPerMillion: 2,
+      outputPerMillion: 8, basis: cost.minimumCny === cost.maximumCny ? "provider_cache_split" : "cache_split_unknown" },
+  };
+}
+
+it("keeps the batch cost upper bound unknown when no request has a price", () => {
+  const result = summarizeEvaluationCalls([
+    evaluationCall(null, "deepseek_network_error"), evaluationCall(null, "deepseek_timeout"),
+  ]);
+  expect(JSON.parse(JSON.stringify(result))).toEqual({
+    modelRequests: 2, pricedRequests: 0,
+    estimatedCostCny: { minimum: 0, maximum: null, knownSubtotal: { minimum: 0, maximum: 0 }, unknownRequests: 2 },
+  });
+});
+
+it("separates a priced failed request subtotal from an unpriced request instead of inventing a total upper bound", () => {
+  const result = summarizeEvaluationCalls([
+    evaluationCall(null, "deepseek_timeout"),
+    evaluationCall({ minimumCny: 0.002424, maximumCny: 0.002424 }, "deepseek_rate_limited"),
+  ]);
+  expect(result).toEqual({
+    modelRequests: 2, pricedRequests: 1,
+    estimatedCostCny: { minimum: 0.002424, maximum: null,
+      knownSubtotal: { minimum: 0.002424, maximum: 0.002424 }, unknownRequests: 1 },
+  });
+});
+
+it("totals complete request price ranges and counts a known zero price as priced", () => {
+  const result = summarizeEvaluationCalls([
+    evaluationCall({ minimumCny: 0.001, maximumCny: 0.003 }),
+    evaluationCall({ minimumCny: 0.002, maximumCny: 0.002 }, "deepseek_output_truncated"),
+    evaluationCall({ minimumCny: 0, maximumCny: 0 }),
+  ]);
+  expect(result).toMatchObject({ modelRequests: 3, pricedRequests: 3, estimatedCostCny: { unknownRequests: 0 } });
+  expect(result.estimatedCostCny.minimum).toBeCloseTo(0.003);
+  expect(result.estimatedCostCny.maximum).toBeCloseTo(0.005);
+  expect(result.estimatedCostCny.knownSubtotal).toEqual({
+    minimum: result.estimatedCostCny.minimum, maximum: result.estimatedCostCny.maximum,
+  });
+});
 
 it("scores failures and unknowns separately without inventing mass or dividing by zero", () => {
   const zero = { energyKcal: 0, massGrams: 0, proteinGrams: 0, carbohydrateGrams: 0, fatGrams: 0 };

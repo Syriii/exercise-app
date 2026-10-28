@@ -9,7 +9,7 @@ import { isAbsolute, dirname, resolve } from "node:path";
 import { readSecretValue } from "../config/environment.js";
 import { DeepSeekImageAnalyzer, DeepSeekImageAnalyzerError, imageAnalysisPromptVersion } from "../modules/image-analysis/deepseek-analyzer.js";
 import type { ImageAnalyzerCall } from "../modules/image-analysis/analyzer.js";
-import { predictionValues, summarizeEvaluation, type EvaluationRecord, type EvaluationValues } from "../testing/photo-evaluation.js";
+import { predictionValues, summarizeEvaluation, summarizeEvaluationCalls, type EvaluationRecord, type EvaluationValues } from "../testing/photo-evaluation.js";
 
 const [manifestPath, approvedHash, output] = process.argv.slice(2);
 if (!manifestPath || !approvedHash || !output || process.env.PHOTO_EVALUATION_APPROVED !== "true") throw new Error("evaluation_requires_explicit_approval");
@@ -59,9 +59,5 @@ try {
     records.push(row); await file.sync();
     console.log(JSON.stringify({ completed: records.length, total: manifest.samples.length, failed: row.error !== null }));
   }
-  await file.write(JSON.stringify({ type: "summary", ...summarizeEvaluation(records), modelRequests: calls.length,
-    pricedRequests: calls.filter(call => call.cost !== null).length,
-    estimatedCostCny: { minimum: calls.reduce((sum, call) => sum + (call.cost?.minimumCny ?? 0), 0),
-      maximum: calls.reduce((sum, call) => sum + (call.cost?.maximumCny ?? 0), 0),
-      unknownRequests: calls.filter(call => call.cost === null).length } }) + "\n");
+  await file.write(JSON.stringify({ type: "summary", ...summarizeEvaluation(records), ...summarizeEvaluationCalls(calls) }) + "\n");
 } finally { await file.close(); }
