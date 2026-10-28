@@ -9,6 +9,8 @@ export interface ImageAnalyzerUsage {
 }
 
 export interface ImageAnalyzerCall {
+  /** Application-generated ID for one physical provider request; absent on legacy evidence. */
+  readonly callId?: string;
   readonly startedAt: string;
   readonly configuredModel: string;
   readonly providerModel: string | null;
@@ -17,6 +19,20 @@ export interface ImageAnalyzerCall {
   readonly usage: ImageAnalyzerUsage | null;
   readonly cost: import("./deepseek-pricing.js").DeepSeekCostEstimate | null;
   readonly durationMs: number;
+}
+
+/** A durable preparation is an intent, not proof that a request was sent or charged. */
+export interface ImageAnalyzerCallPreparation {
+  readonly callId: string;
+  readonly preparedAt: string;
+  readonly configuredModel: string;
+}
+
+export interface ImageAnalyzerObserver {
+  /** Must finish before dispatch. False means the original business work is no longer active. */
+  beforeRequest(preparation: ImageAnalyzerCallPreparation): Promise<boolean>;
+  /** One execution's complete ordered terminal call snapshot, persisted before any retry. */
+  afterRequest(calls: readonly ImageAnalyzerCall[]): Promise<void>;
 }
 
 export interface ImageAnalyzerResult {
@@ -31,5 +47,5 @@ export interface ImageAnalyzerResult {
 
 export interface ImageAnalyzer {
   readonly model: string;
-  analyze(contentType: string, image: Buffer): Promise<ImageAnalyzerResult>;
+  analyze(contentType: string, image: Buffer, observer?: ImageAnalyzerObserver): Promise<ImageAnalyzerResult>;
 }

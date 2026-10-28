@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { StoredTemporaryMedia } from "../media/temporary-media-store.js";
-import { mergeAttemptCalls } from "./attempt-evidence.js";
+import { mergeAttemptCalls, mergePreparedCall } from "./attempt-evidence.js";
 import type { ImageAnalysisRepository } from "./repository.js";
 import type { AnalysisWorkItem, ImageAnalysisAttempt, ImageNutritionCandidate, MealImageAnalysis } from "./types.js";
 
@@ -63,6 +63,20 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
     const attempt: ImageAnalysisAttempt = { id: randomUUID(), sequence: value.attempts.length + 1, status: "running", providerRequestId: null, errorCode: null, startedAt: new Date(), finishedAt: null, evidence: { model: value.model, promptVersion: value.promptVersion } };
     const saved = { ...value, status: "running" as const, attempts: [...value.attempts, attempt], revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return { work: clone(saved), attemptId: attempt.id };
   }
+  public async prepareCall(id: string, attemptId: string, preparation: import("./analyzer.js").ImageAnalyzerCallPreparation) {
+    // NutritionService guards meal availability for the in-memory adapter; PG checks it transactionally.
+    const value = this.#items.get(id), attempt = value?.attempts.find(item => item.id === attemptId);
+    if (!value || value.status !== "running" || attempt?.status !== "running" || !value.imageAvailable
+      || (this.#expires.get(value.mediaId)?.getTime() ?? Infinity) <= Date.now()) return false;
+    const evidence = mergePreparedCall(attempt.evidence, preparation);
+    if (!evidence) return false;
+    if (evidence !== attempt.evidence) this.#items.set(id, { ...value,
+      attempts: value.attempts.map(item => item.id === attemptId ? { ...item, evidence } : item) });
+    return true;
+  }
+  public async recordCalls(id: string, attemptId: string, calls: readonly import("./analyzer.js").ImageAnalyzerCall[]) {
+    this.captureCalls(id, attemptId, calls, true);
+  }
   public async succeed(id: string, attemptId: string, candidate: ImageNutritionCandidate, providerRequestId: string | null, result?: import("./analyzer.js").ImageAnalyzerResult) {
     const value = this.captureCalls(id, attemptId, result?.calls); const attempt = value?.attempts.find((item) => item.id === attemptId); if (value === undefined || value.status !== "running" || attempt?.status !== "running") return "not_running" as const;
     if (!value.imageAvailable || (this.#expires.get(value.mediaId)?.getTime() ?? Infinity) <= Date.now()) { this.#items.set(id, { ...value, status: "cancelled", lastErrorCode: "image_unavailable", revision: value.revision + 1, attempts: value.attempts.map(item => item.id === attemptId ? { ...item, status: "failed", errorCode: "image_unavailable", finishedAt: new Date() } : item) }); return "not_running" as const; }
@@ -70,10 +84,10 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
     this.#items.set(id, { ...value, status: "succeeded", candidate, lastErrorCode: null, attempts, revision: value.revision + 1, updatedAt: new Date() }); return { status: "succeeded" as const, tentativeHandled: false };
   }
   public async fail(id: string, attemptId: string, errorCode: string, calls?: readonly import("./analyzer.js").ImageAnalyzerCall[]) { const value = this.captureCalls(id, attemptId, calls); if (value?.status !== "running" || !value.attempts.some(item => item.id === attemptId && item.status === "running")) return; const attempts = value.attempts.map((item) => item.id === attemptId ? { ...item, status: "failed" as const, errorCode, finishedAt: new Date() } : item); this.#items.set(id, { ...value, status: "failed", lastErrorCode: errorCode, attempts, revision: value.revision + 1, updatedAt: new Date() }); }
-  private captureCalls(id: string, attemptId: string, calls: readonly import("./analyzer.js").ImageAnalyzerCall[] | undefined) {
+  private captureCalls(id: string, attemptId: string, calls: readonly import("./analyzer.js").ImageAnalyzerCall[] | undefined, strict = false) {
     const value = this.#items.get(id), attempt = value?.attempts.find(item => item.id === attemptId);
     if (!value || !attempt) return value;
-    const evidence = mergeAttemptCalls(attempt.evidence, calls);
+    const evidence = mergeAttemptCalls(attempt.evidence, calls, strict);
     if (evidence === attempt.evidence) return value;
     const saved = { ...value, attempts: value.attempts.map(item => item.id === attemptId ? { ...item, evidence } : item) };
     this.#items.set(id, saved);

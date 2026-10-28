@@ -227,6 +227,10 @@ function analysisStatus(value: MealImageAnalysis, meal: Meal): string {
 }
 function confidenceLabel(value: "low" | "medium" | "high"): string { return value === "high" ? "较高" : value === "medium" ? "一般" : "较低"; }
 function imageAnalysisFailureText(code: string | null, imageAvailable: boolean): string {
+  const preserved = imageAvailable ? "原图仍在，已有食物未改动。" : "已有食物记录仍保留。";
+  if (code === "deepseek_call_preparation_failed") return `本次准备的请求未发送给识别服务，调用前记录保存失败，已停止自动处理。${preserved}`;
+  if (code === "deepseek_call_recording_failed") return `这次识别未能完整保存，已停止自动重试。识别服务可能已处理请求，${preserved}`;
+  if (code === "deepseek_request_cancelled") return `这次识别已停止，未发出后续请求。${preserved}请查看当前照片与餐食状态。`;
   if (!imageAvailable) return "这次识别没有完成；已有食物记录仍保留。";
   if (code === "analysis_interrupted") return "上次识别意外中断，已有食物未改动；原图仍在，可以重新分析。";
   if (code === "queue_wait_expired") return "这张照片等待处理过久，已有食物未改动；原图仍在，可以重新分析。";
@@ -453,7 +457,11 @@ async function uploadMealImage(meal: Meal) {
 }
 
 async function retryImageAnalysis(mealId: string, analysis: MealImageAnalysis) {
-  if (actingAnalysisId.value !== null || !window.confirm("将这张照片发送给识别服务，估算食物与营养。已有食物和修正不会自动覆盖，是否继续？")) return;
+  if (actingAnalysisId.value !== null) return;
+  const confirmation = analysis.lastErrorCode === "deepseek_call_recording_failed"
+    ? "识别服务可能已处理这次请求，重新分析可能再次计费，是否继续？"
+    : "将这张照片发送给识别服务，估算食物与营养。已有食物和修正不会自动覆盖，是否继续？";
+  if (!window.confirm(confirmation)) return;
   actingAnalysisId.value = analysis.id; errorMessage.value = "";
   try {
     const saved = analysis.status === "succeeded" ? await nutritionApi.reanalyze(analysis.id, analysis.revision) : await nutritionApi.retryImageAnalysis(analysis.id, analysis.revision);

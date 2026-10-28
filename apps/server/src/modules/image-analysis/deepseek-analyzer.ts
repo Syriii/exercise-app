@@ -1,4 +1,5 @@
-import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerResult, ImageAnalyzerUsage } from "./analyzer.js";
+import { randomUUID } from "node:crypto";
+import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerObserver, ImageAnalyzerResult, ImageAnalyzerUsage } from "./analyzer.js";
 import { estimateDeepSeekCost } from "./deepseek-pricing.js";
 import type { ImageFoodCandidate, ImageNutritionCandidate } from "./types.js";
 
@@ -7,6 +8,7 @@ export const imageAnalysisPromptVersion = "meal-image-foods-2026-09-06.1";
 const defaultRetryLimit = 2;
 const defaultRetryDelayMs = 500;
 const maximumOutputTokens = 6_000;
+const evidenceWriteTimeoutMs = 5_000;
 
 export class DeepSeekImageAnalyzerError extends Error {
   public constructor(
@@ -44,7 +46,7 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
     return this.options.model;
   }
 
-  public async analyze(contentType: string, image: Buffer): Promise<ImageAnalyzerResult> {
+  public async analyze(contentType: string, image: Buffer, observer?: ImageAnalyzerObserver): Promise<ImageAnalyzerResult> {
     const deadline = this.#now() + this.options.timeoutMs;
     const retryLimit = this.options.retryLimit ?? defaultRetryLimit;
     const retryDelayMs = this.options.retryDelayMs ?? defaultRetryDelayMs;
@@ -52,7 +54,7 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
 
     for (let retry = 0; ; retry += 1) {
       try {
-        return { ...await this.request(contentType, image, deadline, calls), calls };
+        return { ...await this.request(contentType, image, deadline, calls, observer), calls };
       } catch (error) {
         if (error instanceof DeepSeekImageAnalyzerError) error.calls = [...calls];
         if (!(error instanceof DeepSeekImageAnalyzerError) || !error.retryable || retry >= retryLimit) {
@@ -65,10 +67,32 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
     }
   }
 
-  private async request(contentType: string, image: Buffer, deadline: number, calls: ImageAnalyzerCall[]): Promise<ImageAnalyzerResult> {
-    const remainingMs = deadline - this.#now();
-    if (remainingMs <= 0) throw new DeepSeekImageAnalyzerError("deepseek_timeout", true);
+  private async request(contentType: string, image: Buffer, deadline: number, calls: ImageAnalyzerCall[], observer?: ImageAnalyzerObserver): Promise<ImageAnalyzerResult> {
+    if (deadline <= this.#now()) throw new DeepSeekImageAnalyzerError("deepseek_timeout", false);
 
+    const preparation = { callId: randomUUID(), preparedAt: new Date(this.#now()).toISOString(), configuredModel: this.options.model };
+    if (observer) {
+      const active = await this.observe(() => observer.beforeRequest(preparation), Math.min(evidenceWriteTimeoutMs, deadline - this.#now()), "deepseek_call_preparation_failed");
+      if (!active) throw new DeepSeekImageAnalyzerError("deepseek_request_cancelled", false);
+    }
+    const requestBody = JSON.stringify({
+      model: this.options.model,
+      stream: false,
+      thinking: { type: "disabled" },
+      temperature: 0.2,
+      max_tokens: maximumOutputTokens,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: nutritionAnalysisPrompt },
+        { role: "user", content: [
+          { type: "text", text: "请分析这张餐食照片，并只返回符合上述格式的 JSON 对象。" },
+          { type: "image_url", image_url: { url: `data:${contentType};base64,${image.toString("base64")}`, detail: "auto" } },
+        ] },
+      ],
+    });
+    // Persistence time belongs to the overall deadline; do not dispatch an expired request.
+    const remainingMs = deadline - this.#now();
+    if (remainingMs <= 0) throw new DeepSeekImageAnalyzerError("deepseek_timeout", false);
     const startedAt = this.#now();
     let sent = false;
     let providerRequestId: string | null = null;
@@ -88,30 +112,7 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
             authorization: `Bearer ${this.options.apiKey}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({
-            model: this.options.model,
-            stream: false,
-            thinking: { type: "disabled" },
-            temperature: 0.2,
-            max_tokens: maximumOutputTokens,
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: nutritionAnalysisPrompt },
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: "请分析这张餐食照片，并只返回符合上述格式的 JSON 对象。" },
-                  {
-                    type: "image_url",
-                    image_url: {
-                      url: `data:${contentType};base64,${image.toString("base64")}`,
-                      detail: "auto",
-                    },
-                  },
-                ],
-              },
-            ],
-          }),
+          body: requestBody,
         });
       } catch {
         if (controller.signal.aborted) throw new DeepSeekImageAnalyzerError("deepseek_timeout", true);
@@ -175,11 +176,29 @@ export class DeepSeekImageAnalyzer implements ImageAnalyzer {
       throw error;
     } finally {
       clearTimeout(timeout);
-      if (sent) calls.push({ startedAt: new Date(startedAt).toISOString(), configuredModel: this.options.model,
-        providerModel, providerRequestId, status, usage,
-        cost: estimateDeepSeekCost(providerModel ?? this.options.model, new Date(startedAt), usage),
-        durationMs: Math.max(0, this.#now() - startedAt) });
+      if (sent) {
+        calls.push({ callId: preparation.callId, startedAt: new Date(startedAt).toISOString(), configuredModel: preparation.configuredModel,
+          providerModel, providerRequestId, status, usage,
+          cost: estimateDeepSeekCost(providerModel ?? this.options.model, new Date(startedAt), usage),
+          durationMs: Math.max(0, this.#now() - startedAt) });
+        if (observer) {
+          // A terminal receipt still gets a bounded write window after provider timeout.
+          await this.observe(() => observer.afterRequest([...calls]), evidenceWriteTimeoutMs, "deepseek_call_recording_failed");
+        }
+      }
     }
+  }
+
+  private async observe<T>(operation: () => Promise<T>, timeoutMs: number, code: string): Promise<T> {
+    if (timeoutMs <= 0) throw new DeepSeekImageAnalyzerError(code, false);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(operation),
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(code)), timeoutMs); }),
+      ]);
+    } catch { throw new DeepSeekImageAnalyzerError(code, false); }
+    finally { if (timeout !== undefined) clearTimeout(timeout); }
   }
 }
 

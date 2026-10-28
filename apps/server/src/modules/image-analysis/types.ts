@@ -36,6 +36,8 @@ export interface AnalysisAttemptEvidence {
   readonly usage?: import("./analyzer.js").ImageAnalyzerUsage | null;
   readonly finishReason?: string | null;
   readonly candidate?: ImageNutritionCandidate;
+  /** Persisted intent only; absence of a matching call leaves the outcome unknown. */
+  readonly preparedCalls?: readonly import("./analyzer.js").ImageAnalyzerCallPreparation[];
   readonly calls?: readonly import("./analyzer.js").ImageAnalyzerCall[];
 }
 

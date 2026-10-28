@@ -10,6 +10,7 @@ import { readSecretValue } from "../config/environment.js";
 import { DeepSeekImageAnalyzer, DeepSeekImageAnalyzerError, imageAnalysisPromptVersion } from "../modules/image-analysis/deepseek-analyzer.js";
 import type { ImageAnalyzerCall } from "../modules/image-analysis/analyzer.js";
 import { predictionValues, summarizeEvaluation, summarizeEvaluationCalls, type EvaluationRecord, type EvaluationValues } from "../testing/photo-evaluation.js";
+import { createEvaluationProviderObserver, shouldStopEvaluationForLogFailure } from "../testing/photo-evaluation-log.js";
 
 const [manifestPath, approvedHash, output] = process.argv.slice(2);
 if (!manifestPath || !approvedHash || !output || process.env.PHOTO_EVALUATION_APPROVED !== "true") throw new Error("evaluation_requires_explicit_approval");
@@ -44,20 +45,27 @@ try {
   for (const [index, sample] of manifest.samples.entries()) {
     await file.write(JSON.stringify({ type: "request_started", id: sample.id, at: new Date().toISOString() }) + "\n");
     await file.sync();
+    const providerLog = createEvaluationProviderObserver(file, sample.id);
     let row: EvaluationRecord;
+    let predictionRecord: Record<string, unknown>;
     try {
       // No dish IDs, ground-truth names, weights or nutrition labels enter the model input.
-      const result = await analyzer.analyze(sample.contentType, images[index]!);
+      const result = await analyzer.analyze(sample.contentType, images[index]!, providerLog.observer);
+      if (providerLog.failure) throw providerLog.failure;
       calls.push(...(result.calls ?? []));
       row = { id: sample.id, truth: sample.truth, prediction: predictionValues(result.candidate), error: null };
-      await file.write(JSON.stringify({ type: "prediction", ...row, foods: result.candidate.foods ?? null, candidate: result.candidate, usage: result.usage ?? null, calls: result.calls ?? [], durationMs: result.durationMs ?? null, providerModel: result.providerModel ?? null }) + "\n");
+      predictionRecord = { type: "prediction", ...row, foods: result.candidate.foods ?? null, candidate: result.candidate, usage: result.usage ?? null, calls: result.calls ?? [], durationMs: result.durationMs ?? null, providerModel: result.providerModel ?? null };
     } catch (error) {
+      // A log failure stops the batch; continuing could spend another sample's budget without evidence.
+      if (shouldStopEvaluationForLogFailure(error, providerLog.failure)) throw providerLog.failure ?? error;
       if (error instanceof DeepSeekImageAnalyzerError) calls.push(...error.calls);
       row = { id: sample.id, truth: sample.truth, prediction: null, error: error instanceof DeepSeekImageAnalyzerError ? error.code : "evaluation_request_failed" };
-      await file.write(JSON.stringify({ type: "prediction", ...row, calls: error instanceof DeepSeekImageAnalyzerError ? error.calls : [] }) + "\n");
+      predictionRecord = { type: "prediction", ...row, calls: error instanceof DeepSeekImageAnalyzerError ? error.calls : [] };
     }
+    await file.write(JSON.stringify(predictionRecord) + "\n");
     records.push(row); await file.sync();
     console.log(JSON.stringify({ completed: records.length, total: manifest.samples.length, failed: row.error !== null }));
   }
   await file.write(JSON.stringify({ type: "summary", ...summarizeEvaluation(records), ...summarizeEvaluationCalls(calls) }) + "\n");
+  await file.sync();
 } finally { await file.close(); }

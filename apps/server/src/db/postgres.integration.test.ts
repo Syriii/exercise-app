@@ -1193,6 +1193,115 @@ describe("PostgreSQL integration", () => {
     } finally { await restricted.close(); }
   });
 
+  it("records request intentions and responses independently with exact attempt ownership and no business resurrection", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`request-a-${randomUUID()}`, `request-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const nutrition = new NutritionService(new PostgresNutritionRepository(restricted.database));
+    const images = new PostgresImageAnalysisRepository(database.database), scoped = new PostgresImageAnalysisRepository(restricted.database);
+    const makeMeal = () => context.run(owner, () => nutrition.createMeal(owner, { occurredAt: "2026-10-28T04:00:00Z", localDate: "2026-10-28", timeZone: "UTC", name: "调用证据测试", note: null }));
+    try {
+      const meal = await makeMeal();
+      const makePhoto = (mealId = meal.id, expiresAt: Date | null = null) => context.run(owner, () => scoped.create(owner, mealId, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "a".repeat(64) }, expiresAt, "original-model", "original-prompt"));
+      const photo = await makePhoto();
+      const first = await images.beginAttempt(photo.id);
+      if (typeof first === "string") throw Error(first);
+      const preparation = { callId: randomUUID(), preparedAt: "2026-10-28T03:59:59.000Z", configuredModel: "original-model" };
+      const events = async () => (await database.pool.query("select id, operation from meal_record_events where entity_type = 'meal_image_analysis_attempts' and entity_id = $1 order by id", [first.attemptId])).rows;
+      const beforePreparation = (await images.get(owner, photo.id))!;
+      expect(await context.run(other, () => scoped.prepareCall(photo.id, first.attemptId, preparation))).toBe(false);
+      expect(await images.prepareCall(photo.id, randomUUID(), preparation)).toBe(false);
+      expect(await images.get(owner, photo.id)).toEqual(beforePreparation);
+      expect(await images.prepareCall(photo.id, first.attemptId, preparation)).toBe(true);
+      const prepared = (await images.get(owner, photo.id))!;
+      expect(prepared).toEqual({ ...beforePreparation, attempts: [{ ...beforePreparation.attempts[0]!, evidence: { ...beforePreparation.attempts[0]!.evidence!, preparedCalls: [preparation] } }] });
+      const preparedEvents = await events();
+      expect(await images.prepareCall(photo.id, first.attemptId, { ...preparation })).toBe(true);
+      expect(await images.prepareCall(photo.id, first.attemptId, { ...preparation, configuredModel: "conflict" })).toBe(false);
+      expect(await images.get(owner, photo.id)).toEqual(prepared);
+      expect(await events()).toEqual(preparedEvents);
+      const call = { callId: preparation.callId, startedAt: "2026-10-28T04:00:00.000Z", configuredModel: preparation.configuredModel, providerModel: "deepseek-flash", providerRequestId: "independent-response", status: "succeeded",
+        usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, cost: null, durationMs: 40 };
+      await expect(images.recordCalls(photo.id, first.attemptId, [{ ...call, callId: randomUUID() }])).rejects.toThrow("image_analysis_call_evidence_conflict");
+      await expect(images.recordCalls(photo.id, first.attemptId, [{ ...call, configuredModel: "wrong-model" }])).rejects.toThrow("image_analysis_call_evidence_conflict");
+      expect(await images.get(owner, photo.id)).toEqual(prepared);
+      expect(await events()).toEqual(preparedEvents);
+      await context.run(other, () => scoped.recordCalls(photo.id, first.attemptId, [call]));
+      expect(await images.get(owner, photo.id)).toEqual(prepared);
+      await images.recordCalls(photo.id, first.attemptId, [call]);
+      const recorded = (await images.get(owner, photo.id))!;
+      expect(recorded).toEqual({ ...prepared, attempts: [{ ...prepared.attempts[0]!, evidence: { ...prepared.attempts[0]!.evidence!, calls: [call] } }] });
+      expect(recorded.candidate).toBeNull();
+      expect((await context.run(owner, () => nutrition.getMeal(owner, meal.id))).contributions).toHaveLength(0);
+      const recordedEvents = await events();
+      await images.recordCalls(photo.id, first.attemptId, [call]);
+      await expect(images.recordCalls(photo.id, first.attemptId, [{ ...call, providerRequestId: "wrong-provider-request" }])).rejects.toThrow("image_analysis_call_evidence_conflict");
+      await expect(images.recordCalls(photo.id, first.attemptId, [{ ...call, startedAt: "2026-10-28T05:00:00.000Z" }])).rejects.toThrow("image_analysis_call_evidence_conflict");
+      await expect(images.recordCalls(photo.id, first.attemptId, [{ ...call, usage: { promptTokens: 999, completionTokens: 20, totalTokens: 1019 } }])).rejects.toThrow("image_analysis_call_evidence_conflict");
+      expect(await images.get(owner, photo.id)).toEqual(recorded);
+      await images.recordCalls(randomUUID(), first.attemptId, [call]);
+      await images.recordCalls(photo.id, randomUUID(), [call]);
+      expect(await events()).toEqual(recordedEvents);
+
+      const unknownPreparation = { ...preparation, callId: randomUUID(), preparedAt: "2026-10-28T04:00:01.000Z" };
+      expect(await images.prepareCall(photo.id, first.attemptId, unknownPreparation)).toBe(true);
+      await images.fail(photo.id, first.attemptId, "analysis_interrupted");
+      const failed = (await images.get(owner, photo.id))!;
+      expect(await images.prepareCall(photo.id, first.attemptId, { ...preparation, callId: randomUUID() })).toBe(false);
+      const retry = await images.retry(owner, photo.id, failed.revision, { model: "new-model", promptVersion: "new-prompt" });
+      if (typeof retry === "string") throw Error(retry);
+      const second = await images.beginAttempt(photo.id);
+      if (typeof second === "string") throw Error(second);
+      const current = (await images.get(owner, photo.id))!;
+      expect(await images.prepareCall(photo.id, first.attemptId, { ...preparation, callId: randomUUID() })).toBe(false);
+      const lateCall = { ...call, callId: unknownPreparation.callId, startedAt: "2026-10-28T04:00:02.000Z", providerRequestId: "late-original-response" };
+      await images.recordCalls(photo.id, first.attemptId, [call, lateCall]);
+      const afterLate = (await images.get(owner, photo.id))!;
+      expect(afterLate).toEqual({ ...current, attempts: [{ ...failed.attempts[0]!, evidence: { ...failed.attempts[0]!.evidence!, calls: [call, lateCall] } }, current.attempts[1]!] });
+      expect(afterLate.attempts[1]!.evidence).toEqual({ model: "new-model", promptVersion: "new-prompt" });
+      const nextPreparation = { ...preparation, callId: randomUUID(), configuredModel: "new-model" };
+      expect(await images.prepareCall(photo.id, second.attemptId, nextPreparation)).toBe(true);
+      const nextCall = { ...call, callId: nextPreparation.callId, configuredModel: nextPreparation.configuredModel, providerRequestId: "new-response" };
+      await images.recordCalls(photo.id, second.attemptId, [nextCall]);
+      const candidate = { title: "测试餐", observedFoods: [], foods: [{ label: "鸡蛋", portionAmount: 1, portionUnit: "个", note: null, energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5 }], energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5, confidence: "low" as const, assumptions: [], uncertaintyNote: "测试" };
+      expect(await images.succeed(photo.id, second.attemptId, candidate, "new-response", { candidate, providerRequestId: "new-response", calls: [nextCall] })).toEqual({ status: "succeeded", tentativeHandled: true });
+      const completed = (await images.get(owner, photo.id))!;
+      expect(completed.attempts[1]!.evidence).toMatchObject({ preparedCalls: [nextPreparation], calls: [nextCall] });
+      await images.recordCalls(photo.id, first.attemptId, [call, lateCall]);
+      expect(await images.get(owner, photo.id)).toEqual(completed);
+      const exported = await context.run(owner, () => new PostgresUserDataExporter(restricted.database).exportUserData(owner, new Date()));
+      expect(exported.data.meal_image_analysis_attempts).toEqual(expect.arrayContaining([expect.objectContaining({ id: first.attemptId, evidence: expect.objectContaining({ preparedCalls: [preparation, unknownPreparation], calls: [call, lateCall] }) })]));
+      expect((await context.run(other, () => new PostgresUserDataExporter(restricted.database).exportUserData(other, new Date()))).data.meal_image_analysis_attempts).toHaveLength(0);
+
+      const cancelled = await makePhoto(), cancelledAttempt = await images.beginAttempt(cancelled.id);
+      if (typeof cancelledAttempt === "string") throw Error(cancelledAttempt);
+      const cancelledPreparation = { ...preparation, callId: randomUUID() };
+      expect(await images.prepareCall(cancelled.id, cancelledAttempt.attemptId, cancelledPreparation)).toBe(true);
+      await images.markMediaStatus(cancelledAttempt.work.mediaId, "deleted");
+      const cancelledBefore = (await images.get(owner, cancelled.id))!;
+      expect(await images.prepareCall(cancelled.id, cancelledAttempt.attemptId, cancelledPreparation)).toBe(false);
+      expect(await images.get(owner, cancelled.id)).toEqual(cancelledBefore);
+      const cancelledCall = { ...call, callId: cancelledPreparation.callId };
+      await images.recordCalls(cancelled.id, cancelledAttempt.attemptId, [cancelledCall]);
+      expect(await images.get(owner, cancelled.id)).toEqual({ ...cancelledBefore, attempts: [{ ...cancelledBefore.attempts[0]!, evidence: { ...cancelledBefore.attempts[0]!.evidence!, calls: [cancelledCall] } }] });
+      const expired = await makePhoto(meal.id, new Date(Date.now() - 1000)), expiredAttempt = await images.beginAttempt(expired.id);
+      if (typeof expiredAttempt === "string") throw Error(expiredAttempt);
+      expect(await images.prepareCall(expired.id, expiredAttempt.attemptId, preparation)).toBe(false);
+      const movedMeal = await makeMeal(), deletedPhoto = await makePhoto(movedMeal.id), deletedAttempt = await images.beginAttempt(deletedPhoto.id);
+      if (typeof deletedAttempt === "string") throw Error(deletedAttempt);
+      await context.run(owner, () => nutrition.deleteMeal(owner, movedMeal.id, movedMeal.revision));
+      expect(await images.prepareCall(deletedPhoto.id, deletedAttempt.attemptId, preparation)).toBe(false);
+      await database.pool.query("delete from meal_image_analyses where id = $1", [deletedPhoto.id]);
+      expect(await images.prepareCall(deletedPhoto.id, deletedAttempt.attemptId, preparation)).toBe(false);
+      await images.recordCalls(deletedPhoto.id, deletedAttempt.attemptId, [call]);
+      expect(await images.get(owner, deletedPhoto.id)).toBeNull();
+      await database.pool.query("delete from users where id = $1", [owner]);
+      expect(await images.prepareCall(photo.id, first.attemptId, preparation)).toBe(false);
+      await images.recordCalls(photo.id, first.attemptId, [call]);
+      expect(await images.get(owner, photo.id)).toBeNull();
+    } finally { await restricted.close(); }
+  });
+
   it("retains meal photos and transactional usage history with isolated exports, rollback and deletion fencing", async () => {
     const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`usage-a-${randomUUID()}`, `usage-b-${randomUUID()}`]);
     const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;

@@ -98,7 +98,17 @@ export class ImageAnalysisService {
     let completedCalls: readonly ImageAnalyzerCall[] | undefined;
     try {
       const image = await readAll(await this.options.mediaStore.open(started.work.objectKey), this.options.maxUploadBytes);
-      const result = await this.options.analyzer.analyze(started.work.contentType, image);
+      const result = await this.options.analyzer.analyze(started.work.contentType, image, {
+        beforeRequest: async preparation => {
+          try { await this.options.nutritionService.getMeal(started.work.userId, started.work.mealId); }
+          catch (error) {
+            if (error instanceof Error && "statusCode" in error && error.statusCode === 404) return false;
+            throw error;
+          }
+          return this.options.repository.prepareCall(analysisId, started.attemptId, preparation);
+        },
+        afterRequest: calls => this.options.repository.recordCalls(analysisId, started.attemptId, calls),
+      });
       // A charged provider result must survive a later business-write failure.
       completedCalls = result.calls;
       const completed = await this.options.repository.succeed(analysisId, started.attemptId, result.candidate, result.providerRequestId, result);

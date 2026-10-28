@@ -14,6 +14,10 @@ export interface ImageAnalysisRepository {
   get(userId: string, analysisId: string): Promise<MealImageAnalysis | null>;
   getWorkItem(analysisId: string): Promise<AnalysisWorkItem | null>;
   beginAttempt(analysisId: string): Promise<{ work: AnalysisWorkItem; attemptId: string } | "not_found" | "not_ready">;
+  /** Record intent before sending; true does not prove the provider received or charged it. */
+  prepareCall(analysisId: string, attemptId: string, preparation: import("./analyzer.js").ImageAnalyzerCallPreparation): Promise<boolean>;
+  /** Persist the completed cumulative call snapshot independently of business result writes. */
+  recordCalls(analysisId: string, attemptId: string, calls: readonly import("./analyzer.js").ImageAnalyzerCall[]): Promise<void>;
   succeed(analysisId: string, attemptId: string, candidate: ImageNutritionCandidate, providerRequestId: string | null, result?: import("./analyzer.js").ImageAnalyzerResult): Promise<{ readonly status: "succeeded"; readonly tentativeHandled: boolean } | "not_running">;
   fail(analysisId: string, attemptId: string, errorCode: string, calls?: readonly import("./analyzer.js").ImageAnalyzerCall[]): Promise<void>;
   retry(userId: string, analysisId: string, expectedRevision: number, provider?: { model: string; promptVersion: string }): Promise<MealImageAnalysis | "not_found" | "not_failed" | "revision_conflict">;

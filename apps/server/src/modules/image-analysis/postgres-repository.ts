@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gte, lte, ne, inArray, isNull, sql } from "drizzle-
 import type { Database } from "../../db/database.js";
 import { mealContributions, mealImageAnalysisAttempts, mealImageAnalyses, meals, temporaryMedia, users } from "../../db/schema/index.js";
 import { imageFoodContributions } from "../nutrition/image-foods.js";
-import { mergeAttemptCalls } from "./attempt-evidence.js";
+import { mergeAttemptCalls, mergePreparedCall } from "./attempt-evidence.js";
 import type { StoredTemporaryMedia } from "../media/temporary-media-store.js";
 import type { ImageAnalysisRepository } from "./repository.js";
 import type { AnalysisWorkItem, ImageAnalysisAttempt, ImageNutritionCandidate, MealImageAnalysis } from "./types.js";
@@ -67,6 +67,38 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
   public async beginAttempt(id: string) {
     const attemptId = await this.database.transaction(async (tx) => { const [analysis] = await tx.select().from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update").limit(1); if (analysis === undefined) return "not_found" as const; if (analysis.status !== "pending") return "not_ready" as const; const [countRow] = await tx.select({ count: sql<number>`count(*)::int` }).from(mealImageAnalysisAttempts).where(eq(mealImageAnalysisAttempts.analysisId, id)); const [attempt] = await tx.insert(mealImageAnalysisAttempts).values({ analysisId: id, sequence: (countRow?.count ?? 0) + 1, evidence: { model: analysis.model, promptVersion: analysis.promptVersion } }).returning({ id: mealImageAnalysisAttempts.id }); await tx.update(mealImageAnalyses).set({ status: "running", revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id)); return attempt!.id; });
     if (attemptId === "not_found" || attemptId === "not_ready") return attemptId; const work = await this.getWorkItem(id); if (work === null) return "not_found"; return { work, attemptId };
+  }
+  public async prepareCall(id: string, attemptId: string, preparation: import("./analyzer.js").ImageAnalyzerCallPreparation) {
+    return this.database.transaction(async tx => {
+      const [analysis] = await tx.select().from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update").limit(1);
+      if (analysis?.status !== "running") return false;
+      const [attempt] = await tx.select().from(mealImageAnalysisAttempts)
+        .where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.analysisId, id))).for("update").limit(1);
+      if (attempt?.status !== "running") return false;
+      const [meal] = await tx.select({ id: meals.id }).from(meals)
+        .where(and(eq(meals.id, analysis.mealId), eq(meals.userId, analysis.userId), isNull(meals.deletedAt))).for("share").limit(1);
+      if (!meal) return false;
+      const [media] = await tx.select({ status: temporaryMedia.status, expiresAt: temporaryMedia.expiresAt }).from(temporaryMedia)
+        .where(eq(temporaryMedia.id, analysis.mediaId)).for("share").limit(1);
+      if (media?.status !== "available" || (media.expiresAt !== null && media.expiresAt <= new Date())) return false;
+      const evidence = mergePreparedCall(attempt.evidence, preparation);
+      if (!evidence) return false;
+      if (evidence !== attempt.evidence) await tx.update(mealImageAnalysisAttempts).set({ evidence })
+        .where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.analysisId, id)));
+      return true;
+    });
+  }
+  public async recordCalls(id: string, attemptId: string, calls: readonly import("./analyzer.js").ImageAnalyzerCall[]) {
+    await this.database.transaction(async tx => {
+      const [analysis] = await tx.select({ id: mealImageAnalyses.id }).from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update").limit(1);
+      if (!analysis) return;
+      const [attempt] = await tx.select({ evidence: mealImageAnalysisAttempts.evidence }).from(mealImageAnalysisAttempts)
+        .where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.analysisId, id))).for("update").limit(1);
+      if (!attempt) return;
+      const evidence = mergeAttemptCalls(attempt.evidence, calls, true);
+      if (evidence !== attempt.evidence) await tx.update(mealImageAnalysisAttempts).set({ evidence })
+        .where(and(eq(mealImageAnalysisAttempts.id, attemptId), eq(mealImageAnalysisAttempts.analysisId, id)));
+    });
   }
   public async succeed(id: string, attemptId: string, candidate: ImageNutritionCandidate, providerRequestId: string | null, result?: import("./analyzer.js").ImageAnalyzerResult) {
     return this.database.transaction(async (tx) => {

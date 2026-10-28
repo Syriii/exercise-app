@@ -1,14 +1,14 @@
 import { Readable } from "node:stream";
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryTemporaryMediaStore } from "../media/memory-temporary-media-store.js";
 import { MemoryNutritionRepository } from "../nutrition/memory-repository.js";
 import { NutritionService } from "../nutrition/service.js";
 import { MemoryTaskQueue } from "../tasks/memory-task-queue.js";
 import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerResult } from "./analyzer.js";
-import { DeepSeekImageAnalyzerError } from "./deepseek-analyzer.js";
+import { DeepSeekImageAnalyzer, DeepSeekImageAnalyzerError } from "./deepseek-analyzer.js";
 import { estimateDeepSeekCost } from "./deepseek-pricing.js";
 import { MemoryImageAnalysisRepository } from "./memory-repository.js";
 import { FixedImageAnalyzer, ImageAnalysisService } from "./service.js";
@@ -29,6 +29,20 @@ const candidate = {
   assumptions: ["按常见食堂份量估算"],
   uncertaintyNote: "请按实际剩余量修正。",
 };
+
+afterEach(() => vi.unstubAllGlobals());
+
+function fakeProviderResponse() {
+  return new Response(JSON.stringify({ id: "fake-physical-request", model: "deepseek-flash",
+    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ ...candidate,
+      foods: [{ label: "米饭", portionAmount: 100, portionUnit: "g", note: null, energyKcal: 100, proteinGrams: 2, carbohydrateGrams: 20, fatGrams: null }],
+    }) } }],
+  }), { status: 200 });
+}
+function recordedAnalyzer() {
+  return new DeepSeekImageAnalyzer({ apiKey: "fake-only-usage-key", baseUrl: "https://example.invalid", model: "deepseek-flash", timeoutMs: 1000, retryDelayMs: 0 });
+}
 
 async function fixture(
   analyzer: ImageAnalyzer = new FixedImageAnalyzer(candidate),
@@ -70,6 +84,99 @@ class ConflictOnceImageAnalysisRepository extends MemoryImageAnalysisRepository 
 }
 
 describe("ImageAnalysisService", () => {
+  it("persists each physical receipt before a failing meal-result write", async () => {
+    const fetch = vi.fn(async () => fakeProviderResponse());
+    vi.stubGlobal("fetch", fetch);
+    const values = await fixture(recordedAnalyzer());
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    vi.spyOn(values.repository, "succeed").mockImplementationOnce(async () => {
+      const evidence = (await values.repository.get("user-1", uploaded.id))!.attempts[0]!.evidence!;
+      expect(evidence.calls).toHaveLength(1);
+      expect(evidence.preparedCalls).toHaveLength(1);
+      expect(evidence.calls![0]!.callId).toBe(evidence.preparedCalls![0]!.callId);
+      expect(evidence.calls![0]!.usage?.totalTokens).toBe(120);
+      throw new Error("fake business write failure");
+    });
+    await expect(values.service.process(uploaded.id)).rejects.toThrow("fake business write failure");
+    const failed = (await values.repository.get("user-1", uploaded.id))!;
+    expect(failed.status).toBe("failed");
+    expect(failed.attempts[0]!.evidence!.calls).toHaveLength(1);
+    expect(failed.attempts[0]!.evidence!.preparedCalls).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(0);
+  });
+
+  it("does not call the provider when its durable preparation cannot be saved", async () => {
+    const fetch = vi.fn(async () => fakeProviderResponse());
+    vi.stubGlobal("fetch", fetch);
+    const values = await fixture(recordedAnalyzer());
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    vi.spyOn(values.repository, "prepareCall").mockRejectedValueOnce(new Error("fake database failure"));
+    await expect(values.service.process(uploaded.id)).rejects.toMatchObject({ code: "deepseek_call_preparation_failed", retryable: false });
+    const failed = (await values.repository.get("user-1", uploaded.id))!;
+    expect(failed.lastErrorCode).toBe("deepseek_call_preparation_failed");
+    expect(failed.attempts[0]!.evidence?.calls ?? []).toHaveLength(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps a received call through the failure fallback without dispatching another request", async () => {
+    const fetch = vi.fn(async () => fakeProviderResponse());
+    vi.stubGlobal("fetch", fetch);
+    const values = await fixture(recordedAnalyzer());
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    vi.spyOn(values.repository, "recordCalls").mockRejectedValueOnce(new Error("fake receipt write failure"));
+    await expect(values.service.process(uploaded.id)).rejects.toMatchObject({ code: "deepseek_call_recording_failed", retryable: false });
+    const failed = (await values.repository.get("user-1", uploaded.id))!;
+    expect(failed.lastErrorCode).toBe("deepseek_call_recording_failed");
+    expect(failed.attempts[0]!.evidence).toMatchObject({ preparedCalls: [expect.objectContaining({ configuredModel: "deepseek-flash" })],
+      calls: [expect.objectContaining({ status: "succeeded", providerRequestId: "fake-physical-request" })] });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(0);
+  });
+
+  it("checks the meal again before dispatch when it disappears during image reading", async () => {
+    const fetch = vi.fn(async () => fakeProviderResponse());
+    vi.stubGlobal("fetch", fetch);
+    const values = await fixture(recordedAnalyzer());
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    const open = values.mediaStore.open.bind(values.mediaStore);
+    vi.spyOn(values.mediaStore, "open").mockImplementationOnce(async key => {
+      await values.nutritionService.deleteMeal("user-1", values.meal.id, values.meal.revision);
+      return open(key);
+    });
+    await expect(values.service.process(uploaded.id)).rejects.toMatchObject({ code: "deepseek_request_cancelled", retryable: false });
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await values.repository.get("user-1", uploaded.id))?.attempts[0]?.evidence?.preparedCalls ?? []).toHaveLength(0);
+  });
+
+  it("preserves unresolved preparations across interruption and records a late receipt without restoring meal facts", async () => {
+    let dispatched!: () => void, release!: (response: Response) => void;
+    const started = new Promise<void>(resolve => { dispatched = resolve; });
+    const pending = new Promise<Response>(resolve => { release = resolve; });
+    const fetch = vi.fn(() => { dispatched(); return pending; });
+    vi.stubGlobal("fetch", fetch);
+    const values = await fixture(recordedAnalyzer());
+    const uploaded = await values.service.request("user-1", values.meal.id, "image/png", Readable.from(png));
+    const processing = values.service.process(uploaded.id);
+    await started;
+    const running = (await values.repository.get("user-1", uploaded.id))!;
+    expect(running.attempts[0]!.evidence!.preparedCalls).toHaveLength(1);
+    expect(running.attempts[0]!.evidence!.calls ?? []).toHaveLength(0);
+    await values.repository.expireInterrupted(new Date(Date.now() + 1000), new Date());
+    const interrupted = (await values.repository.get("user-1", uploaded.id))!;
+    expect(interrupted.lastErrorCode).toBe("analysis_interrupted");
+    expect(interrupted.attempts[0]!.evidence).toEqual(running.attempts[0]!.evidence);
+    release(fakeProviderResponse());
+    await processing;
+    const late = (await values.repository.get("user-1", uploaded.id))!;
+    expect(late.status).toBe("failed");
+    expect(late.candidate).toBeNull();
+    expect(late.attempts[0]!.evidence!.calls).toHaveLength(1);
+    expect(late.attempts[0]!.evidence!.preparedCalls).toEqual(running.attempts[0]!.evidence!.preparedCalls);
+    expect((await values.nutritionService.getMeal("user-1", values.meal.id)).contributions).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["succeeded", "failed"] as const)("retains a late %s call after photo cancellation without restoring business data", async outcome => {
     let resolveResponse!: (result: ImageAnalyzerResult) => void, rejectResponse!: (error: unknown) => void, modelStarted!: () => void;
     const response = new Promise<ImageAnalyzerResult>((resolve, reject) => { resolveResponse = resolve; rejectResponse = reject; });
