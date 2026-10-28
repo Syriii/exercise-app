@@ -8,7 +8,8 @@ import { mealResponse, serializeMeal } from "../nutrition/routes.js";
 import type { ImageReplacementInput } from "./replacement.js";
 
 const supportedImageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-const nullableNumber = { anyOf: [{ type: "null" }, { type: "number" }] } as const;
+// Keep known zeroes distinct from null under AJV's default coercion.
+const nullableNumber = { type: "number", nullable: true } as const;
 const nullableString = { anyOf: [{ type: "null" }, { type: "string" }] } as const;
 const candidateSchema = {
   anyOf: [

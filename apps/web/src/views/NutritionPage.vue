@@ -17,6 +17,7 @@ import ImageResultReplacement from "../features/nutrition/ImageResultReplacement
 import RetainedMealPhoto from "../features/nutrition/RetainedMealPhoto.vue";
 import { foodCatalogApi } from "../api/food-catalog";
 import { newFoodPickerDraft, type FoodPickerDraft, type FoodReplacementTarget } from "../features/nutrition/food-picker-draft";
+import type { PortionDraft } from "../features/nutrition/portion-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
 import { usePhotoIntakeStore } from "../stores/photo-intake";
 import MealReviewPhoto from "../features/nutrition/MealReviewPhoto.vue";
@@ -54,6 +55,48 @@ async function imageFoodsRefreshed(meal: Meal, analysis: MealImageAnalysis) {
 const reference = ref<DailyPlanningReference | null>(null);
 const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
+const portionDrafts = reactive<Record<string, PortionDraft>>({});
+const portionSavingIds = reactive(new Set<string>());
+const portionRequestInFlight = computed(() => portionSavingIds.size > 0);
+const orphanedPortionDrafts = computed(() => loading.value ? [] : Object.values(portionDrafts).filter(draft =>
+  !meals.value.some(meal => meal.id === draft.meal.id && meal.contributions.some(item => item.id === draft.item.id))));
+function startPortionDraft(meal: Meal, item: MealContribution) {
+  if (saving.value || portionRequestInFlight.value) return;
+  portionDrafts[item.id] ??= { meal, item, amount: item.portionAmount?.toString() ?? "", error: "" };
+}
+function cancelPortionDraft(id: string) {
+  if (!portionSavingIds.has(id)) delete portionDrafts[id];
+}
+async function savePortionDraft(id: string) {
+  const draft = portionDrafts[id];
+  if (!draft || saving.value || portionRequestInFlight.value || String(draft.amount).trim() === "") return;
+  portionSavingIds.add(id);
+  draft.error = "";
+  try {
+    const saved = await nutritionApi.changePortion(draft.meal, draft.item, Number(draft.amount));
+    if (portionDrafts[id] === draft) delete portionDrafts[id];
+    await portionSaved(saved);
+  } catch (cause) {
+    if (portionDrafts[id] === draft) draft.error = cause instanceof ApiError ? cause.message : "份量暂时保存不了，输入已保留。";
+  } finally { portionSavingIds.delete(id); }
+}
+async function returnToPortionDate(id: string) {
+  const draft = portionDrafts[id];
+  if (!draft || loading.value || saving.value || portionRequestInFlight.value || uploadingMealId.value !== null || actingAnalysisId.value !== null) return;
+  const date = draft.meal.localDate;
+  creatingMeal.value = false;
+  selectedDate.value = date;
+  await changeDate();
+  if (!pageActive || route.name !== "nutrition" || selectedDate.value !== date || portionDrafts[id] !== draft) return;
+  const owner = meals.value.find(meal => meal.id === draft.meal.id && meal.contributions.some(item => item.id === id));
+  if (!owner) return;
+  openMeals[owner.id] = true;
+  focusedMealId.value = owner.id;
+  await nextTick();
+  const input = document.getElementById(`meal-food-${id}`)?.querySelector<HTMLInputElement>('.portion-editor input');
+  input?.focus({ preventScroll: true });
+  input?.scrollIntoView({ block: "nearest" });
+}
 const foodPickerDrafts = reactive<Record<string, FoodPickerDraft>>({});
 function foodPickerDraft(mealId: string): FoodPickerDraft { return foodPickerDrafts[mealId] ??= newFoodPickerDraft(); }
 const foodReplacementDrafts = reactive<Record<string, { target: FoodReplacementTarget; picker: FoodPickerDraft }>>({});
@@ -165,7 +208,7 @@ const orphanedCorrection = computed(() => {
 });
 async function returnToCorrectionDate() {
   const correction = orphanedCorrection.value;
-  if (!correction || loading.value || saving.value || uploadingMealId.value !== null || actingAnalysisId.value !== null) return;
+  if (!correction || loading.value || saving.value || portionRequestInFlight.value || uploadingMealId.value !== null || actingAnalysisId.value !== null) return;
   const date = correction.meal.localDate, contributionId = correction.item.id;
   creatingMeal.value = false;
   selectedDate.value = date;
@@ -655,7 +698,7 @@ onBeforeUnmount(stopPolling);
     <header v-show="!creatingMeal" class="view-header">
       <div><h1>饮食</h1><p>记录吃了什么，查看当天营养。</p></div>
       <nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作">
-        <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
+        <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || portionRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
       </nav>
     </header>
     <p v-if="errorMessage && !visibleCorrection" class="form-error" role="alert">{{ errorMessage }} <button v-if="automaticPhotos === null" class="text-action" type="button" @click="loadPhotoSettings">重新读取设置</button><button v-if="editingContributionId" class="text-action" type="button" @click="resumeCorrection">继续未保存的修改</button></p>
@@ -671,8 +714,20 @@ onBeforeUnmount(stopPolling);
         </div>
       </dl>
       <div class="row-actions retained-correction-actions">
-        <button v-if="orphanedCorrection.meal.localDate !== selectedDate" class="action-button" type="button" :aria-label="`返回 ${orphanedCorrection.meal.localDate} 继续修改`" :disabled="loading || saving || uploadingMealId !== null || actingAnalysisId !== null" @click="returnToCorrectionDate">返回原日期</button>
+        <button v-if="orphanedCorrection.meal.localDate !== selectedDate" class="action-button" type="button" :aria-label="`返回 ${orphanedCorrection.meal.localDate} 继续修改`" :disabled="loading || saving || portionRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @click="returnToCorrectionDate">返回原日期</button>
         <button class="text-action" type="button" :disabled="saving" @click="cancelCorrection(orphanedCorrection.meal)">放弃未保存的修改</button>
+      </div>
+    </section>
+    <section v-for="draft in orphanedPortionDrafts" :key="draft.item.id" class="work-panel" :aria-label="`未保存的份量：${draft.item.label}`">
+      <h2>{{ draft.item.label }}的未保存份量</h2>
+      <p v-if="draft.meal.localDate !== selectedDate">这份修改属于 {{ draft.meal.localDate }}，输入已保留。</p>
+      <p v-else>原食物已不在当前记录中，无法保存这份份量；你可以查看或放弃修改。</p>
+      <p class="field-help">原记录：{{ draft.meal.localDate }} · {{ draft.meal.name ?? '餐食' }} · {{ draft.item.label }}</p>
+      <dl class="retained-correction-values"><div><dt>份量 {{ draft.item.portionUnit }}</dt><dd>{{ String(draft.amount).trim() === '' ? '未填写' : draft.amount }}</dd></div></dl>
+      <p v-if="draft.error" class="field-help">{{ draft.error }}</p>
+      <div class="row-actions retained-correction-actions">
+        <button v-if="draft.meal.localDate !== selectedDate" class="action-button" type="button" :aria-label="`返回 ${draft.meal.localDate} 继续修改${draft.item.label}份量`" :disabled="loading || saving || portionRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @click="returnToPortionDate(draft.item.id)">返回原日期</button>
+        <button class="text-action" type="button" :disabled="saving || portionSavingIds.has(draft.item.id)" @click="cancelPortionDraft(draft.item.id)">放弃这份份量修改</button>
       </div>
     </section>
     <section v-if="incomingPhotoDate" class="work-panel" aria-label="处理新选照片"><p>新照片用于 {{ incomingPhotoDate }}。当前未保存的记餐仍保留，请先选择要继续哪一餐。</p><div class="row-actions"><button class="action-button" type="button" :disabled="preparingImage || saving || acceptingIncomingPhoto" @click="acceptIncomingPhoto">放弃当前草稿，使用新照片</button><button class="text-action" type="button" :disabled="acceptingIncomingPhoto" @click="cancelIncomingPhoto">取消新照片，保留当前草稿</button></div></section>
@@ -754,7 +809,7 @@ onBeforeUnmount(stopPolling);
               </fieldset>
             </form>
             <ul v-if="meal.contributions.length" class="meal-items">
-              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :disabled="saving" @saved="portionSaved" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)">
+              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :draft="portionDrafts[item.id]" :saving="portionSavingIds.has(item.id)" :disabled="saving || portionRequestInFlight" @start-portion="startPortionDraft(meal, item)" @save-portion="savePortionDraft(item.id)" @cancel-portion="cancelPortionDraft(item.id)" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)">
                 <form v-if="item.id === editingContributionId" class="contribution-form" aria-label="修正食物" @submit.prevent="saveContribution(meal, item)">
                   <fieldset :disabled="saving">
                     <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>

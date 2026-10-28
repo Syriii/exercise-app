@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../../app.js";
@@ -28,7 +29,60 @@ type AnalysisResponse = {
   candidate: { energyKcal: number } | null;
 };
 
+async function correctedLegacyCandidate() {
+  const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
+  const identityService = new IdentityService({ repository: new MemoryIdentityRepository(), sessionSecret: config.sessionSecret, sessionTtlHours: config.sessionTtlHours });
+  const nutritionService = new NutritionService(new MemoryNutritionRepository());
+  const original = { energyKcal: 100, proteinGrams: 0, carbohydrateGrams: null, fatGrams: 0 };
+  const imageAnalysisService = new ImageAnalysisService({
+    repository: new MemoryImageAnalysisRepository(), mediaStore: new MemoryTemporaryMediaStore(), queue: new MemoryTaskQueue(),
+    analyzer: new FixedImageAnalyzer({ title: "本地旧整餐结果", observedFoods: [], ...original, confidence: "low", assumptions: [], uncertaintyNote: "仅本地固定测试" }),
+    nutritionService, maxUploadBytes: config.imageUploadMaxBytes,
+  });
+  const app = await buildApp({ config, checkDatabase: async () => undefined, identityService, imageAnalysisService, nutritionService, planningService: new PlanningService(new MemoryPlanningRepository()) });
+  apps.push(app);
+  const registration = await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { username: "nullable-image-route", password: "only local nullable image password" } });
+  expect(registration.statusCode, registration.body).toBe(201);
+  const owner = registration.json<{ id: string }>().id;
+  const headers = { cookie: String(registration.headers["set-cookie"]).split(";", 1)[0] };
+  const meal = await nutritionService.createMeal(owner, { occurredAt: "2026-10-28T04:00:00Z", localDate: "2026-10-28", timeZone: "UTC", name: "旧照片营养核对", note: null });
+  const uploaded = await imageAnalysisService.request(owner, meal.id, "image/png", Readable.from(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])), true);
+  await imageAnalysisService.process(uploaded.id);
+  const listed = await app.inject({ method: "GET", url: `/api/v1/image-analyses?mealId=${meal.id}`, headers });
+  expect(listed.statusCode, listed.body).toBe(200);
+  const analysis = listed.json<AnalysisResponse[]>()[0]!;
+  expect(analysis).toMatchObject({ status: "succeeded", candidate: original });
+  const currentMeal = await nutritionService.getMeal(owner, meal.id);
+  const input = { analysisRevision: analysis.revision, mealRevision: currentMeal.revision, mode: "whole_meal", label: "本地修正值", portionAmount: null, portionUnit: null, basisDescription: "旧照片结果修正", replaceExisting: false, deleteOriginal: false };
+  return { app, headers, owner, nutritionService, imageAnalysisService, mealId: meal.id, analysisId: analysis.id, input, original };
+}
+
 describe("image analysis routes", () => {
+  it.each([
+    { name: "zero protein and fat beside unknown carbohydrate", nutrients: { energyKcal: 111, proteinGrams: 0, carbohydrateGrams: null, fatGrams: 0 } },
+    { name: "zero energy and carbohydrate beside unknown fat", nutrients: { energyKcal: 0, proteinGrams: 4, carbohydrateGrams: 0, fatGrams: null } },
+    { name: "four explicitly known zeroes", nutrients: { energyKcal: 0, proteinGrams: 0, carbohydrateGrams: 0, fatGrams: 0 } },
+  ])("preserves $name when adopting and rereading a corrected legacy result", async ({ nutrients }) => {
+    const values = await correctedLegacyCandidate();
+    const adopted = await values.app.inject({ method: "POST", url: `/api/v1/image-analyses/${values.analysisId}/adopt`, headers: values.headers, payload: { ...values.input, ...nutrients } });
+    expect(adopted.statusCode, adopted.body).toBe(200);
+    expect(adopted.json()).toMatchObject({ analysis: { adoptedAt: expect.any(String), candidate: values.original }, meal: { contributions: [nutrients] } });
+    const saved = await values.app.inject({ method: "GET", url: "/api/v1/nutrition/meals?from=2026-10-28&to=2026-10-28", headers: values.headers });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(saved.json()).toMatchObject([{ id: values.mealId, contributions: [nutrients] }]);
+    expect((await values.nutritionService.getMeal(values.owner, values.mealId)).contributions).toEqual([expect.objectContaining(nutrients)]);
+  });
+
+  it("still rejects a legacy whole-meal correction with no known nutrients and keeps the original record", async () => {
+    const values = await correctedLegacyCandidate();
+    const adopted = await values.app.inject({ method: "POST", url: `/api/v1/image-analyses/${values.analysisId}/adopt`, headers: values.headers,
+      payload: { ...values.input, energyKcal: null, proteinGrams: null, carbohydrateGrams: null, fatGrams: null } });
+    expect(adopted.statusCode, adopted.body).toBe(400);
+    expect(adopted.json()).toMatchObject({ code: "invalid_nutrition_input" });
+    expect((await values.nutritionService.getMeal(values.owner, values.mealId)).contributions).toEqual([expect.objectContaining(values.original)]);
+    expect((await values.imageAnalysisService.list(values.owner, values.mealId))[0]).toMatchObject({ adoptedAt: null, imageAvailable: true, candidate: values.original });
+  });
+
   it("uploads, processes and adopts a corrected candidate for an authenticated meal", async () => {
     const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
     const identityService = new IdentityService({
