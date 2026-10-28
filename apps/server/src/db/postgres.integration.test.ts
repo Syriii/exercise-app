@@ -1302,6 +1302,81 @@ describe("PostgreSQL integration", () => {
     } finally { await restricted.close(); }
   });
 
+  it("exports one account snapshot while call receipts and meal results commit on another connection", async () => {
+    const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`export-snapshot-a-${randomUUID()}`, `export-snapshot-b-${randomUUID()}`]);
+    const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;
+    const context = new DatabaseUserContext(), restricted = createDatabase(apiRoleDatabaseUrl(), context);
+    const nutrition = new NutritionService(new PostgresNutritionRepository(restricted.database));
+    const images = new PostgresImageAnalysisRepository(database.database);
+    const exporter = new PostgresUserDataExporter(restricted.database);
+    const exportedAt = new Date("2026-10-28T04:00:00.000Z");
+    const connect = restricted.pool.connect.bind(restricted.pool);
+    let resume!: () => void, markAnalysisRead!: () => void;
+    const canContinue = new Promise<void>(resolveContinue => { resume = resolveContinue; });
+    const analysisRead = new Promise<void>(resolveRead => { markAnalysisRead = resolveRead; });
+    let resetClient: (() => void) | undefined;
+    let exporting: ReturnType<PostgresUserDataExporter["exportUserData"]> | undefined;
+    try {
+      const meal = await context.run(owner, () => nutrition.createMeal(owner, { occurredAt: "2026-10-28T04:00:00Z", localDate: "2026-10-28", timeZone: "UTC", name: "导出快照测试", note: null }));
+      const photo = await images.create(owner, meal.id, "image/png", { objectKey: `integration/${randomUUID()}.png`, byteSize: 128, sha256: "a".repeat(64) }, null, "snapshot-model", "snapshot-prompt");
+      const attempt = await images.beginAttempt(photo.id);
+      if (typeof attempt === "string") throw new Error(attempt);
+      const preparation = { callId: randomUUID(), preparedAt: "2026-10-28T03:59:59.000Z", configuredModel: "snapshot-model" };
+      expect(await images.prepareCall(photo.id, attempt.attemptId, preparation)).toBe(true);
+      const before = await context.run(owner, () => exporter.exportUserData(owner, exportedAt));
+      expect(before.data.meal_image_analysis_attempts).toEqual([expect.objectContaining({ id: attempt.attemptId, status: "running", evidence: { model: "snapshot-model", promptVersion: "snapshot-prompt", preparedCalls: [preparation] } })]);
+
+      // Pause after the analysis SELECT really finishes; keep its real transaction and RLS client.
+      restricted.pool.connect = (async () => {
+        restricted.pool.connect = connect;
+        const client = await connect();
+        const query = client.query;
+        resetClient = () => { client.query = query; };
+        client.query = (async (...args: unknown[]) => {
+          const result = await Reflect.apply(query, client, args);
+          const value = args[0];
+          const text = typeof value === "string" ? value : typeof value === "object" && value !== null && "text" in value ? value.text : null;
+          if (typeof text === "string" && text.includes('from "meal_image_analyses" record')) {
+            resetClient!();
+            markAnalysisRead();
+            await canContinue;
+          }
+          return result;
+        }) as typeof client.query;
+        return client;
+      }) as typeof restricted.pool.connect;
+      exporting = context.run(owner, () => exporter.exportUserData(owner, exportedAt));
+      await Promise.race([analysisRead, exporting.then(() => { throw new Error("export_did_not_pause_after_analysis_read"); })]);
+
+      const call = { callId: preparation.callId, startedAt: "2026-10-28T04:00:00.000Z", configuredModel: preparation.configuredModel, providerModel: "deepseek-flash", providerRequestId: "snapshot-response", status: "succeeded", usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, cost: null, durationMs: 40 };
+      const candidate = { title: "鸡蛋", observedFoods: [], foods: [{ label: "鸡蛋", portionAmount: 1, portionUnit: "个", note: null, energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5 }], energyKcal: 70, proteinGrams: 6, carbohydrateGrams: 1, fatGrams: 5, confidence: "low" as const, assumptions: [], uncertaintyNote: "测试" };
+      // The writer uses the independent worker pool and must commit before the export resumes.
+      await images.recordCalls(photo.id, attempt.attemptId, [call]);
+      expect(await images.succeed(photo.id, attempt.attemptId, candidate, call.providerRequestId, { candidate, providerRequestId: call.providerRequestId, calls: [call] })).toEqual({ status: "succeeded", tentativeHandled: true });
+      resume();
+      const during = await exporting;
+      expect(during).toEqual(before);
+
+      const after = await context.run(owner, () => exporter.exportUserData(owner, exportedAt));
+      expect(after.data.meal_image_analyses).toEqual([expect.objectContaining({ id: photo.id, status: "succeeded", raw_candidate: candidate })]);
+      expect(after.data.meal_image_analysis_attempts).toEqual([expect.objectContaining({ id: attempt.attemptId, status: "succeeded", evidence: expect.objectContaining({ preparedCalls: [preparation], calls: [call], candidate }) })]);
+      expect(after.data.meal_contributions).toEqual([expect.objectContaining({ meal_id: meal.id, source: "model_adopted", label: "鸡蛋" })]);
+      expect(after.data.meal_record_events!.length).toBeGreaterThan(before.data.meal_record_events!.length);
+      expect(after.data.meals).not.toEqual(before.data.meals);
+      for (const target of [other, owner]) {
+        const crossAccount = await context.run(other, () => exporter.exportUserData(target, exportedAt));
+        for (const table of ["meals", "meal_record_events", "meal_image_analyses", "meal_image_analysis_attempts", "meal_contributions"]) expect(crossAccount.data[table]).toEqual([]);
+        expect(crossAccount.lifecycle.temporaryMedia).toEqual([]);
+      }
+    } finally {
+      resume();
+      restricted.pool.connect = connect;
+      resetClient?.();
+      await exporting?.catch(() => undefined);
+      await restricted.close();
+    }
+  });
+
   it("retains meal photos and transactional usage history with isolated exports, rollback and deletion fencing", async () => {
     const accounts = await database.pool.query<{ id: string }>("insert into users (username, normalized_username) values ($1, $1), ($2, $2) returning id", [`usage-a-${randomUUID()}`, `usage-b-${randomUUID()}`]);
     const owner = accounts.rows[0]!.id, other = accounts.rows[1]!.id;

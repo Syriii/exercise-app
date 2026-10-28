@@ -142,13 +142,27 @@ const visibleCorrection = computed(() => !creatingMeal.value && meals.value.some
   && (!focusedMealId.value || focusedMealId.value === meal.id) && meal.contributions.some(item => item.id === editingContributionId.value)));
 async function resumeCorrection() {
   const owner = meals.value.find(meal => meal.contributions.some(item => item.id === editingContributionId.value));
-  if (!owner) return;
+  if (!owner) {
+    if (!orphanedCorrection.value) return;
+    creatingMeal.value = false;
+    await nextTick();
+    orphanedCorrectionPanel.value?.focus();
+    orphanedCorrectionPanel.value?.scrollIntoView({ block: "nearest" });
+    return;
+  }
   creatingMeal.value = false; openMeals[owner.id] = true; focusedMealId.value = owner.id;
   await nextTick();
   document.querySelector<HTMLElement>('.contribution-form')?.scrollIntoView({block:'nearest'});
 }
 const photoPanels = reactive<Record<string, boolean>>({});
 const correctionBases = reactive<Record<string, { meal: Meal; item: MealContribution }>>({});
+const orphanedCorrectionPanel = ref<HTMLElement | null>(null);
+const orphanedCorrection = computed(() => {
+  if (!editingContributionId.value || meals.value.some(meal => meal.contributions.some(item => item.id === editingContributionId.value))) return null;
+  const base = Object.values(correctionBases).find(value => value.item.id === editingContributionId.value);
+  const form = base && contributionForms[base.meal.id];
+  return base && form ? { meal: base.meal, item: base.item, form } : null;
+});
 const metadataDrafts = reactive<Record<string, { base: Meal; date: string; time: string; name: string; note: string }>>({});
 const nutrients = [
   { key: "energyKcal", label: "能量", unit: "kcal" },
@@ -636,6 +650,18 @@ onBeforeUnmount(stopPolling);
       </nav>
     </header>
     <p v-if="errorMessage && !visibleCorrection" class="form-error" role="alert">{{ errorMessage }} <button v-if="automaticPhotos === null" class="text-action" type="button" @click="loadPhotoSettings">重新读取设置</button><button v-if="editingContributionId" class="text-action" type="button" @click="resumeCorrection">继续未保存的修改</button></p>
+    <section v-if="orphanedCorrection" ref="orphanedCorrectionPanel" class="work-panel" tabindex="-1" aria-labelledby="orphaned-correction-title">
+      <h2 id="orphaned-correction-title">未保存的食物修正</h2>
+      <p>原食物已不在当前记录中，无法保存到原食物。放弃这份修改后可继续修正其他食物。</p>
+      <p class="field-help">原记录：{{ orphanedCorrection.meal.localDate }} · {{ orphanedCorrection.meal.name ?? '餐食' }} · {{ orphanedCorrection.item.label }}</p>
+      <dl class="retained-correction-values" aria-label="保留的修正输入">
+        <div><dt>食物名称</dt><dd>{{ orphanedCorrection.form.label || '未填写' }}</dd></div>
+        <div v-for="metric in nutrients" :key="metric.key">
+          <dt>{{ metric.label }} {{ metric.unit }}</dt><dd>{{ orphanedCorrection.form[metric.key] || '未填写' }}</dd>
+        </div>
+      </dl>
+      <div class="row-actions"><button class="text-action" type="button" :disabled="saving" @click="cancelCorrection(orphanedCorrection.meal)">放弃未保存的修改</button></div>
+    </section>
     <section v-if="incomingPhotoDate" class="work-panel" aria-label="处理新选照片"><p>新照片用于 {{ incomingPhotoDate }}。当前未保存的记餐仍保留，请先选择要继续哪一餐。</p><div class="row-actions"><button class="action-button" type="button" :disabled="preparingImage || saving || acceptingIncomingPhoto" @click="acceptIncomingPhoto">放弃当前草稿，使用新照片</button><button class="text-action" type="button" :disabled="acceptingIncomingPhoto" @click="cancelIncomingPhoto">取消新照片，保留当前草稿</button></div></section>
     <p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
     <p v-if="preparingImage" class="field-help" role="status">正在准备照片，请稍候…</p>
@@ -821,4 +847,8 @@ fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: .75rem; min-wid
 .nutrition-overview .metric-list > div { padding-block: .5rem; }
 .nutrition-overview dd { font-size: 1.15rem; }
 .nutrition-overview .metric-list > div > span { font-size: .85rem; }
+.retained-correction-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin: 0; }
+.retained-correction-values > div:first-child { grid-column: 1 / -1; }
+.retained-correction-values dt { font-size: .85rem; color: var(--color-muted); }
+.retained-correction-values dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 </style>

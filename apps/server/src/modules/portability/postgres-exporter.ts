@@ -50,26 +50,29 @@ export class PostgresUserDataExporter implements UserDataExporter {
   public constructor(private readonly database: Database) {}
 
   public async exportUserData(userId: string, exportedAt: Date): Promise<UserExportEnvelope> {
-    const [account] = await this.database.select({ id: users.id, username: users.username, role: users.role, status: users.status, passwordChangeRequired: users.passwordChangeRequired, createdAt: users.createdAt, updatedAt: users.updatedAt }).from(users).where(eq(users.id, userId)).limit(1);
-    if (account === undefined) throw new Error("export_account_not_found");
-    const data: Record<string, readonly unknown[]> = {};
-    const [photoSettings] = await this.database.select({ automatic: users.photoAnalysisAutomatic, consentAt: users.photoAnalysisConsentAt }).from(users).where(eq(users.id, userId));
-    data.photo_analysis_settings = photoSettings ? [photoSettings] : [];
-    for (const table of userExportRootTables) {
-      const result = await this.database.execute<{ value: unknown }>(sql`select (to_jsonb(record) - 'user_id' - 'object_key') as value from ${sql.raw(`"${table}"`)} record where record.user_id = ${userId} order by record.created_at nulls last`);
-      data[table] = result.rows.map((row) => row.value);
-    }
-    for (const [name, query] of Object.entries(childQueries)) {
-      const result = await this.database.execute<{ value: unknown }>(sql`${sql.raw(query)} ${userId}`);
-      data[name] = result.rows.map((row) => row.value);
-    }
-    const mediaResult = await this.database.execute<{ value: unknown }>(sql`select (to_jsonb(record) - 'user_id' - 'object_key') as value from temporary_media record where record.user_id = ${userId} order by record.created_at`);
-    return {
-      schemaVersion: "exercise-app-user-export-v1",
-      exportedAt: exportedAt.toISOString(),
-      account,
-      data,
-      lifecycle: { includesOriginalPhotos: false, excludesCredentialsAndSessions: true, temporaryMedia: mediaResult.rows.map((row) => row.value) },
-    };
+    // A receipt can arrive while exporting; every table must describe the same point in time.
+    return this.database.transaction(async (tx): Promise<UserExportEnvelope> => {
+      const [account] = await tx.select({ id: users.id, username: users.username, role: users.role, status: users.status, passwordChangeRequired: users.passwordChangeRequired, createdAt: users.createdAt, updatedAt: users.updatedAt }).from(users).where(eq(users.id, userId)).limit(1);
+      if (account === undefined) throw new Error("export_account_not_found");
+      const data: Record<string, readonly unknown[]> = {};
+      const [photoSettings] = await tx.select({ automatic: users.photoAnalysisAutomatic, consentAt: users.photoAnalysisConsentAt }).from(users).where(eq(users.id, userId));
+      data.photo_analysis_settings = photoSettings ? [photoSettings] : [];
+      for (const table of userExportRootTables) {
+        const result = await tx.execute<{ value: unknown }>(sql`select (to_jsonb(record) - 'user_id' - 'object_key') as value from ${sql.raw(`"${table}"`)} record where record.user_id = ${userId} order by record.created_at nulls last`);
+        data[table] = result.rows.map((row) => row.value);
+      }
+      for (const [name, query] of Object.entries(childQueries)) {
+        const result = await tx.execute<{ value: unknown }>(sql`${sql.raw(query)} ${userId}`);
+        data[name] = result.rows.map((row) => row.value);
+      }
+      const mediaResult = await tx.execute<{ value: unknown }>(sql`select (to_jsonb(record) - 'user_id' - 'object_key') as value from temporary_media record where record.user_id = ${userId} order by record.created_at`);
+      return {
+        schemaVersion: "exercise-app-user-export-v1",
+        exportedAt: exportedAt.toISOString(),
+        account,
+        data,
+        lifecycle: { includesOriginalPhotos: false, excludesCredentialsAndSessions: true, temporaryMedia: mediaResult.rows.map((row) => row.value) },
+      };
+    }, { isolationLevel: "repeatable read", accessMode: "read only" });
   }
 }
