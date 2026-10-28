@@ -2,7 +2,7 @@ import { apiRequest, uploadBinary } from "./client";
 
 export type MealContributionMode = "item" | "whole_meal" | "supplement";
 export interface NutrientValues { energyKcal: number | null; proteinGrams: number | null; carbohydrateGrams: number | null; fatGrams: number | null; }
-export interface MealContribution extends NutrientValues { id: string; mealId: string; mode: MealContributionMode; source: "manual" | "model_adopted"; reviewStatus: "tentative" | "confirmed"; sourceAnalysisId: string | null; label: string; portionAmount: number | null; portionUnit: string | null; basisDescription: string | null; revision: number; createdAt: string; updatedAt: string; }
+export interface MealContribution extends NutrientValues { id: string; mealId: string; mode: MealContributionMode; source: "manual" | "model_adopted"; reviewStatus: "tentative" | "confirmed"; sourceAnalysisId: string | null; label: string; portionAmount: number | null; portionUnit: string | null; basisDescription: string | null; intakeEvidence?: IntakeEvidence | null; revision: number; createdAt: string; updatedAt: string; }
 export interface Meal { id: string; occurredAt: string; localDate: string; timeZone: string; name: string | null; note: string | null; revision: number; contributions: MealContribution[]; createdAt: string; updatedAt: string; }
 export interface DietPlanEntry { id: string; localDate: string | null; mealName: string | null; foodPlan: string; note: string | null; }
 export interface DietPlan { id: string; dateFrom: string; dateTo: string; title: string; note: string | null; entries: DietPlanEntry[]; revision: number; archivedAt: string | null; createdAt: string; updatedAt: string; }
@@ -12,16 +12,33 @@ export interface FoodSearchResult extends NutrientValues { id: string; source: "
 export interface PublicFoodSearchResult extends NutrientValues { id: string; provider: "open_food_facts"; label: string; brand: string | null; barcode: string; basisAmount: 100; basisUnit: "g"; sourceUrl: string; }
 export interface NutritionValueSummary { recorded: number | null; target: number | null; remaining: number | null; complete: boolean; }
 export interface NutritionDaySummary { localDate: string; mealCount: number; coverageConfirmed: boolean; energyKcal: NutritionValueSummary; proteinGrams: NutritionValueSummary; carbohydrateGrams: NutritionValueSummary; fatGrams: NutritionValueSummary; }
-export type ContributionInput = Omit<MealContribution, "id" | "mealId" | "source" | "reviewStatus" | "sourceAnalysisId" | "revision" | "createdAt" | "updatedAt">;
+export type ContributionInput = Omit<MealContribution, "id" | "mealId" | "source" | "reviewStatus" | "sourceAnalysisId" | "intakeEvidence" | "revision" | "createdAt" | "updatedAt">;
+export type IntakeQuantitySource = "measured" | "merchant" | "user_estimate" | "photo_estimate";
+type IntakeQuantityNotes = { fraction?: number; note?: string };
+export type IntakeQuantityInput =
+  | ({ kind: "net_weight"; grams: number; excludedGrams?: number; source?: IntakeQuantitySource } & IntakeQuantityNotes)
+  | ({ kind: "gross_tare"; grossGrams: number; tareGrams: number; excludedGrams?: number } & IntakeQuantityNotes)
+  | ({ kind: "before_after"; beforeGrams: number; afterGrams: number; sameContainer: true; discardedGrams?: number } & IntakeQuantityNotes)
+  | ({ kind: "count"; amount: number; unit: string; source?: IntakeQuantitySource } & IntakeQuantityNotes)
+  | ({ kind: "photo_estimate"; amount: number; unit: string; reference: string } & IntakeQuantityNotes)
+  | ({ kind: "dimensions"; shape: "box"; lengthCm: number; widthCm: number; heightCm: number; densityGramsPerMl: number; reference: string } & IntakeQuantityNotes)
+  | ({ kind: "dimensions"; shape: "cylinder"; diameterCm: number; heightCm: number; densityGramsPerMl: number; reference: string } & IntakeQuantityNotes);
+export type IntakeBasisInput = { kind: "current_record" } | { kind: "label"; amount: number; unit: string; energyUnit: "kcal" | "kJ"; energy: number | null; proteinGrams: number | null; carbohydrateGrams: number | null; fatGrams: number | null; source: string };
+export interface IntakeInput { mealRevision: number; contributionRevision: number; quantity: IntakeQuantityInput; basis: IntakeBasisInput; }
+export interface IntakeEvidence { version: "intake-v1"; input: { quantity: IntakeQuantityInput; basis: IntakeBasisInput }; amount: number; unit: string; quantitySource: IntakeQuantitySource; basis: NutrientValues & { kind: "current_record" | "label"; amount: number; unit: string; source: string }; nutrients: NutrientValues; equations: Array<{ label: string; expression: string; result: number | null; unit: string }>; warnings: string[]; recordedAt: string; }
 export interface ImageFoodCandidate extends NutrientValues { label: string; portionAmount: number | null; portionUnit: string | null; note: string | null; }
 export interface ImageNutritionCandidate extends NutrientValues { foods?: ImageFoodCandidate[]; title: string; observedFoods: Array<{ label: string; estimatedPortion: string | null; note: string | null }>; confidence: "low" | "medium" | "high"; assumptions: string[]; uncertaintyNote: string; }
 export interface ImageAnalysisAttempt { id: string; sequence: number; status: "running" | "succeeded" | "failed"; providerRequestId: string | null; errorCode: string | null; startedAt: string; finishedAt: string | null; }
-export interface MealImageAnalysis { id: string; mealId: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "waiting"; replacement?: { operationId: string; mealRevision: number; undone: boolean } | null; model: string; promptVersion: string; candidate: ImageNutritionCandidate | null; lastErrorCode: string | null; imageAvailable: boolean; adoptedAt: string | null; revision: number; attempts: ImageAnalysisAttempt[]; createdAt: string; updatedAt: string; }
+export interface MealImageInputContext { role: "meal" | "before" | "after" | "label" | "detail"; note: string | null; referenceAnalysisIds: string[]; }
+export interface MealImageAnalysis {
+  readonly photoId?: string; id: string; mealId: string; status: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "waiting"; inputContext?: MealImageInputContext | null; replacement?: { operationId: string; mealRevision: number; undone: boolean } | null; model: string; promptVersion: string; candidate: ImageNutritionCandidate | null; lastErrorCode: string | null; imageAvailable: boolean; adoptedAt: string | null; revision: number; attempts: ImageAnalysisAttempt[]; createdAt: string; updatedAt: string; }
 export type ImageAdoptionInput = ContributionInput & { analysisRevision: number; mealRevision: number; mode: "whole_meal" | "supplement"; replaceExisting: boolean; deleteOriginal: boolean };
 
 export interface PhotoAnalysisSettings { automatic: boolean; consentAt: string | null; revision: number; }
 export interface ImageReplacementInput { operationId: string; mealRevision: number; analysisRevision: number; replaceIds: string[]; }
 export const nutritionApi = {
+  previewIntake: (mealId: string, itemId: string, input: IntakeInput) => apiRequest<IntakeEvidence>(`/api/v1/nutrition/meals/${mealId}/contributions/${itemId}/intake/preview`, { method: "POST", body: JSON.stringify(input) }),
+  applyIntake: (mealId: string, itemId: string, input: IntakeInput) => apiRequest<Meal>(`/api/v1/nutrition/meals/${mealId}/contributions/${itemId}/intake`, { method: "PUT", body: JSON.stringify(input) }),
   deleteOriginal: (id: string) => apiRequest<void>(`/api/v1/image-analyses/${id}/original`, { method: "DELETE" }),
   photoSettings: () => apiRequest<PhotoAnalysisSettings>("/api/v1/photo-analysis-settings"),
   savePhotoSettings: (input: { revision: number; automatic: boolean; consent: boolean }) => apiRequest<PhotoAnalysisSettings>("/api/v1/photo-analysis-settings", { method: "PUT", body: JSON.stringify(input) }),

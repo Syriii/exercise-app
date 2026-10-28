@@ -30,7 +30,7 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
     this.#settings.set(userId, saved); return clone(saved);
   }
   public async enqueueFailed(userId: string, id: string) { const value = this.#items.get(id); if (value?.userId === userId && value.status === "pending") this.#items.set(id, { ...value, status: "failed", lastErrorCode: "queue_unavailable", revision: value.revision + 1 }); }
-  public async reanalyze(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string }) {
+  public async reanalyze(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string; inputContext?: import("./types.js").MealImageInputContext | null }) {
     const value = this.#items.get(id);
     if (!value || value.userId !== userId) return "not_found" as const;
     if (value.revision !== revision) return "revision_conflict" as const;
@@ -50,10 +50,11 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
     };
   }
 
-  public async create(userId: string, mealId: string, contentType: string, stored: StoredTemporaryMedia, _expiresAt: Date | null, model: string, promptVersion: string, automatic = true): Promise<MealImageAnalysis> {
+  public async create(userId: string, mealId: string, contentType: string, stored: StoredTemporaryMedia, _expiresAt: Date | null, model: string, promptVersion: string, automatic = true, inputContext: import("./types.js").MealImageInputContext | null = null): Promise<MealImageAnalysis> {
     const now = new Date();
     const item: AnalysisWorkItem = { id: randomUUID(), userId, mealId, mediaId: randomUUID(), objectKey: stored.objectKey, contentType, mediaStatus: "available", status: automatic ? "pending" : "waiting", model, promptVersion, candidate: null, lastErrorCode: null, imageAvailable: true, adoptedAt: null, revision: 1, attempts: [], createdAt: now, updatedAt: now };
-    this.#items.set(item.id, item); this.#expires.set(item.mediaId, _expiresAt); this.#mediaBytes.set(item.mediaId, stored.byteSize); return clone(item);
+    const contextual = { ...item, photoId: item.mediaId, inputContext: clone(inputContext) };
+    this.#items.set(item.id, contextual); this.#expires.set(item.mediaId, _expiresAt); this.#mediaBytes.set(item.mediaId, stored.byteSize); return clone(contextual);
   }
   public async list(userId: string, mealId: string) { return clone([...this.#items.values()].filter((value) => value.userId === userId && value.mealId === mealId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())); }
   public async get(userId: string, id: string) { const value = this.#items.get(id); return value === undefined || value.userId !== userId ? null : clone(value); }
@@ -61,7 +62,7 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
   public async beginAttempt(id: string) {
     const value = this.#items.get(id); if (value === undefined) return "not_found" as const; if (value.status !== "pending") return "not_ready" as const;
     const attempt: ImageAnalysisAttempt = { id: randomUUID(), sequence: value.attempts.length + 1, status: "running", providerRequestId: null, errorCode: null, startedAt: new Date(), finishedAt: null, evidence: { model: value.model, promptVersion: value.promptVersion } };
-    const saved = { ...value, status: "running" as const, attempts: [...value.attempts, attempt], revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return { work: clone(saved), attemptId: attempt.id };
+    const saved = { ...value, status: "running" as const, attempts: [...value.attempts, { ...attempt, evidence: { ...attempt.evidence!, inputContext: clone(value.inputContext ?? null) } }], revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return { work: clone(saved), attemptId: attempt.id };
   }
   public async prepareCall(id: string, attemptId: string, preparation: import("./analyzer.js").ImageAnalyzerCallPreparation) {
     // NutritionService guards meal availability for the in-memory adapter; PG checks it transactionally.
@@ -93,7 +94,7 @@ export class MemoryImageAnalysisRepository implements ImageAnalysisRepository {
     this.#items.set(id, saved);
     return saved;
   }
-  public async retry(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string }) { const value = this.#items.get(id); if (value === undefined || value.userId !== userId) return "not_found" as const; if (value.revision !== revision) return "revision_conflict" as const; if (!["failed", "waiting", "cancelled"].includes(value.status) || !value.imageAvailable || (this.#expires.get(value.mediaId)?.getTime() ?? Infinity) <= Date.now()) return "not_failed" as const; const saved = { ...value, ...provider, status: "pending" as const, lastErrorCode: null, revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return clone(saved); }
+  public async retry(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string; inputContext?: import("./types.js").MealImageInputContext | null }) { const value = this.#items.get(id); if (value === undefined || value.userId !== userId) return "not_found" as const; if (value.revision !== revision) return "revision_conflict" as const; if (!["failed", "waiting", "cancelled"].includes(value.status) || !value.imageAvailable || (this.#expires.get(value.mediaId)?.getTime() ?? Infinity) <= Date.now()) return "not_failed" as const; const saved = { ...value, ...provider, status: "pending" as const, lastErrorCode: null, revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return clone(saved); }
   public async markAdopted(userId: string, id: string, revision: number) { const value = this.#items.get(id); if (value === undefined || value.userId !== userId) return "not_found" as const; if (value.revision !== revision) return "revision_conflict" as const; if (value.status !== "succeeded" || value.candidate === null || value.adoptedAt !== null) return "not_ready" as const; const saved = { ...value, adoptedAt: new Date(), revision: value.revision + 1, updatedAt: new Date() }; this.#items.set(id, saved); return clone(saved); }
   public async markMediaStatus(mediaId: string, status: "available" | "deletion_pending" | "deleted" | "missing") { for (const [id, value] of this.#items) if (value.mediaId === mediaId) this.#items.set(id, { ...value, imageAvailable: status === "available", mediaStatus: status, ...(status !== "available" && ["pending", "running", "waiting"].includes(value.status) ? { status: "cancelled" as const, lastErrorCode: "image_unavailable", revision: value.revision + 1, attempts: value.attempts.map(attempt => attempt.status === "running" ? { ...attempt, status: "failed" as const, errorCode: "image_unavailable", finishedAt: new Date() } : attempt) } : {}), updatedAt: new Date() }); }
 }

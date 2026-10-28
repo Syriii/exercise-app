@@ -4,7 +4,7 @@ import AppIcon from "../../components/AppIcon.vue";
 
 // Web adapter: Android can replace this boundary with native camera/photo picker.
 // Keep selection user-initiated and never request broad album permissions.
-const props = defineProps<{ file?: File; disabled?: boolean }>();
+const props = defineProps<{ file?: File; disabled?: boolean; purpose?: "meal" | "evidence" }>();
 const emit = defineEmits<{ change: [event: Event] }>();
 const camera = ref<HTMLInputElement | null>(null), gallery = ref<HTMLInputElement | null>(null);
 function pick(source: "camera" | "gallery") {
@@ -32,8 +32,8 @@ function selected(event: Event) {
       <button type="button" class="action-button" :disabled="disabled" @click="pick('camera')"><AppIcon name="camera" />拍摄照片</button>
       <button type="button" class="action-button" :disabled="disabled" @click="pick('gallery')"><AppIcon name="image" />从相册选择</button>
     </div>
-    <input ref="camera" class="photo-source-input" type="file" aria-label="拍摄餐食照片" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" :disabled="disabled" @change="selected" />
-    <input ref="gallery" class="photo-source-input" type="file" aria-label="从相册选择餐食照片" accept="image/jpeg,image/png,image/gif,image/webp" :disabled="disabled" @change="selected" />
+    <input ref="camera" class="photo-source-input" type="file" :aria-label="purpose === 'evidence' ? '拍摄依据照片' : '拍摄餐食照片'" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" :disabled="disabled" @change="selected" />
+    <input ref="gallery" class="photo-source-input" type="file" :aria-label="purpose === 'evidence' ? '从相册选择依据照片' : '从相册选择餐食照片'" accept="image/jpeg,image/png,image/gif,image/webp" :disabled="disabled" @change="selected" />
     <p class="field-help">支持 JPG、PNG、GIF、WebP。其他格式请先转换；照片会保留到你主动删除。</p>
   </div>
 </template>

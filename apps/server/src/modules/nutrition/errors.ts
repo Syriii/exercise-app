@@ -1,5 +1,8 @@
 export type NutritionErrorCode =
   | "invalid_nutrition_input"
+  | "invalid_intake_input"
+  | "intake_basis_required"
+  | "intake_unit_mismatch"
   | "food_catalog_changed"
   | "food_creation_conflict"
   | "food_not_found"

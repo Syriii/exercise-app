@@ -31,6 +31,7 @@ function savePortion() {
       <small>{{ nutrient(item.energyKcal, 'kcal') }} · 蛋白质 {{ nutrient(item.proteinGrams, 'g') }} · 碳水 {{ nutrient(item.carbohydrateGrams, 'g') }} · 脂肪 {{ nutrient(item.fatGrams, 'g') }}</small>
     </div>
     <div class="row-actions food-item-actions">
+      <slot name="actions" />
       <button v-if="item.mode === 'item' && item.portionAmount !== null && item.portionUnit" class="text-action" type="button" :disabled="disabled || saving" @click="startPortion">改份量</button>
       <button v-if="item.mode === 'item'" class="text-action" type="button" :disabled="disabled || saving" @click="emit('replace')">换食物</button>
       <details class="food-more"><summary>更多</summary><div class="row-actions">

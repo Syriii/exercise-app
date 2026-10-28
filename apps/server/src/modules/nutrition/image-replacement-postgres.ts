@@ -9,7 +9,7 @@ import type { MealContribution } from "./types.js";
 
 function values(item: ContributionInput) {
   return { mode: item.mode, source: item.source, reviewStatus: item.reviewStatus, sourceAnalysisId: item.sourceAnalysisId,
-    foodSnapshot: item.foodSnapshot ?? null, label: item.label, portionAmount: item.portionAmount?.toString() ?? null,
+    foodSnapshot: item.foodSnapshot ?? null, intakeEvidence: item.intakeEvidence ?? null, label: item.label, portionAmount: item.portionAmount?.toString() ?? null,
     portionUnit: item.portionUnit, basisDescription: item.basisDescription, energyKcal: item.energyKcal?.toString() ?? null,
     proteinGrams: item.proteinGrams?.toString() ?? null, carbohydrateGrams: item.carbohydrateGrams?.toString() ?? null,
     fatGrams: item.fatGrams?.toString() ?? null };

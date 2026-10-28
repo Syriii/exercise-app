@@ -1,0 +1,60 @@
+import { expect, it } from "vitest";
+import { buildApp } from "../../app.js";
+import { createTestConfig } from "../../testing/test-config.js";
+import { MemoryIdentityRepository } from "../identity/memory-repository.js";
+import { IdentityService } from "../identity/service.js";
+import { MemoryPlanningRepository } from "../planning/memory-repository.js";
+import { PlanningService } from "../planning/service.js";
+import { MemoryNutritionRepository } from "./memory-repository.js";
+import { NutritionService } from "./service.js";
+
+it("previews without mutation, applies to the original item, fences revisions, preserves history and isolates accounts", async () => {
+  const config = createTestConfig({ webDistDirectory: "/directory-that-does-not-exist" });
+  const identityService = new IdentityService({ repository: new MemoryIdentityRepository(), sessionSecret: config.sessionSecret, sessionTtlHours: config.sessionTtlHours });
+  const app = await buildApp({ config, checkDatabase: async () => undefined, identityService, planningService: new PlanningService(new MemoryPlanningRepository()), nutritionService: new NutritionService(new MemoryNutritionRepository()) });
+  try {
+    const register = async (username: string) => {
+      const response = await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { username, password: "correct horse battery staple" } });
+      return String(response.headers["set-cookie"]).split(";", 1)[0]!;
+    };
+    const cookie = await register("intake-owner"), other = await register("intake-other");
+    const request = (method: "GET" | "POST" | "PUT" | "PATCH", url: string, payload?: object, auth = cookie) => app.inject({ method, url, headers: { cookie: auth }, ...(payload ? { payload } : {}) });
+    const meal = (await request("POST", "/api/v1/nutrition/meals", { occurredAt: "2026-10-01T00:00:00Z", localDate: "2026-10-01", timeZone: "UTC", name: "测试午餐", note: null })).json();
+    const original = { mode: "item", label: "测试食物", portionAmount: 100, portionUnit: "g", basisDescription: "测试来源每100g", energyKcal: 120, proteinGrams: 0, carbohydrateGrams: null, fatGrams: 3, replaceExisting: false, mealRevision: meal.revision };
+    const added = (await request("POST", `/api/v1/nutrition/meals/${meal.id}/contributions`, original)).json();
+    const item = added.contributions[0];
+    expect(item.intakeEvidence).toBeNull();
+    const url = `/api/v1/nutrition/meals/${meal.id}/contributions/${item.id}/intake`;
+    const payload = { mealRevision: added.revision, contributionRevision: item.revision, quantity: { kind: "before_after", beforeGrams: 500, afterGrams: 250, discardedGrams: 50, sameContainer: true }, basis: { kind: "current_record" } };
+    expect((await app.inject({ method: "POST", url: `${url}/preview`, payload })).statusCode).toBe(401);
+    expect((await request("POST", `${url}/preview`, payload, other)).statusCode).toBe(404);
+    const preview = await request("POST", `${url}/preview`, payload);
+    expect(preview.statusCode, preview.body).toBe(200);
+    expect(preview.json()).toMatchObject({ version: "intake-v1", amount: 200, quantitySource: "measured", nutrients: { energyKcal: 240, proteinGrams: 0, carbohydrateGrams: null }, input: { quantity: payload.quantity } });
+    expect((await request("GET", "/api/v1/nutrition/meals?from=2026-10-01&to=2026-10-01")).json()[0]).toEqual(added);
+    const saved = await request("PUT", url, payload);
+    expect(saved.statusCode, saved.body).toBe(200);
+    let updated = saved.json();
+    expect(updated.contributions).toHaveLength(1);
+    expect(updated.contributions[0]).toMatchObject({ id: item.id, portionAmount: 200, energyKcal: 240, carbohydrateGrams: null, intakeEvidence: { input: { quantity: payload.quantity }, basis: { amount: 100, source: "测试来源每100g" } } });
+    expect((await request("PUT", url, payload)).statusCode).toBe(409);
+    const labelPayload = { mealRevision: updated.revision, contributionRevision: updated.contributions[0].revision, quantity: { kind: "count", amount: 2, unit: "份" }, basis: { kind: "label", amount: 1, unit: "份", energyUnit: "kJ", energy: 418.4, proteinGrams: 0, carbohydrateGrams: null, fatGrams: null, source: "测试包装标签" } };
+    const label = await request("PUT", url, labelPayload);
+    expect(label.statusCode, label.body).toBe(200);
+    updated = label.json();
+    expect(updated.contributions[0]).toMatchObject({ portionAmount: 2, portionUnit: "份", energyKcal: 200, proteinGrams: 0, carbohydrateGrams: null, intakeEvidence: { basis: { kind: "label" } } });
+    const portion = await request("PATCH", url.replace(/\/intake$/, "/portion"), { mealRevision: updated.revision, contributionRevision: updated.contributions[0].revision, portionAmount: 1 });
+    expect(portion.statusCode, portion.body).toBe(200);
+    expect(portion.json().contributions[0]).toMatchObject({ intakeEvidence: null, energyKcal: 100, carbohydrateGrams: null });
+    const revisions = await request("GET", `/api/v1/nutrition/meals/${meal.id}/contribution-revisions`);
+    expect(revisions.json().some((value: { intakeEvidence: unknown }) => value.intakeEvidence !== null && value.intakeEvidence !== undefined)).toBe(true);
+    expect((await request("GET", `/api/v1/nutrition/meals/${meal.id}/contribution-revisions`, undefined, other)).statusCode).toBe(404);
+    updated = portion.json();
+    const next = { ...payload, mealRevision: updated.revision, contributionRevision: updated.contributions[0].revision };
+    expect((await request("POST", `${url}/preview`, next)).json().code).toBe("intake_unit_mismatch");
+    for (const grams of [null, "0"]) expect((await request("POST", `${url}/preview`, { ...next, quantity: { kind: "net_weight", grams } })).statusCode).toBe(400);
+    const zero = await request("POST", `${url}/preview`, { ...next, quantity: { kind: "count", amount: 0, unit: "份" } });
+    expect(zero.statusCode, zero.body).toBe(200);
+    expect(zero.json()).toMatchObject({ amount: 0, nutrients: { energyKcal: 0, proteinGrams: 0, carbohydrateGrams: null } });
+  } finally { await app.close(); }
+});

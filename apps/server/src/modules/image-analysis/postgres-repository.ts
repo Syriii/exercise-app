@@ -33,7 +33,7 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
     return saved ?? "revision_conflict" as const;
   }
   public async enqueueFailed(userId: string, id: string) { await this.database.update(mealImageAnalyses).set({ status: "failed", lastErrorCode: "queue_unavailable", revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(and(eq(mealImageAnalyses.id, id), eq(mealImageAnalyses.userId, userId), eq(mealImageAnalyses.status, "pending"))); }
-  public async reanalyze(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string }) {
+  public async reanalyze(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string; inputContext?: import("./types.js").MealImageInputContext | null }) {
     const result = await this.database.transaction(async tx => {
       const [row] = await tx.select().from(mealImageAnalyses).where(and(eq(mealImageAnalyses.id, id), eq(mealImageAnalyses.userId, userId))).for("update");
       if (!row) return "not_found" as const;
@@ -41,7 +41,7 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       const [media] = await tx.select().from(temporaryMedia).where(eq(temporaryMedia.id, row.mediaId));
       const [meal] = await tx.select().from(meals).where(and(eq(meals.id, row.mealId), eq(meals.userId, userId), isNull(meals.deletedAt))).for("update");
       if (!meal || row.status !== "succeeded" || media?.status !== "available" || (media.expiresAt !== null && media.expiresAt <= new Date())) return "not_ready" as const;
-      const [saved] = await tx.insert(mealImageAnalyses).values({ userId, mealId: row.mealId, mediaId: row.mediaId, previousAnalysisId: row.id, model: provider?.model ?? row.model, promptVersion: provider?.promptVersion ?? row.promptVersion }).returning({ id: mealImageAnalyses.id });
+      const [saved] = await tx.insert(mealImageAnalyses).values({ userId, mealId: row.mealId, mediaId: row.mediaId, previousAnalysisId: row.id, model: provider?.model ?? row.model, promptVersion: provider?.promptVersion ?? row.promptVersion, inputContext: provider?.inputContext === undefined ? row.inputContext : provider.inputContext }).returning({ id: mealImageAnalyses.id });
       await tx.update(mealImageAnalyses).set({ revision: row.revision + 1, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id));
       return { id: saved!.id };
     });
@@ -53,11 +53,11 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
     const [media] = await this.database.select({ bytes: sql<number>`coalesce(sum(${temporaryMedia.byteSize}), 0)::bigint` }).from(temporaryMedia).where(and(eq(temporaryMedia.userId, userId), inArray(temporaryMedia.status, ["available", "deletion_pending"])));
     return { activeAnalyses: active?.count ?? 0, temporaryMediaBytes: Number(media?.bytes ?? 0) };
   }
-  public async create(userId: string, mealId: string, contentType: string, stored: StoredTemporaryMedia, expiresAt: Date | null, model: string, promptVersion: string, automatic = true): Promise<MealImageAnalysis> {
+  public async create(userId: string, mealId: string, contentType: string, stored: StoredTemporaryMedia, expiresAt: Date | null, model: string, promptVersion: string, automatic = true, inputContext: import("./types.js").MealImageInputContext | null = null): Promise<MealImageAnalysis> {
     const id = await this.database.transaction(async (tx) => {
       const [owned] = await tx.select({ id: meals.id }).from(meals).where(and(eq(meals.id, mealId), eq(meals.userId, userId), isNull(meals.deletedAt))).limit(1); if (owned === undefined) throw new Error("meal_not_found");
       const [media] = await tx.insert(temporaryMedia).values({ userId, objectKey: stored.objectKey, contentType, byteSize: stored.byteSize, sha256: stored.sha256, expiresAt }).returning({ id: temporaryMedia.id }); if (media === undefined) throw new Error("media_not_returned");
-      const [analysis] = await tx.insert(mealImageAnalyses).values({ userId, mealId, mediaId: media.id, model, promptVersion, status: automatic ? "pending" : "waiting" }).returning({ id: mealImageAnalyses.id }); if (analysis === undefined) throw new Error("analysis_not_returned"); return analysis.id;
+      const [analysis] = await tx.insert(mealImageAnalyses).values({ userId, mealId, mediaId: media.id, model, promptVersion, inputContext, status: automatic ? "pending" : "waiting" }).returning({ id: mealImageAnalyses.id }); if (analysis === undefined) throw new Error("analysis_not_returned"); return analysis.id;
     });
     const saved = await this.get(userId, id); if (saved === null) throw new Error("created analysis not found"); return saved;
   }
@@ -65,7 +65,7 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
   public async get(userId: string, id: string) { const [row] = await this.database.select().from(mealImageAnalyses).where(and(eq(mealImageAnalyses.id, id), eq(mealImageAnalyses.userId, userId))).limit(1); return row === undefined ? null : (await this.attachAttempts([row]))[0] ?? null; }
   public async getWorkItem(id: string): Promise<AnalysisWorkItem | null> { const [row] = await this.database.select({ analysis: mealImageAnalyses, media: temporaryMedia }).from(mealImageAnalyses).innerJoin(temporaryMedia, eq(mealImageAnalyses.mediaId, temporaryMedia.id)).where(eq(mealImageAnalyses.id, id)).limit(1); if (row === undefined) return null; const publicValue = (await this.attachAttempts([row.analysis]))[0]!; return { ...publicValue, userId: row.analysis.userId, mediaId: row.media.id, objectKey: row.media.objectKey, contentType: row.media.contentType, mediaStatus: row.media.status }; }
   public async beginAttempt(id: string) {
-    const attemptId = await this.database.transaction(async (tx) => { const [analysis] = await tx.select().from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update").limit(1); if (analysis === undefined) return "not_found" as const; if (analysis.status !== "pending") return "not_ready" as const; const [countRow] = await tx.select({ count: sql<number>`count(*)::int` }).from(mealImageAnalysisAttempts).where(eq(mealImageAnalysisAttempts.analysisId, id)); const [attempt] = await tx.insert(mealImageAnalysisAttempts).values({ analysisId: id, sequence: (countRow?.count ?? 0) + 1, evidence: { model: analysis.model, promptVersion: analysis.promptVersion } }).returning({ id: mealImageAnalysisAttempts.id }); await tx.update(mealImageAnalyses).set({ status: "running", revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id)); return attempt!.id; });
+    const attemptId = await this.database.transaction(async (tx) => { const [analysis] = await tx.select().from(mealImageAnalyses).where(eq(mealImageAnalyses.id, id)).for("update").limit(1); if (analysis === undefined) return "not_found" as const; if (analysis.status !== "pending") return "not_ready" as const; const [countRow] = await tx.select({ count: sql<number>`count(*)::int` }).from(mealImageAnalysisAttempts).where(eq(mealImageAnalysisAttempts.analysisId, id)); const [attempt] = await tx.insert(mealImageAnalysisAttempts).values({ analysisId: id, sequence: (countRow?.count ?? 0) + 1, evidence: { model: analysis.model, promptVersion: analysis.promptVersion, inputContext: analysis.inputContext } }).returning({ id: mealImageAnalysisAttempts.id }); await tx.update(mealImageAnalyses).set({ status: "running", revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id)); return attempt!.id; });
     if (attemptId === "not_found" || attemptId === "not_ready") return attemptId; const work = await this.getWorkItem(id); if (work === null) return "not_found"; return { work, attemptId };
   }
   public async prepareCall(id: string, attemptId: string, preparation: import("./analyzer.js").ImageAnalyzerCallPreparation) {
@@ -81,6 +81,16 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       const [media] = await tx.select({ status: temporaryMedia.status, expiresAt: temporaryMedia.expiresAt }).from(temporaryMedia)
         .where(eq(temporaryMedia.id, analysis.mediaId)).for("share").limit(1);
       if (media?.status !== "available" || (media.expiresAt !== null && media.expiresAt <= new Date())) return false;
+      const mediaIds = new Set([analysis.mediaId]);
+      for (const referenceId of analysis.inputContext?.referenceAnalysisIds ?? []) {
+        const [reference] = await tx.select({ mediaId: mealImageAnalyses.mediaId }).from(mealImageAnalyses)
+          .where(and(eq(mealImageAnalyses.id, referenceId), eq(mealImageAnalyses.userId, analysis.userId), eq(mealImageAnalyses.mealId, analysis.mealId))).limit(1);
+        if (!reference || referenceId === id || mediaIds.has(reference.mediaId)) return false;
+        const [referenceMedia] = await tx.select({ status: temporaryMedia.status, expiresAt: temporaryMedia.expiresAt }).from(temporaryMedia)
+          .where(and(eq(temporaryMedia.id, reference.mediaId), eq(temporaryMedia.userId, analysis.userId))).for("share").limit(1);
+        if (referenceMedia?.status !== "available" || (referenceMedia.expiresAt !== null && referenceMedia.expiresAt <= new Date())) return false;
+        mediaIds.add(reference.mediaId);
+      }
       const evidence = mergePreparedCall(attempt.evidence, preparation);
       if (!evidence) return false;
       if (evidence !== attempt.evidence) await tx.update(mealImageAnalysisAttempts).set({ evidence })
@@ -123,7 +133,7 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       const prior = await tx.select({ id: mealContributions.id }).from(mealContributions).where(eq(mealContributions.mealId, meal.id)).limit(1);
       const items = imageFoodContributions(analysis.id, candidate);
       const newer = await tx.select({ id: mealImageAnalyses.id }).from(mealImageAnalyses).where(and(eq(mealImageAnalyses.mealId, meal.id), ne(mealImageAnalyses.id, id), gte(mealImageAnalyses.createdAt, analysis.createdAt))).limit(1);
-      if (prior.length === 0 && items.length > 0 && newer.length === 0) {
+      if (prior.length === 0 && items.length > 0 && newer.length === 0 && !analysis.inputContext) {
         await tx.insert(mealContributions).values(items.map((item, sourceItemIndex) => ({
           ...item, mealId: meal.id, sourceItemIndex,
           portionAmount: item.portionAmount?.toString() ?? null,
@@ -157,7 +167,7 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
       await tx.update(mealImageAnalyses).set({ status: "failed", lastErrorCode: errorCode, revision: sql`${mealImageAnalyses.revision} + 1`, updatedAt: new Date() }).where(eq(mealImageAnalyses.id, id));
     });
   }
-  public async retry(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string }) {
+  public async retry(userId: string, id: string, revision: number, provider?: { model: string; promptVersion: string; inputContext?: import("./types.js").MealImageInputContext | null }) {
     const result = await this.database.transaction(async tx => {
       const [row] = await tx.select().from(mealImageAnalyses).where(and(eq(mealImageAnalyses.id, id), eq(mealImageAnalyses.userId, userId))).for("update");
       if (!row) return "not_found" as const;
@@ -187,5 +197,5 @@ export class PostgresImageAnalysisRepository implements ImageAnalysisRepository 
     });
   }
 
-  private async attachAttempts(rows: readonly (typeof mealImageAnalyses.$inferSelect)[]): Promise<MealImageAnalysis[]> { if (rows.length === 0) return []; const attempts = await this.database.select().from(mealImageAnalysisAttempts).where(inArray(mealImageAnalysisAttempts.analysisId, rows.map((row) => row.id))).orderBy(asc(mealImageAnalysisAttempts.sequence)); const grouped = new Map<string, ImageAnalysisAttempt[]>(); for (const row of attempts) grouped.set(row.analysisId, [...(grouped.get(row.analysisId) ?? []), { id: row.id, sequence: row.sequence, status: row.status, providerRequestId: row.providerRequestId, errorCode: row.errorCode, startedAt: row.startedAt, finishedAt: row.finishedAt, evidence: row.evidence }]); const mediaRows = await this.database.select({ id: temporaryMedia.id, status: temporaryMedia.status, expiresAt: temporaryMedia.expiresAt }).from(temporaryMedia).where(inArray(temporaryMedia.id, rows.map((row) => row.mediaId))); const media = new Map(mediaRows.map((row) => [row.id, row.status === "available" && (row.expiresAt === null || row.expiresAt > new Date())])); return rows.map((row) => ({ id: row.id, mealId: row.mealId, status: row.status, model: row.model, promptVersion: row.promptVersion, candidate: row.rawCandidate as unknown as ImageNutritionCandidate | null, lastErrorCode: row.lastErrorCode, imageAvailable: media.get(row.mediaId) === true, adoptedAt: row.adoptedAt, revision: row.revision, attempts: grouped.get(row.id) ?? [], createdAt: row.createdAt, updatedAt: row.updatedAt })); }
+  private async attachAttempts(rows: readonly (typeof mealImageAnalyses.$inferSelect)[]): Promise<MealImageAnalysis[]> { if (rows.length === 0) return []; const attempts = await this.database.select().from(mealImageAnalysisAttempts).where(inArray(mealImageAnalysisAttempts.analysisId, rows.map((row) => row.id))).orderBy(asc(mealImageAnalysisAttempts.sequence)); const grouped = new Map<string, ImageAnalysisAttempt[]>(); for (const row of attempts) grouped.set(row.analysisId, [...(grouped.get(row.analysisId) ?? []), { id: row.id, sequence: row.sequence, status: row.status, providerRequestId: row.providerRequestId, errorCode: row.errorCode, startedAt: row.startedAt, finishedAt: row.finishedAt, evidence: row.evidence }]); const mediaRows = await this.database.select({ id: temporaryMedia.id, status: temporaryMedia.status, expiresAt: temporaryMedia.expiresAt }).from(temporaryMedia).where(inArray(temporaryMedia.id, rows.map((row) => row.mediaId))); const media = new Map(mediaRows.map((row) => [row.id, row.status === "available" && (row.expiresAt === null || row.expiresAt > new Date())])); return rows.map((row) => ({ id: row.id, photoId: row.mediaId, mealId: row.mealId, status: row.status, model: row.model, promptVersion: row.promptVersion, inputContext: row.inputContext, candidate: row.rawCandidate as unknown as ImageNutritionCandidate | null, lastErrorCode: row.lastErrorCode, imageAvailable: media.get(row.mediaId) === true, adoptedAt: row.adoptedAt, revision: row.revision, attempts: grouped.get(row.id) ?? [], createdAt: row.createdAt, updatedAt: row.updatedAt })); }
 }

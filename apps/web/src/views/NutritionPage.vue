@@ -4,7 +4,7 @@ import { returnToHistory } from "../support/history-return";
 import { useRoute, useRouter } from "vue-router";
 
 import { ApiError } from "../api/client";
-import { nutritionApi, type ContributionInput, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary } from "../api/nutrition";
+import { nutritionApi, type ContributionInput, type IntakeEvidence, type Meal, type MealContribution, type MealContributionMode, type MealImageAnalysis, type NutritionDaySummary } from "../api/nutrition";
 import { planningApi, type DailyPlanningReference } from "../api/planning";
 import AppShell from "../app/AppShell.vue";
 import MealFoodItem from "../features/nutrition/MealFoodItem.vue";
@@ -21,6 +21,13 @@ import type { PortionDraft } from "../features/nutrition/portion-draft";
 import { formatFileSize, prepareMealImage, type PreparedMealImage } from "../features/nutrition/image-compression";
 import { usePhotoIntakeStore } from "../stores/photo-intake";
 import MealReviewPhoto from "../features/nutrition/MealReviewPhoto.vue";
+import IntakeEditor from "../features/nutrition/IntakeEditor.vue";
+import IntakeCalculation from "../features/nutrition/IntakeCalculation.vue";
+import MealSuggestions from "../features/nutrition/MealSuggestions.vue";
+import MealPhotoEvidence from "../features/nutrition/MealPhotoEvidence.vue";
+import { intakeInput, intakeMethodLabels, newIntakeDraft, retainedIntakeInputs, type IntakeDraft } from "../features/nutrition/intake-draft";
+import type { MealSuggestionDraft } from "../features/nutrition/meal-suggestions";
+import { clearPhotoEvidenceDraft, createPhotoEvidenceDraft, hasPhotoEvidenceDraft, photoRoleLabels, type PhotoEvidenceDraft } from "../features/nutrition/photo-evidence-api";
 
 interface ContributionForm { mode: MealContributionMode; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; saveAsTemplate: boolean; }
 interface ImageAdoptionForm { mode: "whole_meal" | "supplement"; label: string; portionAmount: string; portionUnit: string; basisDescription: string; energyKcal: string; proteinGrams: string; carbohydrateGrams: string; fatGrams: string; replaceExisting: boolean; deleteOriginal: boolean; }
@@ -55,6 +62,107 @@ async function imageFoodsRefreshed(meal: Meal, analysis: MealImageAnalysis) {
 const reference = ref<DailyPlanningReference | null>(null);
 const summary = ref<NutritionDaySummary | null>(null);
 const meals = ref<Meal[]>([]);
+const photoEvidenceDrafts = reactive<Record<string, { meal: Meal; draft: PhotoEvidenceDraft }>>({});
+function photoEvidenceDraft(meal: Meal): PhotoEvidenceDraft { return (photoEvidenceDrafts[meal.id] ??= { meal, draft: createPhotoEvidenceDraft() }).draft; }
+const orphanedPhotoEvidenceDrafts = computed(() => loading.value ? [] : Object.values(photoEvidenceDrafts).filter(value =>
+  hasPhotoEvidenceDraft(value.draft) && !meals.value.some(meal => meal.id === value.meal.id)));
+async function returnToPhotoEvidenceDate(mealId: string) {
+  const value = photoEvidenceDrafts[mealId];
+  if (!value || loading.value || saving.value || intakeRequestInFlight.value || portionRequestInFlight.value || uploadingMealId.value !== null || actingAnalysisId.value !== null) return;
+  creatingMeal.value = false; selectedDate.value = value.meal.localDate; await changeDate();
+  if (!pageActive || route.name !== 'nutrition' || selectedDate.value !== value.meal.localDate || !meals.value.some(meal => meal.id === mealId)) return;
+  openMeals[mealId] = true; focusedMealId.value = mealId; photoPanels[mealId] = true;
+  await nextTick(); document.getElementById(`meal-recognition-details-${mealId}`)?.scrollIntoView({ block: 'nearest' });
+}
+const intakeDrafts = reactive<Record<string, IntakeDraft>>({});
+const recordedCalculationViews = reactive<Record<string, { key: string; evidence: IntakeEvidence | null; error: string }>>({});
+const recordedCalculationOpen = reactive<Record<string, boolean>>({});
+const intakeRequestIds = reactive(new Set<string>());
+const intakeRequestInFlight = computed(() => intakeRequestIds.size > 0);
+async function showRecordedCalculation(meal: Meal, item: MealContribution) {
+  if (intakeRequestInFlight.value || saving.value || portionRequestInFlight.value) return;
+  recordedCalculationOpen[item.id] = !recordedCalculationOpen[item.id];
+  if (!recordedCalculationOpen[item.id]) return;
+  const key = `${meal.revision}:${item.revision}`;
+  if (recordedCalculationViews[item.id]?.key === key && recordedCalculationViews[item.id]?.evidence) return;
+  recordedCalculationViews[item.id] = { key, evidence: null, error: '' };
+  const view = recordedCalculationViews[item.id]!;
+  intakeRequestIds.add(item.id);
+  try { view.evidence = await nutritionApi.previewIntake(meal.id, item.id, intakeInput(newIntakeDraft(meal, item))); }
+  catch (cause) { view.error = cause instanceof ApiError ? cause.message : '当前记录还缺少可计算的份量依据，请通过“记录吃入量”补充。'; }
+  finally { intakeRequestIds.delete(item.id); }
+}
+const orphanedIntakeDrafts = computed(() => loading.value ? [] : Object.values(intakeDrafts).filter(draft =>
+  !meals.value.some(meal => meal.id === draft.meal.id && meal.contributions.some(item => item.id === draft.item.id))));
+async function startIntakeDraft(meal: Meal, item: MealContribution) {
+  if (saving.value || portionRequestInFlight.value || intakeRequestInFlight.value) return;
+  intakeDrafts[item.id] ??= newIntakeDraft(meal, item);
+  await focusIntakeDraft(item.id);
+}
+async function focusIntakeDraft(id: string) {
+  await nextTick();
+  const panel = document.getElementById(`intake-${id}`);
+  panel?.querySelector<HTMLSelectElement>('select')?.focus({ preventScroll: true });
+  panel?.scrollIntoView({ block: 'nearest' });
+}
+function cancelIntakeDraft(id: string) { if (!intakeRequestIds.has(id)) delete intakeDrafts[id]; }
+function intakeChanged(meal: Meal, item: MealContribution) {
+  const draft = intakeDrafts[item.id];
+  return !!draft && (draft.meal.revision !== meal.revision || draft.item.revision !== item.revision);
+}
+async function previewIntake(id: string) {
+  const draft = intakeDrafts[id];
+  if (!draft || saving.value || portionRequestInFlight.value || intakeRequestInFlight.value) return;
+  draft.error = ''; draft.preview = null; draft.previewKey = null;
+  intakeRequestIds.add(id);
+  try {
+    const input = intakeInput(draft); const key = JSON.stringify(input);
+    const evidence = await nutritionApi.previewIntake(draft.meal.id, id, input);
+    if (intakeDrafts[id] === draft && JSON.stringify(intakeInput(draft)) === key) { draft.preview = evidence; draft.previewKey = key; }
+  } catch (cause) {
+    if (intakeDrafts[id] === draft) draft.error = cause instanceof Error ? cause.message : '暂时无法预览，输入已保留。';
+  } finally { intakeRequestIds.delete(id); }
+}
+async function saveIntake(id: string) {
+  const draft = intakeDrafts[id];
+  if (!draft?.preview || !draft.previewKey || saving.value || portionRequestInFlight.value || intakeRequestInFlight.value) return;
+  draft.error = ''; intakeRequestIds.add(id);
+  try {
+    const input = intakeInput(draft);
+    if (JSON.stringify(input) !== draft.previewKey) { draft.preview = null; draft.previewKey = null; throw new Error('输入已变化，请重新预览后保存。'); }
+    const saved = await nutritionApi.applyIntake(draft.meal.id, id, input);
+    if (intakeDrafts[id] === draft) delete intakeDrafts[id];
+    await portionSaved(saved);
+    notice.value = '实际吃入量与计算依据已保存，其他食物保留';
+  } catch (cause) {
+    if (intakeDrafts[id] === draft) draft.error = cause instanceof ApiError ? cause.message : '暂时无法确认保存结果，输入已保留。请重新读取原食物核对后再试。';
+  } finally { intakeRequestIds.delete(id); }
+}
+async function refreshIntakeBase(id: string) {
+  const draft = intakeDrafts[id];
+  if (!draft || saving.value || portionRequestInFlight.value || intakeRequestInFlight.value) return;
+  intakeRequestIds.add(id); draft.error = '';
+  try {
+    const latest = await nutritionApi.listMeals(draft.meal.localDate, draft.meal.localDate);
+    if (intakeDrafts[id] !== draft) return;
+    if (selectedDate.value === draft.meal.localDate) meals.value = latest;
+    const meal = latest.find(value => value.id === draft.meal.id); const item = meal?.contributions.find(value => value.id === id);
+    if (!meal || !item) throw new Error('原食物已不存在，输入保留供查看；无法另建记录代替保存。');
+    draft.meal = meal; draft.item = item; draft.preview = null; draft.previewKey = null;
+    notice.value = '已读取原食物最新版本，填写的输入保留；请重新预览';
+  } catch (cause) { if (intakeDrafts[id] === draft) draft.error = cause instanceof Error ? cause.message : '读取失败，输入已保留。'; }
+  finally { intakeRequestIds.delete(id); }
+}
+async function returnToIntakeDate(id: string) {
+  const draft = intakeDrafts[id];
+  if (!draft || loading.value || saving.value || portionRequestInFlight.value || intakeRequestInFlight.value || uploadingMealId.value !== null || actingAnalysisId.value !== null) return;
+  creatingMeal.value = false; selectedDate.value = draft.meal.localDate;
+  await changeDate();
+  if (!pageActive || route.name !== 'nutrition' || selectedDate.value !== draft.meal.localDate || intakeDrafts[id] !== draft) return;
+  const owner = meals.value.find(meal => meal.id === draft.meal.id && meal.contributions.some(item => item.id === id));
+  if (!owner) return;
+  openMeals[owner.id] = true; focusedMealId.value = owner.id; await focusIntakeDraft(id);
+}
 const portionDrafts = reactive<Record<string, PortionDraft>>({});
 const portionSavingIds = reactive(new Set<string>());
 const portionRequestInFlight = computed(() => portionSavingIds.size > 0);
@@ -124,9 +232,23 @@ async function selectionsSaved(meal: Meal) {
   try { await refreshSummary(); } catch { errorMessage.value = "食物已保存，汇总暂时刷新不了，请不要重复添加。"; }
 }
 const creatingMeal = ref(false);
+const showingMealSuggestions = ref(false);
 const newMealFoods = ref<FoodPickerDraft>({ ...newFoodPickerDraft(), open: true });
 const pendingManualMeal = ref<Meal | undefined>();
 const manualCreationUnknown = ref(false);
+async function useMealSuggestion(value: MealSuggestionDraft) {
+  if (saving.value || intakeRequestInFlight.value || portionRequestInFlight.value || preparingImage.value) return;
+  if (manualCreationUnknown.value) { errorMessage.value = '请先重新读取餐食列表，核对上次建立的结果后再使用搭配。'; return; }
+  const hasDraft = quickMealImage.value || newMealFoods.value.selected.length || newMealFoods.value.personalPending || mealForm.name.trim() || mealForm.note.trim();
+  if ((hasDraft || pendingManualMeal.value) && !window.confirm(pendingManualMeal.value
+    ? '已建立的餐食会保留。放弃当前未保存的食物选择，为这份搭配开启一份新草稿？'
+    : '放弃当前未保存的记餐草稿，改用这份搭配？')) return;
+  photoDraftGeneration++; quickMealImage.value = undefined; pendingManualMeal.value = undefined;
+  newMealFoods.value = { ...newFoodPickerDraft(), open: true, selected: value.selections.map(selection => ({ food: { ...selection.food }, amount: selection.amount })) };
+  mealForm.name = value.title; mealForm.note = ''; mealForm.time = currentTime();
+  showingMealSuggestions.value = false; await openMealComposer('food');
+  notice.value = '搭配已放入草稿，可改份量；保存后才计入饮食记录';
+}
 async function createManualMeal(): Promise<Meal> {
   if (pendingManualMeal.value) return pendingManualMeal.value;
   if (manualCreationUnknown.value) throw new Error("Check the meal list before another creation");
@@ -151,6 +273,7 @@ async function manualFoodsSaved(meal: Meal) {
   openMeals[meal.id] = true;
   focusedMealId.value = meal.id;
   creatingMeal.value = false;
+  showingMealSuggestions.value = false;
   pendingManualMeal.value = undefined;
   newMealFoods.value = { ...newFoodPickerDraft(), open: true };
   mealForm.name = ""; mealForm.note = "";
@@ -331,6 +454,7 @@ function resetDateScopedState() {
   summary.value = null;
   meals.value = [];
   creatingMeal.value = false;
+  showingMealSuggestions.value = false;
   pendingManualMeal.value = undefined;
   manualCreationUnknown.value = false;
   newMealFoods.value = { ...newFoodPickerDraft(), open: true };
@@ -698,7 +822,7 @@ onBeforeUnmount(stopPolling);
     <header v-show="!creatingMeal" class="view-header">
       <div><h1>饮食</h1><p>记录吃了什么，查看当天营养。</p></div>
       <nav class="view-header-actions nutrition-header-actions" aria-label="饮食快捷操作">
-        <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || portionRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
+        <label class="date-picker">查看日期<input v-model="selectedDate" type="date" :disabled="saving || portionRequestInFlight || intakeRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @change="changeDate" /></label>
       </nav>
     </header>
     <p v-if="errorMessage && !visibleCorrection" class="form-error" role="alert">{{ errorMessage }} <button v-if="automaticPhotos === null" class="text-action" type="button" @click="loadPhotoSettings">重新读取设置</button><button v-if="editingContributionId" class="text-action" type="button" @click="resumeCorrection">继续未保存的修改</button></p>
@@ -730,6 +854,22 @@ onBeforeUnmount(stopPolling);
         <button class="text-action" type="button" :disabled="saving || portionSavingIds.has(draft.item.id)" @click="cancelPortionDraft(draft.item.id)">放弃这份份量修改</button>
       </div>
     </section>
+    <section v-for="draft in orphanedIntakeDrafts" :key="`intake-${draft.item.id}`" class="work-panel retained-intake" :aria-label="`未保存的吃入量：${draft.item.label}`">
+      <h2>{{ draft.item.label }}的吃入量尚未保存</h2>
+      <p v-if="draft.meal.localDate !== selectedDate">这份输入属于 {{ draft.meal.localDate }}，已保留；返回原日期后可继续。</p>
+      <p v-else>原食物已不在当前记录中，输入保留供查看，无法保存到另一项食物。</p>
+      <p class="field-help">{{ draft.meal.localDate }} · {{ draft.meal.name ?? '餐食' }} · {{ intakeMethodLabels[draft.fields.method] }}</p>
+      <details><summary>查看保留的输入</summary><dl class="retained-correction-values"><div v-for="field in retainedIntakeInputs(draft)" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl><IntakeCalculation v-if="draft.preview" :evidence="draft.preview" /></details>
+      <p v-if="draft.error" class="form-error" role="alert">{{ draft.error }}</p>
+      <div class="row-actions retained-correction-actions"><button v-if="draft.meal.localDate !== selectedDate" class="action-button" type="button" :disabled="loading || saving || portionRequestInFlight || intakeRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @click="returnToIntakeDate(draft.item.id)">返回 {{ draft.meal.localDate }} 继续</button><button class="text-action" type="button" :disabled="intakeRequestIds.has(draft.item.id)" @click="cancelIntakeDraft(draft.item.id)">放弃这份吃入量输入</button></div>
+    </section>
+    <section v-for="value in orphanedPhotoEvidenceDrafts" :key="`photo-evidence-${value.meal.id}`" class="work-panel" :aria-label="`未保存的照片依据：${value.meal.name ?? '餐食'}`">
+      <h2>照片依据尚未保存</h2><p>{{ value.meal.localDate }} · {{ value.meal.name ?? '餐食' }}</p>
+      <p>{{ value.meal.localDate !== selectedDate ? '输入与待上传照片已保留，返回原日期后可继续。' : '原餐食已不在当前记录中，无法继续保存，输入保留供查看。' }}</p>
+      <dl class="retained-correction-values"><div><dt>照片用途</dt><dd>{{ photoRoleLabels[value.draft.role] }}</dd></div><div><dt>待上传照片</dt><dd>{{ value.draft.file?.name ?? '未选择' }}</dd></div><div><dt>说明</dt><dd>{{ value.draft.note || '未填写' }}</dd></div><div><dt>同餐参考图</dt><dd>{{ value.draft.referenceIds.length }} 张</dd></div></dl>
+      <p v-if="value.draft.busy" class="field-help" role="status">正在处理这份依据，完成前请保留输入。</p>
+      <div class="row-actions retained-correction-actions"><button v-if="value.meal.localDate !== selectedDate" class="action-button" type="button" :disabled="saving || intakeRequestInFlight || portionRequestInFlight" @click="returnToPhotoEvidenceDate(value.meal.id)">返回 {{ value.meal.localDate }} 继续</button><button class="text-action" type="button" :disabled="saving || value.draft.busy" @click="clearPhotoEvidenceDraft(value.draft)">放弃这份照片依据输入</button></div>
+    </section>
     <section v-if="incomingPhotoDate" class="work-panel" aria-label="处理新选照片"><p>新照片用于 {{ incomingPhotoDate }}。当前未保存的记餐仍保留，请先选择要继续哪一餐。</p><div class="row-actions"><button class="action-button" type="button" :disabled="preparingImage || saving || acceptingIncomingPhoto" @click="acceptIncomingPhoto">放弃当前草稿，使用新照片</button><button class="text-action" type="button" :disabled="acceptingIncomingPhoto" @click="cancelIncomingPhoto">取消新照片，保留当前草稿</button></div></section>
     <p v-if="notice" class="form-notice" role="status">{{ notice }}</p>
     <p v-if="preparingImage" class="field-help" role="status">正在准备照片，请稍候…</p>
@@ -751,11 +891,16 @@ onBeforeUnmount(stopPolling);
           <p>方法 {{ reference.methodVersion }}</p><p v-for="limitation in reference.result.limitations" :key="limitation">{{ limitation }}</p>
         </details>
       </section>
-      <div v-show="!creatingMeal" class="form-actions nutrition-record-actions" role="group" aria-label="记录餐食">
-        <button class="primary-button" type="button" aria-label="拍照记一餐" :disabled="saving" @click="openMealComposer('photo', 'camera')"><AppIcon name="camera" />拍照</button>
-        <button class="action-button" type="button" aria-label="相册记一餐" :disabled="saving" @click="openMealComposer('photo', 'gallery')"><AppIcon name="image" />相册</button>
-        <button class="text-action" type="button" :disabled="saving" @click="openMealComposer('food')"><AppIcon name="plus" />手动添加食物</button>
-      </div>
+      <section v-show="!creatingMeal" class="nutrition-entry" aria-labelledby="nutrition-entry-title">
+        <div class="panel-heading"><h2 id="nutrition-entry-title">记一餐</h2><button class="text-action" type="button" :aria-expanded="showingMealSuggestions" :disabled="saving || intakeRequestInFlight" @click="showingMealSuggestions = !showingMealSuggestions">{{ showingMealSuggestions ? '收起搭配' : '看看吃什么' }}</button></div>
+        <div class="form-actions nutrition-record-actions" role="group" aria-label="记录餐食">
+          <button class="primary-button" type="button" aria-label="拍照记一餐" :disabled="saving || intakeRequestInFlight" @click="openMealComposer('photo', 'camera')"><AppIcon name="camera" />拍照</button>
+          <button class="action-button" type="button" aria-label="相册记一餐" :disabled="saving || intakeRequestInFlight" @click="openMealComposer('photo', 'gallery')"><AppIcon name="image" />相册</button>
+          <button class="text-action" type="button" :disabled="saving || intakeRequestInFlight" @click="openMealComposer('food')"><AppIcon name="plus" />手动添加食物</button>
+        </div>
+        <p class="field-help">有秤记净重；没秤先按数量、吃入比例或照片估计，之后可补充。</p>
+      </section>
+      <MealSuggestions v-if="showingMealSuggestions && !creatingMeal" :key="selectedDate" :date="selectedDate" :disabled="saving || intakeRequestInFlight || portionRequestInFlight" @use="useMealSuggestion" @close="showingMealSuggestions = false" />
       <section v-show="creatingMeal" tabindex="-1" class="work-panel quick-meal-panel" aria-labelledby="quick-meal-title">
         <div class="panel-heading"><h2 id="quick-meal-title">快速记餐</h2><button class="text-action" type="button" :disabled="saving" @click="closeMealComposer">收起</button></div>
         <form class="inline-form meal-create-form" @submit.prevent="createMeal">
@@ -809,7 +954,11 @@ onBeforeUnmount(stopPolling);
               </fieldset>
             </form>
             <ul v-if="meal.contributions.length" class="meal-items">
-              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :draft="portionDrafts[item.id]" :saving="portionSavingIds.has(item.id)" :disabled="saving || portionRequestInFlight" @start-portion="startPortionDraft(meal, item)" @save-portion="savePortionDraft(item.id)" @cancel-portion="cancelPortionDraft(item.id)" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)">
+              <MealFoodItem v-for="item in meal.contributions" :key="item.id" :meal="meal" :item="item" :draft="portionDrafts[item.id]" :saving="portionSavingIds.has(item.id)" :disabled="saving || portionRequestInFlight || intakeRequestInFlight" @start-portion="startPortionDraft(meal, item)" @save-portion="savePortionDraft(item.id)" @cancel-portion="cancelPortionDraft(item.id)" @edit="editContribution(meal, item)" @replace="startFoodReplacement(meal, item)" @remove="deleteContribution(meal, item)" @favorite="favoriteFood(meal, item)">
+                <template #actions><button class="text-action" type="button" :disabled="saving || portionRequestInFlight || intakeRequestInFlight" :aria-label="`记录吃入量：${item.label}`" @click="startIntakeDraft(meal, item)">{{ intakeDrafts[item.id] ? '继续记录吃入量' : '记录吃入量' }}</button><button v-if="!item.intakeEvidence" class="text-action" type="button" :aria-expanded="!!recordedCalculationOpen[item.id]" :aria-controls="`recorded-calculation-${item.id}`" :disabled="saving || portionRequestInFlight || intakeRequestInFlight" @click="showRecordedCalculation(meal, item)">{{ recordedCalculationOpen[item.id] ? '收起计算' : '看怎么算' }}</button></template>
+                <details v-if="item.intakeEvidence" class="saved-intake-calculation"><summary>查看计算依据</summary><IntakeCalculation :evidence="item.intakeEvidence" /></details>
+                <div v-else-if="recordedCalculationOpen[item.id]" :id="`recorded-calculation-${item.id}`" class="recorded-calculation"><IntakeCalculation v-if="recordedCalculationViews[item.id]?.evidence && recordedCalculationViews[item.id]!.key === `${meal.revision}:${item.revision}`" :evidence="recordedCalculationViews[item.id]!.evidence!" /><p v-else class="field-help">{{ intakeRequestIds.has(item.id) ? '正在读取计算依据…' : recordedCalculationViews[item.id]?.error || '记录已更新，请收起后重新查看计算。' }}</p></div>
+                <IntakeEditor v-if="intakeDrafts[item.id]" :id="`intake-${item.id}`" :draft="intakeDrafts[item.id]!" :busy="intakeRequestIds.has(item.id)" :disabled="saving || portionRequestInFlight || (intakeRequestInFlight && !intakeRequestIds.has(item.id))" :changed="intakeChanged(meal, item)" @preview="previewIntake(item.id)" @save="saveIntake(item.id)" @cancel="cancelIntakeDraft(item.id)" @refresh="refreshIntakeBase(item.id)" />
                 <form v-if="item.id === editingContributionId" class="contribution-form" aria-label="修正食物" @submit.prevent="saveContribution(meal, item)">
                   <fieldset :disabled="saving">
                     <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p>
@@ -824,6 +973,7 @@ onBeforeUnmount(stopPolling);
             <FoodPicker v-if="foodReplacementDrafts[meal.id]" :id="`food-replacement-${meal.id}`" :key="foodReplacementDrafts[meal.id]!.target.id" :meal="meal" :draft="foodReplacementDrafts[meal.id]!.picker" :replacement="foodReplacementDrafts[meal.id]!.target" :disabled="saving" @busy="saving = $event" @saved="foodReplacementSaved" @refreshed="foodReplacementRefreshed" @cancel="delete foodReplacementDrafts[meal.id]" />
             <FoodPicker :meal="meal" :draft="foodPickerDraft(meal.id)" :disabled="saving" @busy="saving = $event" @saved="selectionsSaved" />
               <section v-show="photoPanels[meal.id]" :id="`meal-recognition-details-${meal.id}`" class="meal-image-panel" :aria-labelledby="`meal-image-${meal.id}`">
+                <MealPhotoEvidence :meal="meal" :analyses="analysesByMeal[meal.id] ?? []" :draft="photoEvidenceDraft(meal)" :disabled="saving || intakeRequestInFlight || portionRequestInFlight || uploadingMealId !== null || actingAnalysisId !== null" @saved="loadImageAnalyses(meal.id)" />
                 <div class="meal-image-panel__heading">
                   <div>
                     <strong :id="`meal-image-${meal.id}`">拍照估算</strong>
@@ -911,6 +1061,14 @@ onBeforeUnmount(stopPolling);
 .meal-metadata-form, .contribution-form { padding-block: .75rem; }
 fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: .75rem; min-width: 0; }
 .nutrition-record-actions { justify-content: flex-start; }
+.nutrition-entry { display: grid; gap: .5rem; min-width: 0; }
+.nutrition-entry .panel-heading, .nutrition-entry .form-actions { margin: 0; }
+.nutrition-entry .field-help { margin: 0; }
+.nutrition-record-actions > button { flex-shrink: 0; max-width: 100%; }
+.saved-intake-calculation, .recorded-calculation { min-width: 0; }
+.recorded-calculation { padding-block: .5rem; }
+.saved-intake-calculation > summary { min-height: 44px; }
+.retained-intake > details { min-width: 0; }
 .nutrition-overview { gap: .65rem; padding: 1rem; }
 .nutrition-overview .metric-list > div { padding-block: .5rem; }
 .nutrition-overview dd { font-size: 1.15rem; }

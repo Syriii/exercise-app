@@ -1,9 +1,10 @@
 import type { Readable } from "node:stream";
-import type { ImageAnalyzer, ImageAnalyzerCall } from "./analyzer.js";
+import type { ImageAnalyzer, ImageAnalyzerCall, ImageAnalyzerContext } from "./analyzer.js";
 import { DeepSeekImageAnalyzerError, imageAnalysisPromptVersion } from "./deepseek-analyzer.js";
 import { ImageAnalysisError } from "./errors.js";
 import type { ImageAnalysisRepository } from "./repository.js";
-import type { ImageNutritionCandidate } from "./types.js";
+import { contextualImagePromptVersion, validateImageInputContext } from "./input-context.js";
+import type { MealImageInputContext, ImageNutritionCandidate } from "./types.js";
 import type { TemporaryMediaStore } from "../media/temporary-media-store.js";
 import type { NutritionService } from "../nutrition/service.js";
 import type { MealContributionMode } from "../nutrition/types.js";
@@ -34,14 +35,16 @@ export class ImageAnalysisService {
     try { await this.options.queue.enqueue(mealImageQueue, id); }
     catch { await this.options.repository.enqueueFailed(userId, id); }
   }
-  public async reanalyze(userId: string, analysisId: string, revision: number) {
+  public async reanalyze(userId: string, analysisId: string, revision: number, context?: MealImageInputContext | null) {
     if (!this.options.analyzer) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
     const original = await this.options.repository.get(userId, analysisId);
     if (!original) throw new ImageAnalysisError("analysis_not_found", "找不到这张照片", 404);
     await this.options.nutritionService.getMeal(userId, original.mealId);
+    const inputContext = validateImageInputContext(context === undefined ? original.inputContext : context);
+    await this.referenceWork(userId, original.mealId, analysisId, inputContext);
     const usage = await this.options.repository.getUsage(userId);
     if (usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "请等待已有照片处理后重试", 429);
-    const result = await this.options.repository.reanalyze(userId, analysisId, revision, { model: this.options.analyzer.model, promptVersion: imageAnalysisPromptVersion });
+    const result = await this.options.repository.reanalyze(userId, analysisId, revision, { model: this.options.analyzer.model, promptVersion: inputContext ? contextualImagePromptVersion : imageAnalysisPromptVersion, inputContext });
     if (typeof result === "string") throw new ImageAnalysisError("analysis_revision_conflict", "照片状态已变化或原图已不可用，请刷新后查看", 409);
     await this.enqueue(userId, result.id);
     return (await this.options.repository.get(userId, result.id))!;
@@ -58,9 +61,12 @@ export class ImageAnalysisService {
   }
   public constructor(private readonly options: { repository: ImageAnalysisRepository; mediaStore: TemporaryMediaStore; queue: TaskQueue; analyzer: ImageAnalyzer | null; nutritionService: NutritionService; maxUploadBytes: number; maxActiveAnalysesPerAccount?: number; temporaryMediaMaxBytesPerAccount?: number; now?: () => Date }) {}
 
-  public async request(userId: string, mealId: string, declaredContentType: string | undefined, source: NodeJS.ReadableStream, automatic = true) {
+  public async request(userId: string, mealId: string, declaredContentType: string | undefined, source: NodeJS.ReadableStream, automatic = true, context?: MealImageInputContext | null) {
+    const inputContext = validateImageInputContext(context);
+    automatic = automatic && (!inputContext || inputContext.role === "meal");
     if (automatic && this.options.analyzer === null) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
     await this.options.nutritionService.getMeal(userId, mealId).catch(() => { throw new ImageAnalysisError("meal_not_found", "找不到这顿饭", 404); });
+    await this.referenceWork(userId, mealId, "", inputContext);
     const usage = await this.options.repository.getUsage(userId);
     if (automatic && usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "当前已有多张照片等待分析，请完成后再上传", 429);
     let stored;
@@ -71,7 +77,7 @@ export class ImageAnalysisService {
       if (usage.temporaryMediaBytes + stored.byteSize > (this.options.temporaryMediaMaxBytesPerAccount ?? 256 * 1024 * 1024)) throw new ImageAnalysisError("temporary_media_quota_reached", "照片存储空间已满，请下载并删除不再需要的照片，或联系管理员扩容", 429);
       const actualContentType = await detectImageType(await readAll(await this.options.mediaStore.open(stored.objectKey), this.options.maxUploadBytes));
       if (actualContentType === null || (declaredContentType !== undefined && declaredContentType !== actualContentType)) throw new ImageAnalysisError("invalid_image", "只接受内容真实匹配的 JPEG、PNG、GIF 或 WebP 图片", 400);
-      const created = await this.options.repository.create(userId, mealId, actualContentType, stored, null, this.options.analyzer?.model ?? "unconfigured", imageAnalysisPromptVersion, automatic);
+      const created = await this.options.repository.create(userId, mealId, actualContentType, stored, null, this.options.analyzer?.model ?? "unconfigured", inputContext ? contextualImagePromptVersion : imageAnalysisPromptVersion, automatic, inputContext);
       attached = true;
       if (automatic) await this.enqueue(userId, created.id);
       return (await this.options.repository.get(userId, created.id))!;
@@ -98,6 +104,12 @@ export class ImageAnalysisService {
     let completedCalls: readonly ImageAnalyzerCall[] | undefined;
     try {
       const image = await readAll(await this.options.mediaStore.open(started.work.objectKey), this.options.maxUploadBytes);
+      const references = await this.referenceWork(started.work.userId, started.work.mealId, analysisId, started.work.inputContext ?? null);
+      const context: ImageAnalyzerContext | undefined = started.work.inputContext ? {
+        input: started.work.inputContext,
+        references: await Promise.all(references.map(async work => ({ role: work.inputContext?.role ?? "detail", contentType: work.contentType,
+          image: await readAll(await this.options.mediaStore.open(work.objectKey), this.options.maxUploadBytes) }))),
+      } : undefined;
       const result = await this.options.analyzer.analyze(started.work.contentType, image, {
         beforeRequest: async preparation => {
           try { await this.options.nutritionService.getMeal(started.work.userId, started.work.mealId); }
@@ -105,17 +117,24 @@ export class ImageAnalysisService {
             if (error instanceof Error && "statusCode" in error && error.statusCode === 404) return false;
             throw error;
           }
-          return this.options.repository.prepareCall(analysisId, started.attemptId, preparation);
+          try { await this.referenceWork(started.work.userId, started.work.mealId, analysisId, started.work.inputContext ?? null); }
+          catch (error) { if (error instanceof ImageAnalysisError) return false; throw error; }
+          if (!(await this.options.repository.prepareCall(analysisId, started.attemptId, preparation))) return false;
+          try { await this.options.nutritionService.getMeal(started.work.userId, started.work.mealId); }
+          catch (error) { if (error instanceof Error && "statusCode" in error && error.statusCode === 404) return false; throw error; }
+          try { await this.referenceWork(started.work.userId, started.work.mealId, analysisId, started.work.inputContext ?? null); }
+          catch (error) { if (error instanceof ImageAnalysisError) return false; throw error; }
+          return true;
         },
         afterRequest: calls => this.options.repository.recordCalls(analysisId, started.attemptId, calls),
-      });
+      }, context);
       // A charged provider result must survive a later business-write failure.
       completedCalls = result.calls;
       const completed = await this.options.repository.succeed(analysisId, started.attemptId, result.candidate, result.providerRequestId, result);
       const newer = completed !== "not_running" && !completed.tentativeHandled
         ? (await this.options.repository.list(started.work.userId, started.work.mealId)).some(other => other.id !== analysisId && other.createdAt >= started.work.createdAt)
         : false;
-      if (completed !== "not_running" && !completed.tentativeHandled && !newer) {
+      if (completed !== "not_running" && !completed.tentativeHandled && !newer && !started.work.inputContext) {
         await this.options.nutritionService.ensureTentativeModelContribution(
           started.work.userId,
           started.work.mealId,
@@ -135,14 +154,16 @@ export class ImageAnalysisService {
     }
   }
 
-  public async retry(userId: string, analysisId: string, revision: number) {
+  public async retry(userId: string, analysisId: string, revision: number, context?: MealImageInputContext | null) {
     if (!this.options.analyzer) throw new ImageAnalysisError("image_analysis_unavailable", "图片分析尚未配置", 503);
     const original = await this.options.repository.get(userId, analysisId);
     if (!original) throw new ImageAnalysisError("analysis_not_found", "找不到这张照片", 404);
     await this.options.nutritionService.getMeal(userId, original.mealId);
+    const inputContext = validateImageInputContext(context === undefined ? original.inputContext : context);
+    await this.referenceWork(userId, original.mealId, analysisId, inputContext);
     const usage = await this.options.repository.getUsage(userId);
     if (usage.activeAnalyses >= (this.options.maxActiveAnalysesPerAccount ?? 3)) throw new ImageAnalysisError("image_analysis_capacity_reached", "当前已有多张照片等待分析，请稍后重试", 429);
-    const result = await this.options.repository.retry(userId, analysisId, revision, { model: this.options.analyzer.model, promptVersion: imageAnalysisPromptVersion });
+    const result = await this.options.repository.retry(userId, analysisId, revision, { model: this.options.analyzer.model, promptVersion: inputContext ? contextualImagePromptVersion : imageAnalysisPromptVersion, inputContext });
     if (result === "not_found") throw new ImageAnalysisError("analysis_not_found", "找不到这次图片分析", 404);
     if (result === "revision_conflict") throw new ImageAnalysisError("analysis_revision_conflict", "分析状态已经变化，请刷新后重试", 409);
     if (result === "not_failed") throw new ImageAnalysisError("analysis_not_ready", "照片正在处理或原图已不可用，请刷新后查看", 409);
@@ -192,6 +213,24 @@ export class ImageAnalysisService {
     await this.options.nutritionService.getMeal(userId, analysis.mealId);
     // Idempotent, including retries after a storage failure: deletion_pending is recoverable.
     await this.deleteOriginal(analysisId, true);
+  }
+
+  private async referenceWork(userId: string, mealId: string, primaryId: string, context: MealImageInputContext | null) {
+    const primary = primaryId ? await this.options.repository.getWorkItem(primaryId) : null;
+    if (primaryId && (!primary || primary.userId !== userId || primary.mealId !== mealId || !primary.imageAvailable
+      || !(await this.options.mediaStore.exists(primary.objectKey)))) throw new ImageAnalysisError("analysis_revision_conflict", "原图或照片状态已变化，请重新查看", 409);
+    const seen = new Set(primary ? [primary.mediaId] : []);
+    const result: import("./types.js").AnalysisWorkItem[] = [];
+    for (const id of context?.referenceAnalysisIds ?? []) {
+      // Check owner with the public accessor before reading any private media metadata.
+      const owned = await this.options.repository.get(userId, id);
+      if (!owned || owned.mealId !== mealId || id === primaryId) throw new ImageAnalysisError("reference_photo_unavailable", "参考照片已变化，请重新选择这一餐的照片", 404);
+      const work = await this.options.repository.getWorkItem(id);
+      if (!work || work.userId !== userId || work.mealId !== mealId || !work.imageAvailable || seen.has(work.mediaId)
+        || !(await this.options.mediaStore.exists(work.objectKey))) throw new ImageAnalysisError("reference_photo_unavailable", "参考照片已变化，请重新选择这一餐的照片", 404);
+      seen.add(work.mediaId); result.push(work);
+    }
+    return result;
   }
 
   private async deleteOriginal(analysisId: string, imageAvailable: boolean) {

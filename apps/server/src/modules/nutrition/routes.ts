@@ -8,6 +8,8 @@ import type { PublicFoodSearchResult } from "./public-food-provider.js";
 import type { DietPlan, DietPlanInput, FoodSearchResult, Meal, PersonalFoodTemplate } from "./types.js";
 import { foodCategories, type FoodCategory } from "./food-catalog.js";
 import type { FoodSelection } from "./service.js";
+import { intakeEvidenceSchema, intakeInputSchema } from "./intake-schema.js";
+import { validateIntakeInput, type IntakeInput } from "./intake.js";
 
 // One nullable type preserves both 0 and null under AJV's default coercion.
 const nullableNumber = { type: "number", nullable: true } as const;
@@ -24,7 +26,7 @@ const catalogPageResponse = { type: "object", additionalProperties: false, requi
   categories: { type: "object", additionalProperties: { type: "string" } }, warning: nullableString,
 } } as const;
 const contributionProperties = { foodSnapshot: { anyOf: [{ type: "null" }, foodDefinitionResponse] }, id: { type: "string", format: "uuid" }, mealId: { type: "string", format: "uuid" }, mode: { type: "string", enum: ["item", "whole_meal", "supplement"] }, source: { type: "string", enum: ["manual", "model_adopted"] }, reviewStatus: { type: "string", enum: ["tentative", "confirmed"] }, sourceAnalysisId: { anyOf: [{ type: "null" }, { type: "string", format: "uuid" }] }, label: { type: "string" }, portionAmount: nullableNumber, portionUnit: nullableString, basisDescription: nullableString, ...nutrientProperties, revision: { type: "integer" }, createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } as const;
-const contributionResponse = { type: "object", additionalProperties: false, required: Object.keys(contributionProperties), properties: contributionProperties } as const;
+const contributionResponse = { type: "object", additionalProperties: false, required: [...Object.keys(contributionProperties), "intakeEvidence"], properties: { ...contributionProperties, intakeEvidence: { anyOf: [{ type: "null" }, intakeEvidenceSchema] } } } as const;
 const mealProperties = { id: { type: "string", format: "uuid" }, occurredAt: { type: "string", format: "date-time" }, localDate: { type: "string", format: "date" }, timeZone: { type: "string" }, name: nullableString, note: nullableString, revision: { type: "integer" }, contributions: { type: "array", items: contributionResponse }, createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } as const;
 export const mealResponse = { type: "object", additionalProperties: false, required: Object.keys(mealProperties), properties: mealProperties } as const;
 const mealInput = { type: "object", additionalProperties: false, required: ["occurredAt", "localDate", "timeZone", "name", "note"], properties: { occurredAt: { type: "string", format: "date-time" }, localDate: { type: "string", format: "date" }, timeZone: { type: "string", minLength: 1, maxLength: 100 }, name: { anyOf: [{ type: "null" }, { type: "string", maxLength: 100 }] }, note: { anyOf: [{ type: "null" }, { type: "string", maxLength: 500 }] } } } as const;
@@ -42,7 +44,7 @@ const dietPlanResponse = { type: "object", additionalProperties: false, required
 type MealInput = { occurredAt: string; localDate: string; timeZone: string; name: string | null; note: string | null };
 type ContributionBody = ContributionRequest & { replaceExisting: boolean };
 
-export function serializeMeal(meal: Meal) { return { ...meal, occurredAt: meal.occurredAt.toISOString(), createdAt: meal.createdAt.toISOString(), updatedAt: meal.updatedAt.toISOString(), contributions: meal.contributions.map((value) => ({ ...value, foodSnapshot: value.foodSnapshot ?? null, createdAt: value.createdAt.toISOString(), updatedAt: value.updatedAt.toISOString() })) }; }
+export function serializeMeal(meal: Meal) { return { ...meal, occurredAt: meal.occurredAt.toISOString(), createdAt: meal.createdAt.toISOString(), updatedAt: meal.updatedAt.toISOString(), contributions: meal.contributions.map((value) => ({ ...value, foodSnapshot: value.foodSnapshot ?? null, intakeEvidence: value.intakeEvidence ?? null, createdAt: value.createdAt.toISOString(), updatedAt: value.updatedAt.toISOString() })) }; }
 function serializeTemplate(value: PersonalFoodTemplate) { return { ...value, createdAt: value.createdAt.toISOString(), updatedAt: value.updatedAt.toISOString() }; }
 function serializeFoodSearch(value: FoodSearchResult) { return { ...value, lastUsedAt: value.lastUsedAt.toISOString() }; }
 function serializePublicFoodSearch(value: PublicFoodSearchResult) { return value; }
@@ -81,6 +83,17 @@ export async function registerNutritionRoutes(app: FastifyInstance, options: { i
       } } },
     } }, response: { 201: mealResponse } },
     handler: async (r, reply) => reply.status(201).send(serializeMeal(await options.nutritionService.addFoodSelections(await userId(r), r.params.mealId, r.body.mealRevision, r.body.submissionId, r.body.selections))),
+  });
+
+  app.post<{ Params: { mealId: string; contributionId: string }; Body: IntakeInput }>("/api/v1/nutrition/meals/:mealId/contributions/:contributionId/intake/preview", {
+    preValidation: async request => { validateIntakeInput(request.body); },
+    schema: { params: twoIdParams, body: intakeInputSchema, response: { 200: intakeEvidenceSchema } },
+    handler: async r => options.nutritionService.previewIntake(await userId(r), r.params.mealId, r.params.contributionId, r.body),
+  });
+  app.put<{ Params: { mealId: string; contributionId: string }; Body: IntakeInput }>("/api/v1/nutrition/meals/:mealId/contributions/:contributionId/intake", {
+    preValidation: async request => { validateIntakeInput(request.body); },
+    schema: { params: twoIdParams, body: intakeInputSchema, response: { 200: mealResponse } },
+    handler: async r => serializeMeal(await options.nutritionService.applyIntake(await userId(r), r.params.mealId, r.params.contributionId, r.body)),
   });
 
   app.patch<{ Params: { mealId: string; contributionId: string }; Body: { mealRevision: number; contributionRevision: number; portionAmount: number } }>("/api/v1/nutrition/meals/:mealId/contributions/:contributionId/portion", {

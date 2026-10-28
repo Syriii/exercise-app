@@ -78,13 +78,14 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return (await response.json()) as T;
 }
 
-export function uploadBinary<T>(path: string, file: File, onProgress: (percent: number) => void): Promise<T> {
+export function uploadBinary<T>(path: string, file: File, onProgress: (percent: number) => void, headers: Readonly<Record<string, string>> = {}): Promise<T> {
   return new Promise((resolve, reject) => {
     const startedAt = performance.now();
     const request = new XMLHttpRequest();
     request.open("POST", path);
     request.withCredentials = true;
     request.setRequestHeader("content-type", file.type);
+    for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(Math.round((event.loaded / event.total) * 100));
     });

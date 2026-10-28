@@ -1,4 +1,5 @@
 import type { FoodDefinition, FoodProvenance } from "./food-catalog.js";
+import type { IntakeEvidence } from "./intake.js";
 
 export type MealContributionMode = "item" | "whole_meal" | "supplement";
 export type MealContributionSource = "manual" | "model_adopted";
@@ -12,6 +13,7 @@ export interface NutrientValues {
 }
 
 export interface MealContribution extends NutrientValues {
+  readonly intakeEvidence?: IntakeEvidence | null;
   readonly foodSnapshot?: FoodDefinition | null;
   readonly id: string;
   readonly mealId: string;
@@ -84,6 +86,7 @@ export interface MealRevision {
 }
 
 export interface MealContributionRevision extends NutrientValues {
+  readonly intakeEvidence?: IntakeEvidence | null;
   readonly foodSnapshot?: FoodDefinition | null;
   readonly id: string;
   readonly contributionId: string;

@@ -3,6 +3,12 @@ export type ImageAnalysisStatus = "pending" | "running" | "succeeded" | "failed"
 export interface PhotoAnalysisSettings { automatic: boolean; consentAt: Date | null; revision: number; }
 export type AnalysisAttemptStatus = "running" | "succeeded" | "failed";
 
+export interface MealImageInputContext {
+  readonly role: "meal" | "before" | "after" | "label" | "detail";
+  readonly note: string | null;
+  readonly referenceAnalysisIds: readonly string[];
+}
+
 export interface ImageFoodCandidate {
   readonly label: string;
   readonly portionAmount: number | null;
@@ -39,6 +45,7 @@ export interface AnalysisAttemptEvidence {
   /** Persisted intent only; absence of a matching call leaves the outcome unknown. */
   readonly preparedCalls?: readonly import("./analyzer.js").ImageAnalyzerCallPreparation[];
   readonly calls?: readonly import("./analyzer.js").ImageAnalyzerCall[];
+  readonly inputContext?: MealImageInputContext | null;
 }
 
 export interface ImageAnalysisAttempt {
@@ -53,6 +60,8 @@ export interface ImageAnalysisAttempt {
 }
 
 export interface MealImageAnalysis {
+  readonly photoId?: string;
+  readonly inputContext?: MealImageInputContext | null;
   readonly id: string;
   readonly mealId: string;
   readonly status: ImageAnalysisStatus;

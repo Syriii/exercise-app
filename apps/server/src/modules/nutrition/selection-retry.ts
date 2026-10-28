@@ -7,5 +7,6 @@ export function sameSelection(saved: MealContribution, input: ContributionInput 
     && saved.label === input.label && saved.portionAmount === input.portionAmount && saved.portionUnit === input.portionUnit
     && saved.energyKcal === input.energyKcal && saved.proteinGrams === input.proteinGrams
     && saved.carbohydrateGrams === input.carbohydrateGrams && saved.fatGrams === input.fatGrams
-    && isDeepStrictEqual(saved.foodSnapshot, input.foodSnapshot);
+    && isDeepStrictEqual(saved.foodSnapshot, input.foodSnapshot)
+    && isDeepStrictEqual(saved.intakeEvidence ?? null, input.intakeEvidence ?? null);
 }

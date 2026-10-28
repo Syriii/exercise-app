@@ -4,6 +4,7 @@ import { catalogFoods, externalFoodVersion, foodCategories, foodSnapshot, foodMa
 import type { ImageNutritionCandidate } from "../image-analysis/types.js";
 import { imageFoodContributions } from "./image-foods.js";
 import { NutritionError } from "./errors.js";
+import { calculateIntake, validateIntakeInput, type IntakeInput } from "./intake.js";
 import { PublicFoodProviderError, type PublicFoodProvider } from "./public-food-provider.js";
 import type { ContributionInput, FoodTemplateInput, MealMetadataInput, NutritionRepository } from "./repository.js";
 import type { DietPlanInput, FoodSearchResult, Meal, MealContributionMode, NutrientValues, NutritionDaySummary } from "./types.js";
@@ -265,6 +266,29 @@ export class NutritionService {
     return this.unwrapMeal(result);
   }
 
+  public async previewIntake(userId: string, mealId: string, contributionId: string, input: IntakeInput) {
+    validateIntakeInput(input);
+    const meal = await this.getMeal(userId, mealId);
+    const item = meal.contributions.find(value => value.id === contributionId);
+    if (item === undefined) throw new NutritionError("contribution_not_found", "找不到这项食物", 404);
+    if (meal.revision !== input.mealRevision || item.revision !== input.contributionRevision) this.revisionConflict();
+    return calculateIntake(item, { quantity: input.quantity, basis: input.basis });
+  }
+
+  public async applyIntake(userId: string, mealId: string, contributionId: string, input: IntakeInput): Promise<Meal> {
+    validateIntakeInput(input);
+    const meal = await this.getMeal(userId, mealId);
+    const item = meal.contributions.find(value => value.id === contributionId);
+    if (item === undefined) throw new NutritionError("contribution_not_found", "找不到这项食物", 404);
+    if (meal.revision !== input.mealRevision || item.revision !== input.contributionRevision) this.revisionConflict();
+    const evidence = calculateIntake(item, { quantity: input.quantity, basis: input.basis });
+    const saved: ContributionInput = { mode: item.mode, label: item.label, source: item.source, sourceAnalysisId: item.sourceAnalysisId,
+      reviewStatus: "confirmed", foodSnapshot: input.basis.kind === "current_record" ? item.foodSnapshot ?? null : null,
+      intakeEvidence: evidence, portionAmount: evidence.amount, portionUnit: evidence.unit,
+      basisDescription: evidence.basis.source.slice(0, 200), ...evidence.nutrients };
+    return this.unwrapMeal(await this.repository.updateContribution(userId, mealId, contributionId, input.mealRevision, input.contributionRevision, saved, false));
+  }
+
   public async changePortion(userId: string, mealId: string, contributionId: string, mealRevision: number, contributionRevision: number, amount: number): Promise<Meal> {
     nonnegative(amount, "份量", 100000);
     const meal = await this.getMeal(userId, mealId);
@@ -468,12 +492,12 @@ export class NutritionService {
     if (input.mode !== "item" && Object.values(nutrients).every((value) => value === null)) throw new NutritionError("invalid_nutrition_input", "至少填写一项营养值；未知项可以留空", 400);
     const label = cleanText(input.label, 100);
     if (label === null) throw new NutritionError("invalid_nutrition_input", "请填写食物名称", 400);
-    return { mode: input.mode, source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null, foodSnapshot: null, label, portionAmount: nonnegative(input.portionAmount, "份量", 100000), portionUnit: cleanText(input.portionUnit, 30), basisDescription: cleanText(input.basisDescription, 200), ...nutrients };
+    return { mode: input.mode, source: "manual", reviewStatus: "confirmed", sourceAnalysisId: null, foodSnapshot: null, intakeEvidence: null, label, portionAmount: nonnegative(input.portionAmount, "份量", 100000), portionUnit: cleanText(input.portionUnit, 30), basisDescription: cleanText(input.basisDescription, 200), ...nutrients };
   }
 
   private foodTemplateInput(input: ContributionRequest): FoodTemplateInput {
     const value = this.contributionInput({ ...input, mode: "item" });
-    const { mode: _mode, source: _source, reviewStatus: _reviewStatus, sourceAnalysisId: _sourceAnalysisId, foodSnapshot: _snapshot, ...template } = value;
+    const { mode: _mode, source: _source, reviewStatus: _reviewStatus, sourceAnalysisId: _sourceAnalysisId, foodSnapshot: _snapshot, intakeEvidence: _evidence, ...template } = value;
     return template;
   }
 

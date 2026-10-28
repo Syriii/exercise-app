@@ -15,6 +15,7 @@ import { IdentityError } from "./modules/identity/errors.js";
 import { registerIdentityRoutes, sessionCookieName } from "./modules/identity/routes.js";
 import type { IdentityService } from "./modules/identity/service.js";
 import { NutritionError } from "./modules/nutrition/errors.js";
+import { registerMealSuggestionRoutes } from "./modules/nutrition/meal-suggestions.js";
 import { registerNutritionRoutes } from "./modules/nutrition/routes.js";
 import type { NutritionService } from "./modules/nutrition/service.js";
 import { registerOperationsRoutes } from "./modules/operations/routes.js";
@@ -64,6 +65,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
             redact: [
               "req.headers.authorization",
               "req.headers.cookie",
+              'req.headers["x-meal-photo-context"]',
               "res.headers.set-cookie",
               "password",
               "passwordHash",
@@ -217,6 +219,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   }
 
   if (dependencies.identityService !== undefined && dependencies.nutritionService !== undefined && dependencies.planningService !== undefined) {
+    await registerMealSuggestionRoutes(app, { identityService: dependencies.identityService, nutritionService: dependencies.nutritionService });
     await registerNutritionRoutes(app, {
       identityService: dependencies.identityService,
       nutritionService: dependencies.nutritionService,

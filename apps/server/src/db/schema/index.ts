@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { FoodDefinition, FoodProvenance } from "../../modules/nutrition/food-catalog.js";
+import type { IntakeEvidence } from "../../modules/nutrition/intake.js";
 import {
   boolean,
   check,
@@ -903,6 +904,7 @@ export const mealContributions = pgTable(
     sourceAnalysisId: uuid("source_analysis_id"),
     sourceItemIndex: integer("source_item_index").default(0).notNull(),
     foodSnapshot: jsonb("food_snapshot").$type<FoodDefinition>(),
+    intakeEvidence: jsonb("intake_evidence").$type<IntakeEvidence>(),
     selectionBatchId: uuid("selection_batch_id"),
     label: text("label").notNull(),
     portionAmount: numeric("portion_amount", { precision: 12, scale: 3 }),
@@ -938,6 +940,7 @@ export const mealContributionRevisions = pgTable(
     contributionId: uuid("contribution_id").notNull().references(() => mealContributions.id, { onDelete: "cascade" }),
     contributionRevision: integer("contribution_revision").notNull(),
     foodSnapshot: jsonb("food_snapshot").$type<FoodDefinition>(),
+    intakeEvidence: jsonb("intake_evidence").$type<IntakeEvidence>(),
     mode: mealContributionMode("mode").notNull(),
     source: mealContributionSource("source").default("manual").notNull(),
     reviewStatus: mealContributionReviewStatus("review_status").default("confirmed").notNull(),
@@ -1015,6 +1018,7 @@ export const mealImageAnalyses = pgTable(
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
     rawCandidate: jsonb("raw_candidate").$type<Record<string, unknown>>(),
+    inputContext: jsonb("input_context").$type<import("../../modules/image-analysis/types.js").MealImageInputContext>(),
     replacementState: jsonb("replacement_state").$type<import("../../modules/image-analysis/replacement.js").StoredImageReplacement>(),
     uncertaintyNote: text("uncertainty_note"),
     lastErrorCode: text("last_error_code"),

@@ -45,7 +45,12 @@ export interface ImageAnalyzerResult {
   readonly calls?: readonly ImageAnalyzerCall[];
 }
 
+export interface ImageAnalyzerContext {
+  readonly input: import("./types.js").MealImageInputContext;
+  readonly references: readonly { readonly contentType: string; readonly image: Buffer; readonly role: import("./types.js").MealImageInputContext["role"] }[];
+}
+
 export interface ImageAnalyzer {
   readonly model: string;
-  analyze(contentType: string, image: Buffer, observer?: ImageAnalyzerObserver): Promise<ImageAnalyzerResult>;
+  analyze(contentType: string, image: Buffer, observer?: ImageAnalyzerObserver, context?: ImageAnalyzerContext): Promise<ImageAnalyzerResult>;
 }
